@@ -220,10 +220,12 @@ signals:
     void adcValue(int channel, double value, QString message);
     void systemrestore();
     void systembackup();
+
 public Q_SLOTS :
     void sendSquelchStatus(int softPhoneID, bool pttOn, bool sqlOn, bool callState, QString state, double freq);
     void sendToWebMessageClient(QString message);
     void sendToWebMessageClientWebSender(QString message,QWebSocket *webClient);
+
 private Q_SLOTS:
     void onNewConnection();
     void commandProcess(QString message, QWebSocket *pSender);

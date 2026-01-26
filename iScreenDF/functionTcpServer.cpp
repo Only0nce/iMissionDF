@@ -858,9 +858,7 @@ static double clampDouble(double v, double lo, double hi)
     return v;
 }
 
-void iScreenDF::updateReceiverParametersFreqOffsetBw(qint64 rfHz,
-                                                     double offsetHz,
-                                                     double bwHz)
+void iScreenDF::updateReceiverParametersFreqOffsetBw(qint64 rfHz,double offsetHz,double bwHz)
 {
     if (m_parameter.isEmpty() || !m_parameter.first()) {
         qWarning() << "[iScreenDF] updateReceiverParametersFreqOffsetBw: no parameter";
@@ -1252,7 +1250,257 @@ void iScreenDF::setLinkStatus(bool linkStatus)
     qDebug() << "[iScreenDF] setLinkStatusFromQml =" << linkStatus;
     db->UpdateParameterField("linkstatus", linkStatus ? 1 : 0);
 }
-// void iScreenDF::updateReceiverParametersFreqOffsetBw(qint64 rfHz, double offsetHz, double bwHz)
+// -----------------------------
+// sanitizePathPart
+// -----------------------------
+QString iScreenDF::sanitizePathPart(QString s)
+{
+    s = s.trimmed();
+    s.replace(QRegularExpression(R"(\s+)"), "_");
+    s.replace(QRegularExpression(R"([^A-Za-z0-9_\-\.])"), "_");
+    if (s.isEmpty()) s = "NA";
+    return s;
+}
+
+// -----------------------------
+// freqToFolder: 120000000 -> "120_000MHz"
+// -----------------------------
+QString iScreenDF::freqToFolder(double freqHz)
+{
+    if (!qIsFinite(freqHz) || freqHz <= 0) return "0MHz";
+
+    const double mhz = freqHz / 1e6;
+    QString s = QString::number(mhz, 'f', 3); // "120.000"
+    s.replace('.', '_');                      // "120_000"
+    return s + "MHz";
+}
+
+// -----------------------------
+// dateToFolder: "22 Jan 2026" -> "2026-01-22" (fallback from updatedMs)
+// -----------------------------
+QString iScreenDF::dateToFolder(const QString &dateStr, double ms)
+{
+    QDate d = QDate::fromString(dateStr.trimmed(), "dd MMM yyyy");
+
+    if (!d.isValid()) {
+        const qint64 msi = static_cast<qint64>(ms);
+        if (msi > 0) d = QDateTime::fromMSecsSinceEpoch(msi).date();
+    }
+    if (!d.isValid()) d = QDate::currentDate();
+
+    return d.toString("yyyy-MM-dd");
+}
+
+// -----------------------------
+// timeToFolder: "14:12:49" -> "14-12-49" (fallback from updatedMs)
+// -----------------------------
+QString iScreenDF::timeToFolder(const QString &timeStr, double ms)
+{
+    QTime t = QTime::fromString(timeStr.trimmed(), "HH:mm:ss");
+
+    if (!t.isValid()) {
+        const qint64 msi = static_cast<qint64>(ms);
+        if (msi > 0) t = QDateTime::fromMSecsSinceEpoch(msi).time();
+    }
+    if (!t.isValid()) t = QTime::currentTime();
+
+    return t.toString("HH-mm-ss");
+}
+// -----------------------------
+// buildDailyCsvPath
+// ✅ 1 ไฟล์ต่อ freq+day
+// ตัวอย่าง:
+// /var/log/iScreenDF/120_000MHz/2026-01-22/120_000MHz_2026-01-22.csv
+// -----------------------------
+QString iScreenDF::buildDailyCsvPath(double freqHz,
+                                     const QString &dateStr,
+                                     double updatedMs) const
+{
+    const QString freqFolder = sanitizePathPart(freqToFolder(freqHz));
+    const QString dayFolder  = sanitizePathPart(dateToFolder(dateStr, updatedMs));
+
+    const QString dirPath  = m_txBaseDir + "/" + freqFolder + "/" + dayFolder;
+    const QString filePath = dirPath + "/" + freqFolder + "_" + dayFolder + ".csv";
+    return filePath;
+}
+// -----------------------------
+// ensureDir
+// -----------------------------
+bool iScreenDF::ensureDir(const QString &dirPath)
+{
+    QDir dir;
+    return dir.mkpath(dirPath);
+}
+
+// -----------------------------
+// updateActiveCsvIfNeeded
+// ✅ เปลี่ยนความถี่ หรือ ข้ามวัน -> เปลี่ยนไฟล์ใหม่
+// -----------------------------
+void iScreenDF::updateActiveCsvIfNeeded(double freqHz,
+                                        const QString &dateStr,
+                                        double updatedMs)
+{
+    const QString newFreqFolder = sanitizePathPart(freqToFolder(freqHz));
+    const QString newDayFolder  = sanitizePathPart(dateToFolder(dateStr, updatedMs));
+    const QString newPath       = buildDailyCsvPath(freqHz, dateStr, updatedMs);
+
+    if (newFreqFolder == m_activeFreqFolder &&
+        newDayFolder  == m_activeDayFolder  &&
+        newPath       == m_activeCsvPath)
+    {
+        return; // ยังเป็นไฟล์เดิม
+    }
+
+    // เปลี่ยนไฟล์ใหม่
+    m_activeFreqFolder = newFreqFolder;
+    m_activeDayFolder  = newDayFolder;
+    m_activeCsvPath    = newPath;
+
+    // หมายเหตุ: ไม่ต้อง reset dedupe keys ก็ได้
+    // แต่ถ้าต้องการกัน "key เดิมจากไฟล์เก่า" มากระทบไฟล์ใหม่:
+    m_lastTxSeenKey.clear();
+    m_lastTxWrittenKey.clear();
+
+    // สร้างโฟลเดอร์ล่วงหน้า (optional)
+    const QFileInfo fi(m_activeCsvPath);
+    ensureDir(fi.absolutePath());
+}
+// -----------------------------
+// appendTxCsvRow (creates header if new file)
+// -----------------------------
+bool iScreenDF::appendTxCsvRow(const QString &filePath,
+                               const QString &latStr,
+                               const QString &lonStr,
+                               const QString &rmsStr,
+                               const QString &freqStr,
+                               const QString &dateStr,
+                               const QString &timeStr,
+                               const QString &updatedMsStr,
+                               const QString &mgrs)
+{
+    const QFileInfo fi(filePath);
+    if (!ensureDir(fi.absolutePath())) {
+        qWarning().noquote() << "[TX CSV] mkpath failed for" << fi.absolutePath();
+        return false;
+    }
+
+    const bool newFile = !QFile::exists(filePath);
+
+    QFile f(filePath);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        qWarning().noquote() << "[TX CSV] open failed:" << filePath << "err=" << f.errorString();
+        return false;
+    }
+
+    QTextStream out(&f);
+    out.setCodec("UTF-8");
+
+    // if (newFile) {
+    //     out << "lat,lon,rms_m,freqHz,date,time,updatedMs,mgrs\n";
+    // }
+
+    // out << latStr << ","
+    //     << lonStr << ","
+    //     << rmsStr << ","
+    //     << freqStr << ","
+    //     << dateStr << ","
+    //     << timeStr << ","
+    //     << updatedMsStr << ","
+    //     << mgrs
+    //     << "\n";
+    if (newFile) {
+        out << "rms_m,freqHz,date,time,updatedMs,mgrs\n";
+    }
+
+    out << rmsStr << ","
+        << freqStr << ","
+        << dateStr << ","
+        << timeStr << ","
+        << updatedMsStr << ","
+        << mgrs
+        << "\n";
+
+    out.flush();
+    f.close();
+    return true;
+}
+
+void iScreenDF::onTxSnapshotUpdated(double lat,
+                                    double lon,
+                                    double rms_m,
+                                    double freqHz,
+                                    const QString &dateStr,
+                                    const QString &timeStr,
+                                    double updatedMs,
+                                    const QString &mgrs)
+{
+    // ✅ format lat/lon = 6 decimals
+    const QString latStr = QString::number(lat, 'f', 6);
+    const QString lonStr = QString::number(lon, 'f', 6);
+
+    // ✅ normalize others
+    const QString rmsStr   = QString::number(rms_m,  'f', 2);
+    const QString freqStr  = QString::number(freqHz, 'f', 0);
+    const QString upMsStr  = QString::number(updatedMs, 'f', 0);
+
+    // ✅ KEY ไม่รวม updatedMs (เพื่อให้ 9489 กับ 9496 ถือว่า "ซ้ำ")
+    const QString key =
+        latStr + "," + lonStr +
+        "|rms=" + rmsStr +
+        "|f=" + freqStr +
+        "|mgrs=" + mgrs;
+
+    // ✅ เปลี่ยนไฟล์เมื่อ freq/day เปลี่ยน
+    updateActiveCsvIfNeeded(freqHz, dateStr, updatedMs);
+
+    // ------------------------------------------------------------
+    // CASE 1: key ใหม่ (เข้ามาครั้งแรก) -> ยังไม่เขียน
+    // ------------------------------------------------------------
+    if (key != m_lastTxSeenKey) {
+        m_lastTxSeenKey = key;
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // CASE 2: key ซ้ำ (เข้ามาครั้งที่ 2+)
+    // แต่ถ้าเคยเขียนไปแล้ว -> ไม่เขียนซ้ำ
+    // ------------------------------------------------------------
+    if (key == m_lastTxWrittenKey) {
+        return;
+    }
+
+    // ------------------------------------------------------------
+    // CASE 3: ซ้ำจริง และยังไม่เคยเขียน -> APPEND 1 แถว
+    // ------------------------------------------------------------
+    m_lastTxWrittenKey = key;
+
+    const QString csvPath = m_activeCsvPath;
+
+    const bool ok = appendTxCsvRow(csvPath,
+                                   latStr, lonStr, rmsStr, freqStr,
+                                   dateStr, timeStr, upMsStr, mgrs);
+
+    // ✅ optional debug log: เฉพาะตอนเขียนจริง
+    if (ok) {
+        qDebug().noquote()
+        << "[TX CSV APPEND]"
+        << csvPath
+        << "lat=" << latStr
+        << "lon=" << lonStr
+        << "rms_m=" << rmsStr
+        << "freqHz=" << freqStr
+        << "date=" << dateStr
+        << "time=" << timeStr
+        << "updatedMs=" << upMsStr
+        << "mgrs=" << mgrs;
+    } else {
+        qWarning().noquote() << "[TX CSV] write failed:" << csvPath;
+    }
+
+}
+
+
+// void ::updateReceiverParametersFreqOffsetBw(qint64 rfHz, double offsetHz, double bwHz)
 // {
 //     if (m_parameter.isEmpty() || !m_parameter.first()) {
 //         qWarning() << "[iScreenDF] updateReceiverParametersFreqOffsetBw: no parameter";

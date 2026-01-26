@@ -165,6 +165,8 @@ public:
     void handleBroadcastMessage(const QJsonObject &obj);
     void updateReceiverFreqandbw(int Freq, int BW,bool link);
 
+    void setBaseDir(const QString &dir) { m_txBaseDir = dir;}
+
 
 signals:
     // EMIT  FROM cpp to /MainPage.qml
@@ -321,6 +323,7 @@ public slots:
                                  const QString &dns2);
     void requestRfFrequency();
     void sendMaxDoaLineMeters(int meters);
+    void onTxSnapshotUpdated(double lat,double lon,double rms_m,double freqHz,const QString &dateStr,const QString &timeStr,double updatedMs,const QString &mgrs);
 
 private slots:
     void remoteGroupsJson(const QString &json);
@@ -495,6 +498,56 @@ private:
 
     //////////////connectCompassServer /////////////////////////////////
     CompassClient *m_compassClient = nullptr;
+
+private:
+    QString m_imgBaseDir = "/var/www/html/image";
+
+    // core
+    bool deleteImageRel(const QString &rel, QString *reasonOut);
+    void pruneEmptyDirs(const QString &absFilePath);
+    void sendReloadWeb();
+
+    QString m_txBaseDir = "/var/www/html/log/iScreenDF";
+
+    QString m_lastTxSeenKey;
+    QString m_lastTxWrittenKey;
+    // =========================
+    // ACTIVE FILE (per freq+day)
+    // =========================
+    QString m_activeFreqFolder;   // เช่น "120_000MHz"
+    QString m_activeDayFolder;    // เช่น "2026-01-22"
+    QString m_activeCsvPath;      // full path ของไฟล์ที่กำลัง append อยู่
+
+    // =========================
+    // HELPERS
+    // =========================
+    static QString sanitizePathPart(QString s);
+
+    static QString freqToFolder(double freqHz);                        // "120_000MHz"
+    static QString dateToFolder(const QString &dateStr, double ms);    // "2026-01-22"
+    static QString timeToFolder(const QString &timeStr, double ms);    // "14-12-49" (ยังใช้ในแถว CSV ได้)
+
+    QString buildDailyCsvPath(double freqHz,
+                              const QString &dateStr,
+                              double updatedMs) const;
+    void updateActiveCsvIfNeeded(double freqHz,
+                                 const QString &dateStr,
+                                 double updatedMs);
+
+    static bool ensureDir(const QString &dirPath);
+
+    static bool appendTxCsvRow(const QString &filePath,
+                               const QString &latStr,
+                               const QString &lonStr,
+                               const QString &rmsStr,
+                               const QString &freqStr,
+                               const QString &dateStr,
+                               const QString &timeStr,
+                               const QString &updatedMsStr,
+                               const QString &mgrs);
+    bool deleteRel(const QString &rel, QString *reasonOut);
+    void cleanupEmptyDirs(const QString &absFilePath);
+    void sendResult(const QJsonObject &o);
 
 private slots:
     void newCommandProcess(const QJsonObject &command, QWebSocket *pSender,const QString &message);

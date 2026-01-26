@@ -1573,10 +1573,16 @@
 //     }
 // }
 // DoaHistoryViewer.qml (FULL FILE)
-// ✅ ปุ่มกดง่าย (Touch-friendly) ทั้ง TAB (TX/DOA) + Toggle (lat/lon vs MGRS) อยู่ข้าง tabBg
-// ✅ TX PANEL แสดงพิกัดสลับได้ lat/lon หรือ MGRS และจำค่าไว้ด้วย Settings
-// ✅ มีฟังก์ชัน WGS84 lat/lon -> UTM -> MGRS (digits 1..5)
-
+// ✅ FIX: TX emit no longer duplicates
+//    - Coalesce ALL txModel signals into ONE emit per event-loop (Qt.callLater)
+//    - Hard de-dupe by modelKey (lat/lon/rms/updatedMs) => same TX point never re-sent
+// ✅ FIX: use viewer.krakenmapval (injected) ONLY (no global Krakenmapval)
+// ✅ TX PANEL + coord toggle (lat/lon vs MGRS) persisted via Settings
+// ✅ NOTE: MapViewer should inject:
+//    doaHistoryViewer.txModel = txHistoryModel
+//    doaHistoryViewer.krakenmapval = Krakenmapval
+//    doaHistoryViewer.rfCache = rfCache
+//    doaHistoryViewer.loggingEnabled = true for the active overlay only
 import QtQuick 2.15
 import Qt.labs.settings 1.1
 import QtQuick.Controls 2.15
@@ -1585,33 +1591,29 @@ import QtGraphicalEffects 1.15
 
 Rectangle {
     id: viewer
-    width: 530 /*440*/
-    height: 380
+    width: 530
+    height: 440
     radius: 18
     color: "#0B1216"
     border.width: 1
     border.color: "#2A3A44"
-    opacity: active ? 0.96 : 0.14
+    opacity: active ? 0.72 : 0.14
 
     property bool active: false
     property bool daqLocked: false
 
-    // ✅ only ONE instance should log (set from MapViewer for the active overlay)
+    // ✅ only ONE instance should log/send (set from MapViewer for the active overlay)
     property bool loggingEnabled: true
 
-    // รับ txHistoryModel จากภายนอก
+    // external models/refs
     property var txModel: null
-
-    // inject refs
     property var krakenmapval: null
     property var rfCache: null
 
     property alias logger: logger
 
-    // ✅ DOA log model for UI (no refresh needed)
+    // ✅ DOA log model for UI (append-only)
     ListModel { id: doaLogModel }
-
-    // Keep max logs
     property int maxLogItems: 100
 
     // ============================================================
@@ -1628,6 +1630,31 @@ Rectangle {
     }
 
     // ============================================================
+    // ✅ TX emit coalesce + hard de-dupe
+    // ============================================================
+    property bool   _txEmitPending: false
+    property string _lastTxModelKey: ""      // hard de-dupe by model content
+    property real   _lastTxEmitAtMs: 0       // optional guard
+    property string _lastTxDebug: ""
+
+    function scheduleEmitLatestTx() {
+        if (viewer._txEmitPending) return
+        viewer._txEmitPending = true
+
+        // ✅ Coalesce: no matter how many model signals fire, emit once per event-loop
+        Qt.callLater(function() {
+            viewer._txEmitPending = false
+            viewer.emitLatestTxToKrakenmapval()
+        })
+    }
+
+    onTxModelChanged: {
+        viewer._lastTxModelKey = ""
+        viewer._lastTxEmitAtMs = 0
+        viewer.scheduleEmitLatestTx()
+    }
+
+    // ============================================================
     // MGRS (WGS84) helper
     // ============================================================
     function _mgrsPad(n, width) {
@@ -1637,19 +1664,17 @@ Rectangle {
     }
 
     function _mgrsLatitudeBandLetter(latDeg) {
-        // bands: C(-80) .. X(+84), omit I,O
         if (!isFinite(latDeg)) return "Z"
         if (latDeg <= -80) return "C"
         if (latDeg >=  84) return "X"
         var bands = "CDEFGHJKLMNPQRSTUVWX"
-        var idx = Math.floor((latDeg + 80) / 8) // 0..19
+        var idx = Math.floor((latDeg + 80) / 8)
         if (idx < 0) idx = 0
         if (idx > 19) idx = 19
         return bands.charAt(idx)
     }
 
     function _mgrsFixZone(latDeg, lonDeg, zone) {
-        // Norway / Svalbard exceptions
         if (latDeg >= 56 && latDeg < 64 && lonDeg >= 3 && lonDeg < 12) return 32
         if (latDeg >= 72 && latDeg < 84) {
             if      (lonDeg >= 0  && lonDeg < 9 )  return 31
@@ -1661,7 +1686,6 @@ Rectangle {
     }
 
     function _latLonToUtm(latDeg, lonDeg) {
-        // WGS84
         var a = 6378137.0
         var f = 1.0 / 298.257223563
         var e2 = f * (2 - f)
@@ -1768,6 +1792,96 @@ Rectangle {
         return String(zone) + band + " " + colL + rowL + " " + eStr + " " + nStr
     }
 
+    // ============================================================
+    // TX -> C++ emit
+    // ============================================================
+    function emitLatestTxToKrakenmapval() {
+        if (!txModel) return
+
+        // ✅ use injected ref only
+        if (!viewer.krakenmapval) {
+            console.log("[TX] krakenmapval is null (not injected)")
+            return
+        }
+
+        // ✅ prevent stacked/hidden instances
+        if (!viewer.visible || !viewer.loggingEnabled) return
+
+        if (txModel.count !== undefined && txModel.count <= 0) return
+
+        // ✅ latest = index 0 (ตาม UI ของคุณ)
+        var m = txModel.get ? txModel.get(0) : null
+        if (!m) return
+
+        var lat = Number(m.lat)
+        var lon = Number(m.lon)
+        var rms = Number(m.rms || 0)
+        var updatedMs = Number(m.updatedMs || 0)
+
+        if (!isFinite(lat) || !isFinite(lon)) return
+
+        // ✅ HARD DEDUPE BY MODEL CONTENT
+        // Same TX point -> never re-send even if multiple model signals fired.
+        var modelKey = lat.toFixed(6) + "," + lon.toFixed(6)
+                     + "|rms=" + Math.round(rms)
+                     + "|ms=" + Math.floor(updatedMs)
+
+        if (modelKey === viewer._lastTxModelKey) {
+            return
+        }
+        viewer._lastTxModelKey = modelKey
+
+        // freq snapshot (from rf cache)
+        var fHz = 0
+        if (logger && typeof logger._getRfFreqHzNow === "function")
+            fHz = Number(logger._getRfFreqHzNow())
+
+        // date/time (fallback from updatedMs/now)
+        var dStr = String(logger ? logger.lastDate : "")
+        var tStr = String(logger ? logger.lastTime : "")
+
+        function _pad2(n) { n = Math.floor(Number(n)); return (n < 10 ? ("0" + n) : ("" + n)) }
+        function _fmtDate(ms) {
+            var d = new Date(Number(ms))
+            var mon = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][d.getMonth()]
+            return _pad2(d.getDate()) + " " + mon + " " + d.getFullYear()
+        }
+        function _fmtTime(ms) {
+            var d = new Date(Number(ms))
+            return _pad2(d.getHours()) + ":" + _pad2(d.getMinutes()) + ":" + _pad2(d.getSeconds())
+        }
+
+        var baseMs = (isFinite(updatedMs) && updatedMs > 0) ? updatedMs : Date.now()
+        if (!dStr.length) dStr = _fmtDate(baseMs)
+        if (!tStr.length) tStr = _fmtTime(baseMs)
+
+        // mgrs
+        var mgrs = "-"
+        mgrs = latLonToMgrs(lat, lon, 5)
+
+        // call into C++
+        if (typeof viewer.krakenmapval.onTxSnapshotUpdated === "function") {
+            viewer.krakenmapval.onTxSnapshotUpdated(
+                lat, lon, rms, fHz, dStr, tStr, updatedMs, mgrs
+            )
+        } else {
+            console.log("[TX] krakenmapval.onTxSnapshotUpdated not found")
+        }
+    }
+
+    // Hook txModel signals (minimal set to avoid duplicate triggers)
+    Connections {
+        target: txModel
+        ignoreUnknownSignals: true
+
+        function onRowsInserted(parent, first, last) { viewer.scheduleEmitLatestTx() }
+        function onModelReset() { viewer.scheduleEmitLatestTx() }
+        function onCountChanged() { viewer.scheduleEmitLatestTx() }
+    }
+
+    // ============================================================
+    // Visual effects
+    // ============================================================
     layer.enabled: true
     layer.effect: DropShadow {
         color: "#00E5FF33"
@@ -1789,7 +1903,7 @@ Rectangle {
     }
 
     // ============================================================
-    // Logger
+    // Logger (DOA)
     // ============================================================
     QtObject {
         id: logger
@@ -1805,6 +1919,22 @@ Rectangle {
 
         property real lastRfFreqHz: 0
         property real lastRfBwHz: 0
+
+        property int  maxStableMs: 3200
+        property real maxStableDeltaDeg: 1.0
+        property int  maxMinIntervalMs: 300
+
+        property string candKey: ""
+        property real   candDoa: -9999
+        property real   candConf: -1
+        property real   candSinceMs: 0
+        property real   candFreqHz: 0
+        property real   candBwHz: 0
+
+        property real   lastDeltaDegUsed: -1
+        property string lastLoggedKey: ""
+        property real   lastLoggedDoa: -9999
+        property real   lastLoggedMs: 0
 
         function saveRfParams(freqHz, bwHz) {
             var f = Number(freqHz)
@@ -1845,21 +1975,6 @@ Rectangle {
             return 0
         }
 
-        property int  maxStableMs: 3200
-        property real maxStableDeltaDeg: 1.0
-        property int  maxMinIntervalMs: 300
-
-        property string candKey: ""
-        property real   candDoa: -9999
-        property real   candConf: -1
-        property real    candSinceMs: 0
-        property real   candFreqHz: 0
-        property real   candBwHz: 0
-        property real lastDeltaDegUsed: -1
-        property string lastLoggedKey: ""
-        property real   lastLoggedDoa: -9999
-        property real    lastLoggedMs: 0
-
         function _now() { return Date.now() }
 
         function _degChanged(a, b) {
@@ -1899,7 +2014,7 @@ Rectangle {
             doaHistory.push({
                 timestamp: timestamp,
                 name: name,
-                frequency: frequency,
+               frequency: frequency,
                 doa: doaValue + (extra.length ? (" " + extra) : ""),
                 rawVfoIndex: rawVfoIndex
             })
@@ -1919,23 +2034,12 @@ Rectangle {
             historyUpdated()
         }
 
+        // NOTE: You can keep your Max-DOA logging here as before
         function feedMaxDoaCandidate(obj) {
             if (!obj) return
             if (!viewer.visible || !viewer.loggingEnabled) return
 
             var nowMs = _now()
-            if (lastDeltaDegUsed < 0) {
-                lastDeltaDegUsed = maxStableDeltaDeg
-            } else if (Math.abs(Number(lastDeltaDegUsed) - Number(maxStableDeltaDeg)) > 1e-9) {
-                lastDeltaDegUsed = maxStableDeltaDeg
-                candKey = ""
-                candDoa = -9999
-                candConf = -1
-                candSinceMs = nowMs
-                candFreqHz = 0
-                candBwHz = 0
-                return
-            }
 
             var key  = String(obj.key || "")
             var doa  = Number(obj.doa)
@@ -1943,61 +2047,32 @@ Rectangle {
             if (!isFinite(doa))  doa  = 0
             if (!isFinite(conf)) conf = 0
 
-            function maybeFillCandRfSnapshot() {
-                if (!isFinite(candFreqHz) || candFreqHz <= 0) {
-                    var fNow = _getRfFreqHzNow()
-                    if (fNow > 0) candFreqHz = fNow
-                }
-                if (!isFinite(candBwHz) || candBwHz <= 0) {
-                    var bNow = _getRfBwHzNow()
-                    if (bNow > 0) candBwHz = bNow
-                }
-            }
-
-            if (!candKey.length) {
-                candKey = key
-                candDoa = doa
-                candConf = conf
-                candSinceMs = nowMs
-                candFreqHz = _getRfFreqHzNow()
-                candBwHz   = _getRfBwHzNow()
-                return
-            }
-
-            var changed = (key !== candKey) || _degChanged(doa, candDoa)
-            if (changed) {
-                candKey = key
-                candDoa = doa
-                candConf = conf
-                candSinceMs = nowMs
-                candFreqHz = _getRfFreqHzNow()
-                candBwHz   = _getRfBwHzNow()
-                return
-            }
-
-            candConf = conf
-            maybeFillCandRfSnapshot()
-
-            var stableAge = nowMs - candSinceMs
-            if (stableAge <= maxStableMs) return
+            // ✅ rate-limit กันถี่เกิน
             if ((nowMs - lastLoggedMs) < maxMinIntervalMs) return
 
-            var sameAsLast = (candKey === lastLoggedKey) && !_degChanged(candDoa, lastLoggedDoa)
-            if (sameAsLast) return
+            // ✅ de-dupe: key เดิม + doa ไม่เปลี่ยนเกิน delta -> ไม่ต้อง log
+            var sameKey = (key === lastLoggedKey)
+            var sameDoa = !(_degChanged(doa, lastLoggedDoa))   // ใช้ maxStableDeltaDeg เป็น threshold
+            if (sameKey && sameDoa) return
 
-            lastLoggedKey = candKey
-            lastLoggedDoa = candDoa
+            // snapshot RF ตอนนี้
+            var fNow = _getRfFreqHzNow()
+            var bNow = _getRfBwHzNow()
+
+            lastLoggedKey = key
+            lastLoggedDoa = doa
             lastLoggedMs  = nowMs
 
+            // เวลา (remote ถ้ามี)
             var hasRemoteTime = (String(lastDate || "").length > 0) && (String(lastTime || "").length > 0)
             var tsRemote = hasRemoteTime ? ("[" + lastDate + " " + lastTime + "]")
                                          : ("[" + fmtSysDateTime(nowMs) + "]")
 
-            var doaStr = _fmtDoa(candDoa)
+            var doaStr = _fmtDoa(doa)
 
             var extra = ""
-            if (candKey.length) extra += "key=" + candKey
-            extra += (extra.length ? " " : "") + "conf=" + Number(candConf).toFixed(2)
+            if (key.length) extra += "key=" + key
+            extra += (extra.length ? " " : "") + "conf=" + Number(conf).toFixed(2)
 
             if (obj.heading !== undefined && isFinite(Number(obj.heading)))
                 extra += " hdg=" + Number(obj.heading).toFixed(1)
@@ -2007,8 +2082,8 @@ Rectangle {
                 extra += " lat=" + Number(obj.lat).toFixed(6) + " lon=" + Number(obj.lon).toFixed(6)
             }
 
-            var freqStr = _fmtFreqMHzFromHz(candFreqHz)
-            var bwStr   = _fmtBwKHzFromHz(candBwHz)
+            var freqStr = _fmtFreqMHzFromHz(fNow)
+            var bwStr   = _fmtBwKHzFromHz(bNow)
             var freqDisplay = (freqStr === "-") ? "-" : (freqStr + " MHz" + (bwStr !== "-" ? (" / " + bwStr + " kHz") : ""))
 
             _appendLog(tsRemote, "[MAX DOA]", freqDisplay, doaStr, extra, -999)
@@ -2042,6 +2117,9 @@ Rectangle {
         }
     }
 
+    // ============================================================
+    // Fade behavior (UI only)
+    // ============================================================
     Behavior on opacity {
         NumberAnimation { duration: 220; easing.type: Easing.InOutQuad }
     }
@@ -2061,6 +2139,8 @@ Rectangle {
     Component.onCompleted: {
         active = false
         viewer.txCoordMode = viewSettings.txCoordMode
+        viewer._lastTxModelKey = ""
+        viewer.scheduleEmitLatestTx()
     }
 
     Connections {
@@ -2111,8 +2191,8 @@ Rectangle {
 
         Button {
             id: lockFadeButton
-            width: 34
-            height: 34
+            width: 40
+            height: 40
             checkable: true
             checked: false
 
@@ -2126,7 +2206,7 @@ Rectangle {
                 radius: 12
                 color: lockFadeButton.checked ? "#1F6F4A" : "#0E1B22"
                 border.width: 1
-                border.color: lockFadeButton.checked ? "#2ECC71" : "#22313A"
+                border.color: lockFadeButton.checked ? "#2ECC71" : "#314f61"
             }
 
             contentItem: Image {
@@ -2134,8 +2214,8 @@ Rectangle {
                 source: lockFadeButton.checked
                         ? "qrc:/iScreenDFqml/images/lock.png"
                         : "qrc:/iScreenDFqml/images/unlock.png"
-                width: 22
-                height: 22
+                width: 30
+                height: 30
                 fillMode: Image.PreserveAspectFit
             }
         }
@@ -2154,7 +2234,11 @@ Rectangle {
 
         property int tab: 0 // 0=TX, 1=DOA LOG
 
-        // ✅ Touch-friendly tabBg
+        // ✅ when user returns to TX tab -> emit once
+        onTabChanged: {
+            if (tab === 0) viewer.scheduleEmitLatestTx()
+        }
+
         Rectangle {
             id: tabBg
             width: 200
@@ -2243,7 +2327,7 @@ Rectangle {
             }
         }
 
-        // ✅ toggle coord mode next to tabBg (only show on TX tab)
+        // coord toggle (only show on TX tab)
         Rectangle {
             id: coordToggle
             width: 236
@@ -2285,6 +2369,8 @@ Rectangle {
                         onTapped: {
                             viewer.txCoordMode = 0
                             viewSettings.txCoordMode = 0
+                            viewer._lastTxModelKey = ""   // allow re-emit after mode toggle
+                            viewer.scheduleEmitLatestTx()
                         }
                     }
 
@@ -2297,6 +2383,8 @@ Rectangle {
                         onClicked: {
                             viewer.txCoordMode = 0
                             viewSettings.txCoordMode = 0
+                            viewer._lastTxModelKey = ""
+                            viewer.scheduleEmitLatestTx()
                         }
                     }
                 }
@@ -2327,6 +2415,8 @@ Rectangle {
                         onTapped: {
                             viewer.txCoordMode = 1
                             viewSettings.txCoordMode = 1
+                            viewer._lastTxModelKey = ""
+                            viewer.scheduleEmitLatestTx()
                         }
                     }
 
@@ -2339,20 +2429,13 @@ Rectangle {
                         onClicked: {
                             viewer.txCoordMode = 1
                             viewSettings.txCoordMode = 1
+                            viewer._lastTxModelKey = ""
+                            viewer.scheduleEmitLatestTx()
                         }
                     }
                 }
             }
         }
-
-        // Item { width: 1; height: 1; Layout.fillWidth: true }
-
-        // Text {
-        //     anchors.verticalCenter: tabBg.verticalCenter
-        //     text: tabs.tab === 0 ? "Latest point highlighted" : "Max DOA logs (append-only)"
-        //     color: "#6F8C98"
-        //     font.pixelSize: 10
-        // }
     }
 
     // ===================== CONTENT =====================
@@ -2672,4 +2755,3 @@ Rectangle {
         propagateComposedEvents: true
     }
 }
-

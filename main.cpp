@@ -86,26 +86,12 @@ static void handleSignal(int) {
 // ======================================================
 int main(int argc, char *argv[])
 {
-// #ifdef __x86_64__
-//     // do x64 stuff
-// #elif __aarch64__
-//     qputenv("DISPLAY", QByteArray(":0"));
-//     qputenv("QT_QPA_PLATFORM", QByteArray("eglfs"));
-//     qputenv("QT_QPA_EGLFS_INTEGRATION", QByteArray("eglfs_x11"));
-//     qputenv("QT_QPA_EGLFS_DEPTH", QByteArray("32"));
-
-// #endif
-//     qputenv("QT_IM_MODULE", QByteArray("qtvirtualkeyboard"));
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
 #endif
-    QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);
-    qDebug() << "QT_QPA_PLATFORM =" << qgetenv("QT_QPA_PLATFORM");
-
     qputenv("DISPLAY", QByteArray(":0"));
     qputenv("QT_QPA_PLATFORM", QByteArray("eglfs"));
     qputenv("QT_QPA_EGLFS_INTEGRATION", QByteArray("eglfs_x11"));
-
     qputenv("QT_QPA_EGLFS_DEPTH", QByteArray("4"));
     qputenv("QT_QPA_GENERIC_PLUGINS", QByteArray("evdevtouch"));
     qputenv("QSG_RENDER_LOOP", QByteArray("basic"));

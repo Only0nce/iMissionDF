@@ -1,9 +1,8 @@
-// RecordFiles.qml  (Qt 5.12)
-import QtQuick 2.12
-import QtQuick.Controls 2.5
-import QtQuick.Layouts 1.12
-import QtQuick.Extras 1.4
-import QtGraphicalEffects 1.0
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Controls 2.5 as C2
+import QtGraphicalEffects 1.15
 import "."
 
 Item {
@@ -33,6 +32,16 @@ Item {
     property int currentSegIndex: 0
     signal waveFilesSelected(var filesArray)
     signal wavePlayToggleRequested(bool wantPlay, var filesArray, bool concatMode, int playPosMs)
+    property int heightOfPopUP: 500
+    property int extraHeightCustom: 120
+
+    PopUPDeletedFileWave {
+        id: popupDeleteWave
+        listoFDevice: listoFDevice
+        deviceTexte: deviceTexte
+        customMode: customMode
+        presetDays: presetDays
+    }
 
     onStatusSearchingFromMainChanged: {
         console.log("statusSearchingFromMain changed:", statusSearchingFromMain)
@@ -83,8 +92,8 @@ Item {
     function iconSrc(name) {
         function pick(lightFile, darkFile) {
             return isDarkTheme
-                ? ("qrc:/iRecordManage/images/" + lightFile)
-                : ("qrc:/iRecordManage/images/" + darkFile)
+                    ? ("qrc:/iRecordManage/images/" + lightFile)
+                    : ("qrc:/iRecordManage/images/" + darkFile)
         }
         if (name === "refresh") {
             return pick("refresh_light.png", "refresh_dark.png")
@@ -94,13 +103,6 @@ Item {
         }
         return ""
     }
-
-//    function iconSrc(name) {
-//        if (name === "refresh") {
-//            return isDarkTheme ?  "qrc:/iRecordManage/images/refresh_light.png" : "qrc:/iRecordManage/images/refresh_dark.png"
-//        }
-//        return ""
-//    }
 
 
     function addMinutes(d, mins) { var t = new Date(d); t.setMinutes(t.getMinutes() + mins); return t }
@@ -188,15 +190,6 @@ Item {
                             playPosMs)
             }
         }
-//        WaveEditor {
-//            id: editor
-//            x: 0
-//            y: 730
-//            anchors.left: parent.left
-//            anchors.right: parent.right
-//            anchors.bottom: parent.bottom
-//            height: 270
-//        }
     }
 
     Popup {
@@ -260,7 +253,7 @@ Item {
 
     Timer {
         id: searchDelayTimer
-        interval: 3000   // หรือ 500 ms แล้วแต่ชอบ
+        interval: 3000
         repeat: false
         onTriggered: sendSearch()
     }
@@ -370,23 +363,6 @@ Item {
                         }
                     }
 
-//                    Item {
-//                        implicitWidth: 40; implicitHeight: 36
-//                        Layout.preferredWidth: 40; Layout.preferredHeight: 36
-//                        Image {
-//                            anchors.centerIn: parent
-////                            :/iRecordManage/images/calendarDarkMode.png
-//                            source: "qrc:/iRecordManage/images/calendarDarkMode.png"
-////                            source: "qrc:/images/calendarDarkMode.png"
-//                            fillMode: Image.PreserveAspectFit
-//                            width: 50; height: 50; mipmap: true
-//                        }
-//                        MouseArea {
-//                            anchors.fill: parent
-//                            cursorShape: Qt.PointingHandCursor
-//                            onClicked: calendarOverlay.openFor("start")
-//                        }
-//                    }
                 }
             }
 
@@ -552,16 +528,7 @@ Item {
                         exportOverlay.openFor(items, mp, defName)
                     }
                 }
-
-
-
-                //                Button {
-                //                    id: exportButton
-                //                    text: qsTr("Export File")
-                //                    Layout.preferredWidth: comboExportTarget.implicitWidth
-                //                }
             }
-
         }
 
         RowLayout {
@@ -592,34 +559,20 @@ Item {
                     resetFiltersAndReload()
                 }
             }
+            Button {
+                id: buttonDeletedFiles
+                x: 432
+                y: -71
+                text: "Deleted Files"
+                background: Rectangle { radius: 6; color: "#ff004c" }
 
-//            Button {
-//                id:buttonSelectFiles
-//                text: "Select Files"
-//                Layout.fillHeight: true
-//                background: Rectangle { radius: 6; color: "#eb0c69" }
+                onClicked: {
+                    popupDeleteWave.customMode = false
+                    popupDeleteWave.presetDays = 1
+                    popupDeleteWave.open()
+                }
 
-//                onClicked: {
-//                    freezeRecordFilesUpdate = true
-//                    var items = collectSelectedFiles()
-//                    if (items.length === 0) {
-//                        console.log("[Select Files] no file selected")
-//                        return
-//                    }
-
-//                    console.log("[Select Files] sending", items.length, "item(s)")
-//                    for (var k = 0; k < items.length; ++k)
-//                        console.log("  ->", items[k].full_path,
-//                                    "size:", items[k].size,
-//                                    "dur_sec:", items[k].duration_sec)
-
-//                    console.log("[Select Files] TOTAL size =", selectedTotalSizeBytes,
-//                                "TOTAL dur_sec =", selectedTotalDurationSec)
-
-//                    editor.setFiles(items)
-//                    console.log("Successfully")
-//                }
-//            }
+            }
             ToolButton {
                 id: btnRefresh
                 width: squareButton; height: squareButton
@@ -643,6 +596,7 @@ Item {
                     smooth: true
                 }
             }
+
 
         }
 
@@ -763,7 +717,6 @@ Item {
         }
         function close() { visible = false }
 
-        // คลิกพื้นดำด้านนอกเพื่อปิด
         MouseArea { anchors.fill: parent; onClicked: exportOverlay.close() }
 
         Rectangle {
@@ -775,7 +728,6 @@ Item {
             border.color: "#ffffff"
             anchors.centerIn: parent
 
-            // กันไม่ให้คลิกใน panel แล้วไปปิด overlay
             MouseArea {
                 anchors.fill: parent
                 acceptedButtons: Qt.AllButtons
@@ -819,39 +771,15 @@ Item {
 
     /* ================== Search / Reset ================== */
     function popupSearching() {
-        // เปิดโหมด freeze: ไม่รับ real-time update ใหม่
         recordListFrozen = true
-
-        // รีเซ็ตสถานะเก่า
         window.statusSearching = ""
-
         popupStatusText.text = "Searching files ............."
-
         var p = btnRefresh.mapToItem(recordFiles, 0, 0)
         searchStatusPopup.x = p.x + btnRefresh.width + 10
         searchStatusPopup.y = p.y + (btnRefresh.height - searchStatusPopup.height) / 2
-
         searchStatusPopup.open()
-
-        // ดีเลย์แล้วค่อยยิง search จริง
         searchDelayTimer.start()
     }
-
-//    function popupSearching() {
-//        // รีเซ็ตสถานะเก่า
-//        window.statusSearching = ""
-
-//        popupStatusText.text = "Searching files ............."
-
-//        var p = buttonSelectFiles.mapToItem(recordFiles, 0, 0)
-//        searchStatusPopup.x = p.x + buttonSelectFiles.width + 10
-//        searchStatusPopup.y = p.y + (buttonSelectFiles.height - searchStatusPopup.height) / 2
-
-//        searchStatusPopup.open()
-
-//        // ดีเลย์แล้วค่อยยิง search จริง
-//        searchDelayTimer.start()
-//    }
 
     function sendSearch() {
         var deviceStr = (typeof deviceNumBox !== "undefined" && deviceNumBox)
@@ -897,7 +825,6 @@ Item {
         enableSearch = false
     }
 
-    // ---------- ใส่ฟังก์ชันนี้ตรงนี้ ----------
     function collectSelectedFiles() {
         var items = []
         var seen = {}
@@ -935,7 +862,6 @@ Item {
                        })
         }
 
-        // เก็บไว้ในตัวแปรกลาง
         selectedFiles = items
         selectedTotalDurationSec = Math.floor(totalDur)
         selectedTotalSizeBytes   = totalSize
@@ -948,20 +874,16 @@ Item {
 
         function onExportProgress(percent, status) {
             console.log("[RecordFiles] exportProgress", percent, status)
-
             if (exportLoader.status === Loader.Ready &&
                     exportLoader.item && exportLoader.item.updateProgress) {
-
                 exportLoader.item.updateProgress(percent, status)
             }
         }
 
         function onExportFinished(ok, outPath, error) {
             console.log("[RecordFiles] exportFinished", ok, outPath, error)
-
             if (exportLoader.status === Loader.Ready &&
                     exportLoader.item && exportLoader.item.updateProgress) {
-
                 exportLoader.item.updateProgress(
                             ok ? 100 : 0,
                             ok ? ("Saved: " + outPath) : ("Error: " + error)
@@ -986,7 +908,11 @@ Item {
         console.log("[RecordFiles] visible =", visible)
         Backend.recordFilesPageActive = visible
     }
+
 }
 
-
-
+/*##^##
+Designer {
+    D{i:0;formeditorZoom:0.5}
+}
+##^##*/

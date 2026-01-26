@@ -557,7 +557,6 @@ Window {
             socketCPP.active = sockStart
             console.log("socket.active",socket.active)
         }
-
         function selectedRecords() {
             var out = []
             for (var i = 0; i < listFileRecord.count; ++i) {

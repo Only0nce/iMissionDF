@@ -439,5 +439,7 @@
         <file>DoaViewer/ViewerPage.qml</file>
         <file>iScreenDFqml/images/chain_link.png</file>
         <file>iScreenDFqml/images/chain_unlink.png</file>
+        <file>iRecordManage/PopUPDeletedFileWave.qml</file>
+        <file>iRecordManage/TumblerDateTime.qml</file>
     </qresource>
 </RCC>
