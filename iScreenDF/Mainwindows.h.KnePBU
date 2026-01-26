@@ -1,0 +1,258 @@
+#ifndef MAINWINDOWS_H
+#define MAINWINDOWS_H
+#pragma once
+#define SwVersion "V0.2 15052025"
+#define HwVersion "Orinnx"
+#define HwName "Orinnano"
+
+#include <QObject>
+#include <QThread>
+#include "QTimer"
+#include "ChatClient.h"
+#include "ChatServer.h"
+#include "NetworkMng.h"
+#include "Database.h"
+#include <QSettings>
+#include <QDir>
+#include <QWebSocket>
+#include <QQuickItem>
+#include <QVector>
+#include <QVariantList>
+#include <QJsonArray>
+#include <QProcess>
+
+#define FILESETTING "/home/orinnx/.config/iSensorServer/settings.ini"
+
+
+class Mainwindows : public QObject
+{
+    Q_OBJECT
+    Q_PROPERTY(int updateRate READ updateRate NOTIFY updateRateChanged)
+    Q_PROPERTY(int latency READ latency NOTIFY latencyChanged)
+    Q_PROPERTY(int frameIndex READ frameIndex NOTIFY frameIndexChanged)
+    Q_PROPERTY(QString frameSync READ frameSync NOTIFY frameSyncChanged)
+    Q_PROPERTY(QString frameType READ frameType NOTIFY frameTypeChanged)
+    Q_PROPERTY(QString powerLevel READ powerLevel NOTIFY powerLevelChanged)
+    Q_PROPERTY(QString connectionStatus READ connectionStatus NOTIFY connectionStatusChanged)
+    Q_PROPERTY(QString sampleDelaySync READ sampleDelaySync NOTIFY sampleDelaySyncChanged)
+    Q_PROPERTY(QString iqSync READ iqSync NOTIFY iqSyncChanged)
+    Q_PROPERTY(QString nss READ nss NOTIFY nssChanged)
+    Q_PROPERTY(float centerFrequency READ centerFrequency NOTIFY centerFrequencyChanged)
+    Q_PROPERTY(float samplingFrequency READ samplingFrequency NOTIFY samplingFrequencyChanged)
+    Q_PROPERTY(float dspDecimatedBW READ dspDecimatedBW NOTIFY dspDecimatedBWChanged)
+    Q_PROPERTY(QString vfoRange READ vfoRange NOTIFY vfoRangeChanged)
+    Q_PROPERTY(int dataBlockLength READ dataBlockLength NOTIFY dataBlockLengthChanged)
+    Q_PROPERTY(QString rfGain READ rfGain NOTIFY rfGainChanged)
+    Q_PROPERTY(float vfo READ vfo NOTIFY vfoChanged)
+
+    Q_PROPERTY(float gpsalt READ gpsalt NOTIFY gpsAltChanged)
+    Q_PROPERTY(float gpslong READ gpslong NOTIFY gpsLongChanged)
+    Q_PROPERTY(float gpslat READ gpslat NOTIFY gpsLatChanged)
+
+    Q_PROPERTY(float degree READ degree NOTIFY degreeChanged)
+
+    Q_PROPERTY(QVariantList doaRArray READ doaRArray NOTIFY doaChanged)
+    Q_PROPERTY(QVariantList doaThetaArray READ doaThetaArray NOTIFY doaChanged)
+
+    Q_PROPERTY(QString serverKraken READ serverKraken WRITE setServerKraken NOTIFY serverKrakenChanged)
+
+
+public:
+    explicit Mainwindows(QObject *parent = nullptr);
+     ~Mainwindows();
+    int updateRate() const;
+    int latency() const;
+    int frameIndex() const;
+    QString frameSync() const;
+    QString frameType() const;
+    QString powerLevel() const;
+    QString connectionStatus() const;
+    QString sampleDelaySync() const;
+    QString iqSync() const;
+    QString nss() const;
+    float centerFrequency() const;
+    float samplingFrequency() const;
+    float dspDecimatedBW() const;
+    QString vfoRange() const;
+    int dataBlockLength() const;
+    QString rfGain() const;
+    float vfo() const;
+
+    float gpsalt() const;
+    float gpslong() const;
+    float gpslat() const;
+
+    float degree() const;
+
+    QVariantList doaRArray() const;
+    QVariantList doaThetaArray() const;
+
+    QString serverKraken() const;
+
+    void setDoaData(const QJsonObject &obj);
+    void setFromJson(const QJsonObject &obj);
+    void setGpsFromJson(const QJsonObject &obj);
+    void setAngleOfHeading(const QJsonObject &obj);
+
+    void setServerKraken(const QString &val);
+
+    void hardwareInfo();
+    static void* ThreadFunc( void* pTr );
+    typedef void * (*THREADFUNCPTR)(void *);
+    pthread_t idThread;
+
+    int Display_count = 0;
+
+    QString readLine(QString fileName);
+    QString getUPTime();
+
+    void sendToWeb(QString data);
+    QList<QWebSocket *> m_Webapplication;
+
+    void updateFirmware();
+    bool foundfileupdate = false;
+    QStringList findFile();
+    int updateStatus = 0;
+    QTimer *reConnect;
+
+    ChatServer *chatServer;
+    ChatClient *chartclient;
+    NetworkMng *networking;
+
+    void ConnectKraken(const QString &ip);
+
+
+signals:
+    void cppCommand(QVariant jsonMsg);
+
+    void updateRateChanged();
+    void latencyChanged();
+    void frameIndexChanged();
+    void frameSyncChanged();
+    void frameTypeChanged();
+    void powerLevelChanged();
+    void connectionStatusChanged();
+    void sampleDelaySyncChanged();
+    void iqSyncChanged();
+    void nssChanged();
+    void centerFrequencyChanged();
+    void samplingFrequencyChanged();
+    void dspDecimatedBWChanged();
+    void vfoRangeChanged();
+    void dataBlockLengthChanged();
+    void rfGainChanged();
+    void vfoChanged();
+
+    void gpsLatChanged();
+    void gpsLongChanged();
+    void gpsAltChanged();
+
+    void degreeChanged();
+
+    void doaChanged();
+
+    void setNetwork(QString,QString,QString,QString,QString,QString);
+
+    void serverSendMessage(QString);
+    void serverKrakenChanged();
+
+    void updateKrakenServer(const QString &ip);
+
+
+
+public slots:
+    // void cppSubmitTextFiled(QString qmlCommand);
+    void updateReceiverParameters(const QString &signalStrength, const QString &receiverGain);
+    void updateNetworkSlot(QString,QString,QString,QString,QString,QString);
+    void updateNTPServerSlot(QString,QString,int);
+    void loopGetInfo();
+    void connectToserverKraken(const QString &serverKraken);
+
+    void setConnectToserverKraken(const QString &ip);
+
+    // void reConnectSlot();
+
+private:
+
+    int m_updateRate = 0;
+    int m_latency = 0;
+    int m_frameIndex = 0;
+    QString m_frameSync, m_frameType, m_powerLevel, m_connectionStatus;
+    QString m_sampleDelaySync, m_iqSync, m_nss, m_vfoRange, m_rfGain;
+    float m_centerFrequency = 0.0f;
+    float m_samplingFrequency = 0.0f;
+    float m_dspDecimatedBW = 0.0f;
+    int m_dataBlockLength = 0;
+    float m_vfo = 0.0f;
+
+    float m_gpsalt = 0.0f;
+    float m_gpslong = 0.0f;
+    float m_gpslat = 0.0f;
+
+    float m_degree = 0.0f;
+
+    QVariantList m_doaRArray;
+    QVariantList m_doaThetaArray;
+
+    QWebSocket m_webSocket;
+
+    QString m_serverKraken;
+    struct Krakenparameter
+    {
+        QString ServerKraken;
+    };
+    Krakenparameter *krakenparameter;
+
+    struct Network{
+        // network
+        QString dhcpmethod;
+        QString ip_address = "127.0.0.1";
+        QString subnet;
+        QString ip_gateway = "";
+        QString pridns;
+        QString secdns;
+        QString phyName = "bond0";
+
+        //location
+        QString location = 0;
+
+        //ntp server
+        QString ip_timeserver = "";
+        int method_timeserver = 0;
+
+        bool operator==(const Network& other) const {
+            return (/*ipSnmpServer == other.ipSnmpServer &&*/
+                        dhcpmethod == other.dhcpmethod &&
+                    ip_address == other.ip_address &&
+                    subnet == other.subnet &&
+                    ip_gateway == other.ip_gateway &&
+                    pridns == other.pridns &&
+                    secdns == other.secdns &&
+                    phyName == other.phyName );
+        }
+
+        // Inequality operator (optional but useful)
+        bool operator!=(const Network& other) const {
+            return !(*this == other);
+        }
+
+
+        void printinfo(){
+            qDebug() << "networks dhcpmethod:" << dhcpmethod << " ip_address:" << ip_address
+                     << " subnet:" << subnet << " ip_gateway:" << ip_gateway << " pridns:" << pridns
+                     << " secdns:" << secdns << " phyName:" << phyName << " ip_timeserver:" << ip_timeserver;
+        }
+    };
+
+    Network *networks;
+    Database *db;
+    QString lastGetCurrentTime = "";
+    QList<QWebSocket *> m_clients;
+
+private slots:
+    void newCommandProcess(QJsonObject command, QWebSocket *pSender, QString message);
+    void TextMessageReceived(QString message);
+    void socketClientReconnect();
+};
+
+#endif // MAINWINDOWS_H

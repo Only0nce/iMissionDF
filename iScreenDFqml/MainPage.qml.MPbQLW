@@ -1,0 +1,883 @@
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.3
+import QtPositioning 5.5
+import QtLocation 5.6
+import QtQuick.Controls.Material 2.15
+import QtQuick.VirtualKeyboard 2.1
+import QtGraphicalEffects 1.12
+import "."
+
+
+Item {
+    id: mainPage
+    width: 1920
+    height: 1080
+
+    // Add a loader for dynamic page changes
+
+    Material.theme: Material.Dark
+    Material.accent: Material.Teal
+
+    property string signalStrength: "144"
+    property string receiverGain: "0.9 dB"
+    signal receiverParamsUpdated(string signalStrength, string receiverGain)
+
+
+    Loader {
+        id: loader
+        anchors.fill: parent
+        source: "qrc:/pages/QMLMap.qml"  // Initial page to load
+    }
+
+    Rectangle {
+         id: navBar
+         width: parent.width
+         height: 60
+         color: "#111212"
+         z: 1
+         anchors.top: parent.top
+
+         RowLayout {
+             anchors.fill: parent
+             spacing: 20
+             anchors.leftMargin: 20
+             anchors.rightMargin: 20
+
+             RoundButton {
+                 id: settingsButton
+                 Layout.preferredWidth: 48
+                 Layout.preferredHeight: 48
+                 Layout.alignment: Qt.AlignVCenter
+                 radius: 24
+                 padding: 6
+
+                 background: Rectangle {
+                     color: settingsButton.pressed ? "#111212" :
+                            settingsButton.hovered ? "#111212" : "#111212"
+                     border.color: "#373640"
+                     border.width: settingsButton.hovered ? 2 : 1
+                     radius: 24
+                     anchors.fill: parent
+                     Behavior on color {
+                         ColorAnimation { duration: 200 }
+                     }
+                 }
+
+                 Item {
+                     width: 32
+                     height: 32
+                     anchors.centerIn: parent
+
+                     Column {
+                         spacing: 6
+                         anchors.centerIn: parent
+
+                         Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
+                         Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
+                         Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
+                     }
+                 }
+
+
+                 ToolTip.visible: hovered
+                 ToolTip.text: qsTr("Menu")
+
+                 // onClicked: {
+                 //     console.log("Settings button clicked, topDrawer open:")
+                 //     settingsDrawer.open()
+                 // }
+                 onClicked: {
+                     console.log("Settings button clicked, topDrawer open:", topDrawer.open)
+                     topDrawer.close()
+                     settingsDrawer.open()
+                 }
+
+             }
+
+             // Label {
+             //     text: "Offline Map Viewer"
+             //     font.pixelSize: 20
+             //     font.bold: true
+             //     color: "#169976"
+             //     Layout.fillWidth: true
+             //     horizontalAlignment: Text.AlignHCenter
+             // }
+
+             Label {
+                 id: locationLabel
+                 text:  Number(Krakenmapval.degree).toFixed(4) + "° " +
+                        Number(Krakenmapval.gpslat).toFixed(4) + "°N " +
+                        Number(Krakenmapval.gpslong).toFixed(4) + "°E " +
+                        Number(Krakenmapval.gpsalt).toFixed(2) + "m"
+                 font.pixelSize: 14
+                 Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                 color: "#169976"
+             }
+         }
+     }
+    // Drawer and other UI elements go here
+    Drawer {
+        id: settingsDrawer
+        width: 530
+        height: parent.height // Change from `window.height` to `parent.height`
+        edge: Qt.LeftEdge
+        modal: true
+        interactive: true
+        // visible: false
+
+        background: Rectangle {
+            color: "#202020"
+        }
+
+        Item {
+            anchors.fill: parent
+            anchors.margins: 15
+
+        ColumnLayout {
+            anchors.margins: 10
+            spacing: 10
+
+            Label {
+                text: "Select Mode"
+                font.pixelSize: 20
+                font.bold: true
+                color: "#ffffff"
+            }
+
+            ComboBox {
+                id: pageSelector
+                Layout.preferredWidth: 300
+                model: ListModel {
+                    ListElement { title: "MAP VISUALIZATION"; source: "qrc:/pages/QMLMap.qml" }
+                    ListElement { title: "SPECTRUM"; source: "qrc:/pages/spectrum.qml" }
+                    ListElement { title: "DOA ESTIMATION"; source: "qrc:/pages/estimation.qml" }
+                }
+                textRole: "title"
+                onCurrentIndexChanged: {
+                    loader.source = model.get(currentIndex).source
+                }
+            }
+            Label {
+                text: "RF Receiver Configuration"
+                font.pixelSize: 20
+                font.bold: true
+                color: "#ffffff"
+            }
+            GridLayout {
+                columns: 2
+                // Layout.fillWidth: true
+                rowSpacing: 20
+                columnSpacing: 30
+
+                Label {
+                    text: "Signal Strength:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+
+                Tumbler {
+                    id: signalTumbler
+                    Layout.preferredWidth: 150
+                    Layout.preferredHeight: 32
+                    wrap: false
+                    visibleItemCount: 1
+                    clip: true
+                    model: 151  // 0–150
+
+                    // ตั้งค่าค่าตั้งต้นตอนโหลดให้ตรงกับ signalStrength
+
+                    onCurrentIndexChanged: {
+                        signalStrength = currentIndex.toString()
+                    }
+
+                    Component.onCompleted: {
+                        let val = Number(signalStrength)
+                        if (!isNaN(val) && val >= 0 && val < model)
+                            currentIndex = val
+                    }
+
+                    delegate: Item {
+                        width: signalTumbler.width
+                        height: 28
+                        Text {
+                            anchors.centerIn: parent
+                            text: index.toString()
+                            color: "#00FFAA"
+                            font.pixelSize: 16
+                        }
+                    }
+
+                    background: Rectangle {
+                        color: "#2a2a2a"
+                        radius: 10
+                        border.color: "#00FFAA"
+                        border.width: 1
+                    }
+                }
+
+                Label {
+                    text: "Receiver Gain:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+
+                ComboBox {
+                    id: gainCombo
+                    model: ["0", "0.9", "1.4", "2.7","3.7","7.7","8.7","12.5","14.4","15.7","16.6","19.7","20.7","22.9",
+                            "25.4","28.0","29.7","32.8","33.8","36.4","37.2","38.6","40.2","42.1","43.4","44.5","48.0","49.6"]
+
+                    font.pixelSize: 16
+                    Layout.preferredWidth: 150
+                    Layout.preferredHeight: 32
+
+                    Component.onCompleted: {
+                        let idx = model.indexOf(receiverGain)
+                        if (idx !== -1)
+                            currentIndex = idx;
+                    }
+
+                    onActivated: receiverGain = gainCombo.currentText
+
+                    contentItem: Text {
+                        text: gainCombo.currentText + " dB"
+                        color: "#00FFAA"
+                        font.pixelSize: 16
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                        leftPadding: 10
+                    }
+
+                    delegate: ItemDelegate {
+                        width: gainCombo.width
+                        contentItem: Text {
+                            text: modelData + " dB"
+                            font.pixelSize: 12
+                            color: "#222831"
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    background: Rectangle {
+                        color: "#2a2a2a"
+                        radius: 10
+                        border.color: "#00FFAA"
+                        border.width: 1
+                    }
+                }
+
+                Button {
+                    text: "Update Receiver Parameters"
+                    Layout.columnSpan: 2
+                    Layout.fillWidth: true
+                    height: 36
+                    background: Rectangle {
+                        color: "#169976"
+                        radius: 6
+                    }
+                    font.pixelSize: 16
+
+                    onClicked: {
+                        Krakenmapval.updateReceiverParameters(signalStrength, receiverGain)
+                    }
+                }
+
+                }
+
+            Label {
+                text: "DAQ Subsystem Status"
+                font.pixelSize: 20
+                font.bold: true
+                color: "#ffffff"
+                Layout.topMargin: 10
+            }
+
+            GridLayout {
+                columns: 2
+                Layout.fillWidth: true
+                rowSpacing: 10
+                columnSpacing: 100
+
+                Label {
+                    text: "Update Rate:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.updateRate + " ms"
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+
+                Label {
+                    text: "Latency:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.latency + " ms"
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+
+                Label {
+                    text: "Frame Index:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.frameIndex
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Frame Type:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.frameType
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Frame Sync:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.frameSync
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Power level:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.powerLevel
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Connection Status:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.connectionStatus
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Sample Delay Sync:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.sampleDelaySync
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "IQ Sync:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.iqSync
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Noise Source State:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.nss
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Center Frequecy [MHz]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.centerFrequency
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Sampilng Frequecy [MHz]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.samplingFrequency
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "DSP Decimated BW [MHz]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.dspDecimatedBW
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "VFO Range [MHz]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.vfoRange
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "Data Block Length [ms]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.dataBlockLength
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "RF Gains [bB]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.rfGain
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+                Label {
+                    text: "VFO-0 Power [dB]:"
+                    font.pixelSize: 16
+                    color: "#ffffff"
+                }
+                Label {
+                    text: Krakenmapval.vfo
+                    font.pixelSize: 16
+                    color: "#00FFAA"
+                }
+            }
+            }
+
+        Item {
+            id: floatingButtonContainer
+            width: 60
+            height: 60
+            anchors.left: parent.left
+            anchors.bottom: parent.bottom
+            anchors.leftMargin: 20
+            anchors.bottomMargin: 20
+            z: 100
+
+            Rectangle {
+                id: floatingCircleButton
+                width: 60
+                height: 60
+                radius: 30
+                color: "#C7C8CC"
+                anchors.centerIn: parent
+                // elevation: 6
+
+                MouseArea {
+                    anchors.fill: parent
+                    onClicked: {
+                        console.log("Floating button clicked")
+                        // TODO: implement your action
+                    }
+                }
+                Image {
+                    source: "qrc:/images/sun.png"
+                    width: 40
+                    height: 40
+                    anchors.centerIn: parent
+                }
+            }
+        }
+        }
+    }
+    Drawer {
+        id: topDrawer
+        width: parent.width
+        height: 600
+        edge: Qt.TopEdge
+        modal: true
+        interactive: true
+        dragMargin: 5
+
+        background: Rectangle {
+            color: "#1e1e1e"
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 24
+            spacing: 16
+
+            Label {
+                text: "Network Configuration"
+                font.pixelSize: 22
+                font.bold: true
+                color: "#ffffff"
+                Layout.alignment: Qt.AlignHCenter
+            }
+
+            RowLayout {
+                spacing: 10
+                Label {
+                    text: "DHCP"
+                    color: "#cccccc"
+                    font.pixelSize: 16
+                    Layout.preferredWidth: 100
+                }
+
+                ComboBox {
+                    id: ipModeCombo
+                    Layout.preferredWidth: 200
+                    model: ["Automatic", "Static"]
+
+                    Component.onCompleted: {
+                        ipModeCombo.currentIndex = (Krakenmapval.useDHCP === "off") ? 1 : 0
+                    }
+
+                    onCurrentIndexChanged: {
+                        let mode = (ipModeCombo.currentIndex === 0) ? "on" : "off"
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "IP Address"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+
+                    TextField {
+                        id: ipField
+                        placeholderText: "192.168.1.100"
+                        text: Krakenmapval.ipAddress
+                        onTextChanged:  Krakenmapval.ipAddress = text
+                        enabled: ipModeCombo.currentIndex === 1
+                        Layout.fillWidth: true
+                        background: Rectangle {
+                            color: ipField.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "Subnet Mask"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+
+                    TextField {
+                        id: subnetField
+                        placeholderText: "255.255.255.0"
+                        text: Krakenmapval.subnetMask
+                        onTextChanged:  Krakenmapval.subnetMask = text
+                        enabled: ipModeCombo.currentIndex === 1
+                        Layout.fillWidth: true
+                        background: Rectangle {
+                            color: subnetField.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+                }
+            }
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "Gateway"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+
+                    TextField {
+                        id: gatewayField
+                        placeholderText: "Gateway"
+                        text: Krakenmapval.gateway
+                        onTextChanged:  Krakenmapval.gateway = text
+                        enabled: ipModeCombo.currentIndex === 1
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        background: Rectangle {
+                            color: gatewayField.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "Primary DNS"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+
+                    TextField {
+                        id: dns1Field
+                        placeholderText: "Primary DNS"
+                        text: Krakenmapval.dns1
+                        onTextChanged:  Krakenmapval.dns1 = text
+                        enabled: ipModeCombo.currentIndex === 1
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 0
+                        background: Rectangle {
+                            color: dns1Field.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+
+                    Label {
+                        text: "Secondary DNS"
+                        color: "#cccccc"
+                        font.pixelSize: 14
+                    }
+                    TextField {
+                        id: dns2Field
+                        placeholderText: "Secondary DNS"
+                        text: Krakenmapval.dns2
+                        onTextChanged:  Krakenmapval.dns2 = text
+                        enabled: ipModeCombo.currentIndex === 1
+                        Layout.fillWidth: true
+                        background: Rectangle {
+                            color: dns2Field.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+                }
+            }
+
+            RowLayout {
+                spacing: 12
+                Layout.fillWidth: true
+
+                Button {
+                    text: "Apply Settings"
+                    Layout.fillWidth: true
+                    font.pixelSize: 16
+                    background: Rectangle {
+                        color: "#00c896"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        anchors.centerIn: parent
+                        color: "white"
+                        font.bold: true
+                    }
+                    onClicked: {
+                        let dhcpValue = (ipModeCombo.currentIndex === 1) ? "off" : "on";
+
+                        console.log("Apply clicked")
+                        console.log("DHCP:", dhcpValue)
+                        console.log("IP Address:", ipField.text)
+                        console.log("Subnet:", subnetField.text)
+                        console.log("Gateway:", gatewayField.text)
+                        console.log("DNS1:", dns1Field.text)
+                        console.log("DNS2:", dns2Field.text)
+
+                        // ส่งค่าทั้งหมดไปยัง C++
+                        Krakenmapval.updateNetworkfromDisplay(
+                            dhcpValue,
+                            ipField.text,
+                            subnetField.text,
+                            gatewayField.text,
+                            dns1Field.text,
+                            dns2Field.text
+                        );
+                        // topDrawer.close();
+                    }
+                }
+
+                Button {
+                    text: "Restart Network"
+                    Layout.fillWidth: true
+                    font.pixelSize: 16
+                    background: Rectangle {
+                        color: "#007acc"
+                        radius: 6
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        anchors.centerIn: parent
+                        color: "white"
+                        font.bold: true
+                    }
+                    onClicked: {
+                        console.log("Restart Network clicked")
+                        // TODO: call system service or backend to restart network
+                    }
+                }
+            }
+            ColumnLayout {
+                Layout.fillWidth: true
+
+                Label {
+                    text: "Server Kraken"
+                    color: "#cccccc"
+                    font.pixelSize: 14
+                }
+
+                RowLayout {
+                    spacing: 12
+                    Layout.fillWidth: true
+                    Layout.alignment: Qt.AlignVCenter
+
+                    TextField {
+                        id: serverKrakenField
+                        placeholderText: "192.168.1.10"
+                        text: Krakenmapval.serverKraken
+                        onTextChanged: Krakenmapval.serverKraken = text
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 40
+                        background: Rectangle {
+                            color: serverKrakenField.activeFocus ? "#3a7bd5" : "#2c2c2c"
+                            radius: 6
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 250
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
+                        }
+                        color: "white"
+                        font.pixelSize: 16
+                        placeholderTextColor: "#888888"
+                    }
+
+                    Button {
+                        text: "Connect"
+                        Layout.preferredWidth: 160
+                        Layout.preferredHeight: 40
+                        font.pixelSize: 16
+
+                        background: Rectangle {
+                            color: "#f39c12"
+                            radius: 6
+                        }
+
+                        contentItem: Text {
+                            text: parent.text
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            anchors.fill: parent
+                            color: "white"
+                            font.pixelSize: parent.font.pixelSize
+                            font.bold: true
+                        }
+
+                        onClicked: {
+                            // console.log("Connecting to server:", serverKrakenField.text)
+                            // TODO: Call C++ function or backend to connect
+                            Krakenmapval.connectToserverKraken(Krakenmapval.serverKraken)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Rectangle {
+        id: keyboardContainer
+        width: parent.width
+        color: "#111111"
+
+        InputPanel {
+            id: virtualKeyboard
+            width: 1200                     // กำหนดความกว้าง
+            height: 400                    // กำหนดความสูง
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            z: 1000
+            visible: Qt.inputMethod.visible
+            opacity: 0.98                  // เพิ่มความโปร่งใสเล็กน้อย
+        }
+
+    }
+}

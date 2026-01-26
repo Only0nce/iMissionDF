@@ -1,0 +1,1911 @@
+Cell Name         = MIX2
+Parameter Name    = Mixer2x1NoSlewS300Alg1vol_00_00
+Parameter Address = 228
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = MIX2
+Parameter Name    = Mixer2x1NoSlewS300Alg1vol_00_01
+Parameter Address = 229
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = SPLT2
+Parameter Name    = MultiCtrlSplitterS300SLEW1target0
+Parameter Address = 650
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = SPLT2
+Parameter Name    = MultiCtrlSplitterS300SLEW1slew_mode
+Parameter Address = 221
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = SPLT2
+Parameter Name    = MultiCtrlSplitterS300SLEW1target1
+Parameter Address = 651
+Parameter Value   = 0.0158489346504211
+Parameter Data :
+0x00, 0x04, 0x0E, 0xAD, 
+
+
+
+Cell Name         = SPLT2
+Parameter Name    = MultiCtrlSplitterS300SLEW1slew_mode
+Parameter Address = 221
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = SPLT1
+Parameter Name    = MultiCtrlSplitterS300SLEW2target0
+Parameter Address = 638
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = SPLT1
+Parameter Name    = MultiCtrlSplitterS300SLEW2slew_mode
+Parameter Address = 215
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = SPLT1
+Parameter Name    = MultiCtrlSplitterS300SLEW2target1
+Parameter Address = 639
+Parameter Value   = 0.0158489346504211
+Parameter Data :
+0x00, 0x04, 0x0E, 0xAD, 
+
+
+
+Cell Name         = SPLT1
+Parameter Name    = MultiCtrlSplitterS300SLEW2slew_mode
+Parameter Address = 215
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = MIX1
+Parameter Name    = Mixer2x1NoSlewS300Alg2vol_00_00
+Parameter Address = 222
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = MIX1
+Parameter Name    = Mixer2x1NoSlewS300Alg2vol_00_01
+Parameter Address = 223
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = MIX3
+Parameter Name    = Mixer2x1NoSlewS300Alg3vol_00_00
+Parameter Address = 224
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = MIX3
+Parameter Name    = Mixer2x1NoSlewS300Alg3vol_00_01
+Parameter Address = 225
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = SPLT3
+Parameter Name    = MultiCtrlSplitterS300SLEW3target0
+Parameter Address = 642
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = SPLT3
+Parameter Name    = MultiCtrlSplitterS300SLEW3slew_mode
+Parameter Address = 217
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = SPLT3
+Parameter Name    = MultiCtrlSplitterS300SLEW3target1
+Parameter Address = 643
+Parameter Value   = 0.0158489346504211
+Parameter Data :
+0x00, 0x04, 0x0E, 0xAD, 
+
+
+
+Cell Name         = SPLT3
+Parameter Name    = MultiCtrlSplitterS300SLEW3slew_mode
+Parameter Address = 217
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = MIX4
+Parameter Name    = Mixer2x1NoSlewS300Alg4vol_00_00
+Parameter Address = 226
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = MIX4
+Parameter Name    = Mixer2x1NoSlewS300Alg4vol_00_01
+Parameter Address = 227
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = SPLT4
+Parameter Name    = MultiCtrlSplitterS300SLEW4target0
+Parameter Address = 646
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = SPLT4
+Parameter Name    = MultiCtrlSplitterS300SLEW4slew_mode
+Parameter Address = 219
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = SPLT4
+Parameter Name    = MultiCtrlSplitterS300SLEW4target1
+Parameter Address = 647
+Parameter Value   = 0.0158489346504211
+Parameter Data :
+0x00, 0x04, 0x0E, 0xAD, 
+
+
+
+Cell Name         = SPLT4
+Parameter Name    = MultiCtrlSplitterS300SLEW4slew_mode
+Parameter Address = 219
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001TCONST
+Parameter Address = 158
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001hold
+Parameter Address = 159
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001decay
+Parameter Address = 160
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001X
+Parameter Address = 168
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001X_lo
+Parameter Address = 169
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001LinX
+Parameter Address = 170
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001LinX_lo
+Parameter Address = 171
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1
+Parameter Name    = SingleBandLevelDetS3001
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002TCONST
+Parameter Address = 172
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002hold
+Parameter Address = 173
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002decay
+Parameter Address = 174
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002X
+Parameter Address = 182
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002X_lo
+Parameter Address = 183
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002LinX
+Parameter Address = 184
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002LinX_lo
+Parameter Address = 185
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level2
+Parameter Name    = SingleBandLevelDetS3002
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003TCONST
+Parameter Address = 186
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003hold
+Parameter Address = 187
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003decay
+Parameter Address = 188
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003X
+Parameter Address = 196
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003X_lo
+Parameter Address = 197
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003LinX
+Parameter Address = 198
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003LinX_lo
+Parameter Address = 199
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_2
+Parameter Name    = SingleBandLevelDetS3003
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004TCONST
+Parameter Address = 200
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004hold
+Parameter Address = 201
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004decay
+Parameter Address = 202
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004X
+Parameter Address = 210
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004X_lo
+Parameter Address = 211
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004LinX
+Parameter Address = 212
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004LinX_lo
+Parameter Address = 213
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_3
+Parameter Name    = SingleBandLevelDetS3004
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005TCONST
+Parameter Address = 264
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005hold
+Parameter Address = 265
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005decay
+Parameter Address = 266
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005X
+Parameter Address = 274
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005X_lo
+Parameter Address = 275
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005LinX
+Parameter Address = 276
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005LinX_lo
+Parameter Address = 277
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_5
+Parameter Name    = SingleBandLevelDetS3005
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006TCONST
+Parameter Address = 250
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006hold
+Parameter Address = 251
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006decay
+Parameter Address = 252
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006X
+Parameter Address = 260
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006X_lo
+Parameter Address = 261
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006LinX
+Parameter Address = 262
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006LinX_lo
+Parameter Address = 263
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_4
+Parameter Name    = SingleBandLevelDetS3006
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007TCONST
+Parameter Address = 278
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007hold
+Parameter Address = 279
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007decay
+Parameter Address = 280
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007X
+Parameter Address = 288
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007X_lo
+Parameter Address = 289
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007LinX
+Parameter Address = 290
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007LinX_lo
+Parameter Address = 291
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_6
+Parameter Name    = SingleBandLevelDetS3007
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008TCONST
+Parameter Address = 292
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008hold
+Parameter Address = 293
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008decay
+Parameter Address = 294
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008X
+Parameter Address = 302
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008X_lo
+Parameter Address = 303
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008LinX
+Parameter Address = 304
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008LinX_lo
+Parameter Address = 305
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Level1_7
+Parameter Name    = SingleBandLevelDetS3008
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Single 1
+Parameter Name    = HWGainADAU145XAlg1slew_mode
+Parameter Address = 243
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Single 1
+Parameter Name    = HWGainADAU145XAlg1target
+Parameter Address = 242
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Single 2
+Parameter Name    = HWGainADAU145XAlg2slew_mode
+Parameter Address = 249
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Single 2
+Parameter Name    = HWGainADAU145XAlg2target
+Parameter Address = 248
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Single 3
+Parameter Name    = HWGainADAU145XAlg3slew_mode
+Parameter Address = 246
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Single 3
+Parameter Name    = HWGainADAU145XAlg3target
+Parameter Address = 245
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Single 4
+Parameter Name    = HWGainADAU145XAlg4slew_mode
+Parameter Address = 240
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Single 4
+Parameter Name    = HWGainADAU145XAlg4target
+Parameter Address = 239
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1
+Parameter Name    = SinePhaseGainAlgS3001inc
+Parameter Address = 29
+Parameter Value   = 0.0375000238418579
+Parameter Data :
+0x00, 0x09, 0x99, 0x9A, 
+
+
+
+Cell Name         = Tone1
+Parameter Name    = SinePhaseGainAlgS3001index_fp_hi_0
+Parameter Address = 25
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1
+Parameter Name    = SinePhaseGainAlgS3001gain_0
+Parameter Address = 24
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1
+Parameter Name    = Mixer2x1NoSlewS300Alg5vol_00_00
+Parameter Address = 357
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1
+Parameter Name    = Mixer2x1NoSlewS300Alg5vol_00_01
+Parameter Address = 358
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Tone1_2
+Parameter Name    = SinePhaseGainAlgS3002inc
+Parameter Address = 39
+Parameter Value   = 0.0375000238418579
+Parameter Data :
+0x00, 0x09, 0x99, 0x9A, 
+
+
+
+Cell Name         = Tone1_2
+Parameter Name    = SinePhaseGainAlgS3002index_fp_hi_0
+Parameter Address = 35
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_2
+Parameter Name    = SinePhaseGainAlgS3002gain_0
+Parameter Address = 34
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1_2
+Parameter Name    = Mixer2x1NoSlewS300Alg6vol_00_00
+Parameter Address = 359
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_2
+Parameter Name    = Mixer2x1NoSlewS300Alg6vol_00_01
+Parameter Address = 360
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Tone1_3
+Parameter Name    = SinePhaseGainAlgS3003inc
+Parameter Address = 49
+Parameter Value   = 0.0375000238418579
+Parameter Data :
+0x00, 0x09, 0x99, 0x9A, 
+
+
+
+Cell Name         = Tone1_3
+Parameter Name    = SinePhaseGainAlgS3003index_fp_hi_0
+Parameter Address = 45
+Parameter Data :
+0x00, 0x00, 0x00, 0x05, 
+0xB0, 0x5B, 0x05, 0xB0, 
+
+
+
+Cell Name         = Tone1_3
+Parameter Name    = SinePhaseGainAlgS3003gain_0
+Parameter Address = 44
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1_3
+Parameter Name    = Mixer2x1NoSlewS300Alg7vol_00_00
+Parameter Address = 361
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_3
+Parameter Name    = Mixer2x1NoSlewS300Alg7vol_00_01
+Parameter Address = 362
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Tone1_4
+Parameter Name    = SinePhaseGainAlgS3004inc
+Parameter Address = 59
+Parameter Value   = 0.0375000238418579
+Parameter Data :
+0x00, 0x09, 0x99, 0x9A, 
+
+
+
+Cell Name         = Tone1_4
+Parameter Name    = SinePhaseGainAlgS3004index_fp_hi_0
+Parameter Address = 55
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_4
+Parameter Name    = SinePhaseGainAlgS3004gain_0
+Parameter Address = 54
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1_4
+Parameter Name    = Mixer2x1NoSlewS300Alg8vol_00_00
+Parameter Address = 363
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_4
+Parameter Name    = Mixer2x1NoSlewS300Alg8vol_00_01
+Parameter Address = 364
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = FIR1
+Parameter Name    = FIRSigma300Alg1fircoeff
+Parameter Address = 107
+Parameter Data :
+0x00, 0x00, 0x19, 0x8C, 
+0x00, 0x00, 0x2A, 0xBA, 
+0x00, 0x00, 0x41, 0x24, 
+0x00, 0x00, 0x5E, 0xE2, 
+0x00, 0x00, 0x84, 0x3C, 
+0x00, 0x00, 0xAF, 0x14, 
+0x00, 0x00, 0xDA, 0x83, 
+0x00, 0x00, 0xFE, 0xD5, 
+0x00, 0x01, 0x11, 0xE2, 
+0x00, 0x01, 0x07, 0xBC, 
+0x00, 0x00, 0xD3, 0xBD, 
+0x00, 0x00, 0x69, 0xC8, 
+0xFF, 0xFF, 0xBF, 0xA6, 
+0xFF, 0xFE, 0xCE, 0x66, 
+0xFF, 0xFD, 0x93, 0x83, 
+0xFF, 0xFC, 0x11, 0xC7, 
+0xFF, 0xFA, 0x51, 0xB9, 
+0xFF, 0xF8, 0x61, 0x8D, 
+0xFF, 0xF6, 0x54, 0x95, 
+0xFF, 0xF4, 0x42, 0x25, 
+0xFF, 0xF2, 0x44, 0x11, 
+0xFF, 0xF0, 0x74, 0xE4, 
+0xFF, 0xEE, 0xED, 0xE3, 
+0xFF, 0xED, 0xC5, 0x24, 
+0xFF, 0xED, 0x0B, 0xD1, 
+0x00, 0xEC, 0xCC, 0xCD, 
+0xFF, 0xED, 0x0B, 0xD1, 
+0xFF, 0xED, 0xC5, 0x24, 
+0xFF, 0xEE, 0xED, 0xE3, 
+0xFF, 0xF0, 0x74, 0xE4, 
+0xFF, 0xF2, 0x44, 0x11, 
+0xFF, 0xF4, 0x42, 0x25, 
+0xFF, 0xF6, 0x54, 0x95, 
+0xFF, 0xF8, 0x61, 0x8D, 
+0xFF, 0xFA, 0x51, 0xB9, 
+0xFF, 0xFC, 0x11, 0xC7, 
+0xFF, 0xFD, 0x93, 0x83, 
+0xFF, 0xFE, 0xCE, 0x66, 
+0xFF, 0xFF, 0xBF, 0xA6, 
+0x00, 0x00, 0x69, 0xC8, 
+0x00, 0x00, 0xD3, 0xBD, 
+0x00, 0x01, 0x07, 0xBC, 
+0x00, 0x01, 0x11, 0xE2, 
+0x00, 0x00, 0xFE, 0xD5, 
+0x00, 0x00, 0xDA, 0x83, 
+0x00, 0x00, 0xAF, 0x14, 
+0x00, 0x00, 0x84, 0x3C, 
+0x00, 0x00, 0x5E, 0xE2, 
+0x00, 0x00, 0x41, 0x24, 
+0x00, 0x00, 0x2A, 0xBA, 
+0x00, 0x00, 0x19, 0x8C, 
+
+
+
+Cell Name         = FIR2
+Parameter Name    = FIRSigma300Alg5fircoeff
+Parameter Address = 306
+Parameter Data :
+0x00, 0x00, 0x19, 0x8C, 
+0x00, 0x00, 0x2A, 0xBA, 
+0x00, 0x00, 0x41, 0x24, 
+0x00, 0x00, 0x5E, 0xE2, 
+0x00, 0x00, 0x84, 0x3C, 
+0x00, 0x00, 0xAF, 0x14, 
+0x00, 0x00, 0xDA, 0x83, 
+0x00, 0x00, 0xFE, 0xD5, 
+0x00, 0x01, 0x11, 0xE2, 
+0x00, 0x01, 0x07, 0xBC, 
+0x00, 0x00, 0xD3, 0xBD, 
+0x00, 0x00, 0x69, 0xC8, 
+0xFF, 0xFF, 0xBF, 0xA6, 
+0xFF, 0xFE, 0xCE, 0x66, 
+0xFF, 0xFD, 0x93, 0x83, 
+0xFF, 0xFC, 0x11, 0xC7, 
+0xFF, 0xFA, 0x51, 0xB9, 
+0xFF, 0xF8, 0x61, 0x8D, 
+0xFF, 0xF6, 0x54, 0x95, 
+0xFF, 0xF4, 0x42, 0x25, 
+0xFF, 0xF2, 0x44, 0x11, 
+0xFF, 0xF0, 0x74, 0xE4, 
+0xFF, 0xEE, 0xED, 0xE3, 
+0xFF, 0xED, 0xC5, 0x24, 
+0xFF, 0xED, 0x0B, 0xD1, 
+0x00, 0xEC, 0xCC, 0xCD, 
+0xFF, 0xED, 0x0B, 0xD1, 
+0xFF, 0xED, 0xC5, 0x24, 
+0xFF, 0xEE, 0xED, 0xE3, 
+0xFF, 0xF0, 0x74, 0xE4, 
+0xFF, 0xF2, 0x44, 0x11, 
+0xFF, 0xF4, 0x42, 0x25, 
+0xFF, 0xF6, 0x54, 0x95, 
+0xFF, 0xF8, 0x61, 0x8D, 
+0xFF, 0xFA, 0x51, 0xB9, 
+0xFF, 0xFC, 0x11, 0xC7, 
+0xFF, 0xFD, 0x93, 0x83, 
+0xFF, 0xFE, 0xCE, 0x66, 
+0xFF, 0xFF, 0xBF, 0xA6, 
+0x00, 0x00, 0x69, 0xC8, 
+0x00, 0x00, 0xD3, 0xBD, 
+0x00, 0x01, 0x07, 0xBC, 
+0x00, 0x01, 0x11, 0xE2, 
+0x00, 0x00, 0xFE, 0xD5, 
+0x00, 0x00, 0xDA, 0x83, 
+0x00, 0x00, 0xAF, 0x14, 
+0x00, 0x00, 0x84, 0x3C, 
+0x00, 0x00, 0x5E, 0xE2, 
+0x00, 0x00, 0x41, 0x24, 
+0x00, 0x00, 0x2A, 0xBA, 
+0x00, 0x00, 0x19, 0x8C, 
+
+
+
+Cell Name         = Tone1_8
+Parameter Name    = SinePhaseGainAlgS3005inc
+Parameter Address = 69
+Parameter Value   = 0.149999976158142
+Parameter Data :
+0x00, 0x26, 0x66, 0x66, 
+
+
+
+Cell Name         = Tone1_8
+Parameter Name    = SinePhaseGainAlgS3005index_fp_hi_0
+Parameter Address = 65
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_8
+Parameter Name    = SinePhaseGainAlgS3005gain_0
+Parameter Address = 64
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1_5
+Parameter Name    = Mixer2x1NoSlewS300Alg9vol_00_00
+Parameter Address = 236
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_5
+Parameter Name    = Mixer2x1NoSlewS300Alg9vol_00_01
+Parameter Address = 237
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Tone1_5
+Parameter Name    = SinePhaseGainAlgS3006inc
+Parameter Address = 79
+Parameter Value   = 0.25
+Parameter Data :
+0x00, 0x40, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_5
+Parameter Name    = SinePhaseGainAlgS3006index_fp_hi_0
+Parameter Address = 75
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_5
+Parameter Name    = SinePhaseGainAlgS3006gain_0
+Parameter Address = 74
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_6
+Parameter Name    = SinePhaseGainAlgS3007inc
+Parameter Address = 89
+Parameter Value   = 0.149999976158142
+Parameter Data :
+0x00, 0x26, 0x66, 0x66, 
+
+
+
+Cell Name         = Tone1_6
+Parameter Name    = SinePhaseGainAlgS3007index_fp_hi_0
+Parameter Address = 85
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_6
+Parameter Name    = SinePhaseGainAlgS3007gain_0
+Parameter Address = 84
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_7
+Parameter Name    = SinePhaseGainAlgS3008inc
+Parameter Address = 99
+Parameter Value   = 0.149999976158142
+Parameter Data :
+0x00, 0x26, 0x66, 0x66, 
+
+
+
+Cell Name         = Tone1_7
+Parameter Name    = SinePhaseGainAlgS3008index_fp_hi_0
+Parameter Address = 95
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Tone1_7
+Parameter Name    = SinePhaseGainAlgS3008gain_0
+Parameter Address = 94
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = Nx1 Linear1_6
+Parameter Name    = Mixer2x1NoSlewS300Alg10vol_00_00
+Parameter Address = 234
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_6
+Parameter Name    = Mixer2x1NoSlewS300Alg10vol_00_01
+Parameter Address = 235
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_7
+Parameter Name    = Mixer2x1NoSlewS300Alg11vol_00_00
+Parameter Address = 232
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_7
+Parameter Name    = Mixer2x1NoSlewS300Alg11vol_00_01
+Parameter Address = 233
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_8
+Parameter Name    = Mixer2x1NoSlewS300Alg12vol_00_00
+Parameter Address = 230
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Nx1 Linear1_8
+Parameter Name    = Mixer2x1NoSlewS300Alg12vol_00_01
+Parameter Address = 231
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = Gain1_2
+Parameter Name    = HWGainADAU145XAlg6slew_mode
+Parameter Address = 106
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Gain1_2
+Parameter Name    = HWGainADAU145XAlg6target
+Parameter Address = 105
+Parameter Value   = 1.41253751516342
+Parameter Data :
+0x01, 0x69, 0x9C, 0x0F, 
+
+
+
+Cell Name         = Gain1
+Parameter Name    = HWGainADAU145XAlg5slew_mode
+Parameter Address = 375
+Parameter Value   = 8330
+Parameter Data :
+0x00, 0x00, 0x20, 0x8A, 
+
+
+
+Cell Name         = Gain1
+Parameter Name    = HWGainADAU145XAlg5target
+Parameter Address = 374
+Parameter Value   = 1.41253751516342
+Parameter Data :
+0x01, 0x69, 0x9C, 0x0F, 
+
+
+
+Cell Name         = spilter_rec_1
+Parameter Name    = MultiCtrlSplitterS3001gain0
+Parameter Address = 658
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_1
+Parameter Name    = MultiCtrlSplitterS3001gain1
+Parameter Address = 659
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_2
+Parameter Name    = MultiCtrlSplitterS3002gain0
+Parameter Address = 656
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_2
+Parameter Name    = MultiCtrlSplitterS3002gain1
+Parameter Address = 657
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_3
+Parameter Name    = MultiCtrlSplitterS3003gain0
+Parameter Address = 654
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_3
+Parameter Name    = MultiCtrlSplitterS3003gain1
+Parameter Address = 655
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = mix_in_out_rec_1
+Parameter Name    = Mixer2x1NoSlewS300Alg13vol_00_00
+Parameter Address = 365
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_1
+Parameter Name    = Mixer2x1NoSlewS300Alg13vol_00_01
+Parameter Address = 366
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_2
+Parameter Name    = Mixer2x1NoSlewS300Alg14vol_00_00
+Parameter Address = 367
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_2
+Parameter Name    = Mixer2x1NoSlewS300Alg14vol_00_01
+Parameter Address = 368
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_3
+Parameter Name    = Mixer2x1NoSlewS300Alg15vol_00_00
+Parameter Address = 369
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_3
+Parameter Name    = Mixer2x1NoSlewS300Alg15vol_00_01
+Parameter Address = 370
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_4
+Parameter Name    = Mixer2x1NoSlewS300Alg16vol_00_00
+Parameter Address = 371
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = mix_in_out_rec_4
+Parameter Name    = Mixer2x1NoSlewS300Alg16vol_00_01
+Parameter Address = 372
+Parameter Value   = 1
+Parameter Data :
+0x01 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = spilter_rec_4
+Parameter Name    = MultiCtrlSplitterS3004gain0
+Parameter Address = 652
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = spilter_rec_4
+Parameter Name    = MultiCtrlSplitterS3004gain1
+Parameter Address = 653
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_1
+Parameter Name    = MultiCtrlSplitterS3005gain0
+Parameter Address = 660
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_1
+Parameter Name    = MultiCtrlSplitterS3005gain1
+Parameter Address = 661
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_2
+Parameter Name    = MultiCtrlSplitterS3006gain0
+Parameter Address = 662
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_2
+Parameter Name    = MultiCtrlSplitterS3006gain1
+Parameter Address = 663
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_3
+Parameter Name    = MultiCtrlSplitterS3007gain0
+Parameter Address = 664
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_3
+Parameter Name    = MultiCtrlSplitterS3007gain1
+Parameter Address = 665
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_4
+Parameter Name    = MultiCtrlSplitterS3008gain0
+Parameter Address = 666
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = roipout_spilter_rec_4
+Parameter Name    = MultiCtrlSplitterS3008gain1
+Parameter Address = 667
+Parameter Value   = 1
+Parameter Data :
+0x01, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009TCONST
+Parameter Address = 376
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009hold
+Parameter Address = 377
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009decay
+Parameter Address = 378
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009X
+Parameter Address = 386
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009X_lo
+Parameter Address = 387
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009LinX
+Parameter Address = 388
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009LinX_lo
+Parameter Address = 389
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_1
+Parameter Name    = SingleBandLevelDetS3009
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010TCONST
+Parameter Address = 390
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010hold
+Parameter Address = 391
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010decay
+Parameter Address = 392
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010X
+Parameter Address = 400
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010X_lo
+Parameter Address = 401
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010LinX
+Parameter Address = 402
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010LinX_lo
+Parameter Address = 403
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_2
+Parameter Name    = SingleBandLevelDetS30010
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011TCONST
+Parameter Address = 404
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011hold
+Parameter Address = 405
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011decay
+Parameter Address = 406
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011X
+Parameter Address = 414
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011X_lo
+Parameter Address = 415
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011LinX
+Parameter Address = 416
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011LinX_lo
+Parameter Address = 417
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_3
+Parameter Name    = SingleBandLevelDetS30011
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012TCONST
+Parameter Address = 418
+Parameter Value   = 0.0144951939582825
+Parameter Data :
+0x00 ,	0x03 ,	0xB5 ,	0xF5 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012hold
+Parameter Address = 419
+Parameter Value   = 80
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x50 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012decay
+Parameter Address = 420
+Parameter Value   = 0.00130206346511841
+Parameter Data :
+0x00 ,	0x00 ,	0x55 ,	0x55 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012X
+Parameter Address = 428
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012X_lo
+Parameter Address = 429
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012LinX
+Parameter Address = 430
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012LinX_lo
+Parameter Address = 431
+Parameter Value   = 0
+Parameter Data :
+0x00 ,	0x00 ,	0x00 ,	0x00 ,	
+
+
+
+Cell Name         = RECCH_4
+Parameter Name    = SingleBandLevelDetS30012
+Parameter Address = 0
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = None - Framework
+Parameter Name    = __SafeLoad_Module__data_SafeLoad
+Parameter Address = 24576
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = None - Framework
+Parameter Name    = __SafeLoad_Module__address_SafeLoad
+Parameter Address = 24581
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = None - Framework
+Parameter Name    = __SafeLoad_Module__num_SafeLoad_lower
+Parameter Address = 24582
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+
+Cell Name         = None - Framework
+Parameter Name    = __SafeLoad_Module__num_SafeLoad_upper
+Parameter Address = 24583
+Parameter Value   = 0
+Parameter Data :
+0x00, 0x00, 0x00, 0x00, 
+
+
+

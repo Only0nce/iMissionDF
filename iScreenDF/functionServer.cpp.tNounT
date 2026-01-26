@@ -1,0 +1,47 @@
+#include "Mainwindows.h"
+
+void Mainwindows::newCommandProcess(QJsonObject command, QWebSocket *pSender, QString message)
+{
+    QByteArray br = message.toUtf8();
+    QJsonDocument doc = QJsonDocument::fromJson(br);
+    QJsonObject obj = doc.object();
+    QString menuID = obj["menuID"].toString();
+    QString objectName = QJsonValue(obj["objectName"]).toString();
+    if(menuID == "getNetworkPage"){
+
+    }
+    else if(menuID == "getSystem"){
+
+    }
+    else if(menuID == "updateLocalNetwork"){
+        networks->phyName = obj["phyNetworkName"].toString();
+        networks->dhcpmethod = obj["dhcpmethod"].toString();
+        networks->ip_address = obj["ipaddress"].toString();
+        networks->subnet = obj["subnet"].toString();
+        networks->ip_gateway = obj["gateway"].toString();
+        networks->pridns = obj["pridns"].toString();
+        networks->secdns = obj["secdns"].toString();
+        qDebug() << "updateLocalNetwork:" << message;
+        networking->setDHCPIpAddr3(networks->phyName);
+        networking->setStaticIpAddr3(networks->ip_address,networks->subnet,networks->ip_gateway,networks->pridns,networks->secdns,networks->phyName);
+        emit setNetwork(networks->dhcpmethod,networks->ip_address,networks->subnet,networks->ip_gateway,networks->pridns,networks->secdns);
+    }
+    else {
+         qDebug() << "else:" << message;
+    }
+}
+
+void Mainwindows::updateNetworkSlot(QString dhcp,QString ip,QString subnet,QString gateway,QString primaryDns,QString secondaryDns){
+    networks->dhcpmethod = dhcp;
+    networks->ip_address = ip;
+    networks->subnet = subnet;
+    networks->ip_gateway = gateway;
+    networks->pridns = primaryDns;
+    networks->secdns = secondaryDns;
+    networks->printinfo();
+}
+void Mainwindows::updateNTPServerSlot(QString ip,QString location,int method){
+    networks->location = location;
+    networks->ip_timeserver = ip;
+    networks->method_timeserver = method;
+}

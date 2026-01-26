@@ -1,0 +1,41 @@
+# ==============================
+# Qt / C++ (recommended)
+# ==============================
+
+# Build directories
+build*/
+Build*/
+cmake-build*/
+out/
+bin/
+obj/
+
+# Object / libs / temp
+*.o
+*.obj
+*.a
+*.so
+*.dll
+*.dylib
+*.exe
+*.pdb
+*.log
+*.tmp
+*.swp
+.DS_Store
+
+# Qt generated (do NOT commit)
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+qrc_*.h
+ui_*.h
+*.qmlc
+*.jsc
+
+# ==============================
+# Your known large outputs
+# ==============================
+iScanMR10
+iRecordManage/qrc_qml.cpp
+

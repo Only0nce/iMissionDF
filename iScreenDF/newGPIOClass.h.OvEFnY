@@ -1,0 +1,11 @@
+#ifndef NEWGPIOCLASS_H
+#define NEWGPIOCLASS_H
+
+
+class newGPIOClass
+{
+public:
+    newGPIOClass();
+};
+
+#endif // NEWGPIOCLASS_H
