@@ -232,8 +232,8 @@ public:
     QVector<ScanCard> cards;
     ScanRF *scanrf;
     QJsonArray removeCardById(const QJsonArray &array, int targetId);
-    QString toThaiTimeString(const QString &isoUtc);
     QString toThaiTimeStringWithoutT(const QString &isoUtc);
+    QString toThaiTimeString(const QString &isoUtc);
     Q_INVOKABLE void deleteScanGroupByKey(const QString &groupKeyThai);
     QString timeLocation = "";
     void setLocation(QString location);

@@ -313,7 +313,7 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
     // updatePpsCtl();
     double adjLon = info.lon + 0.05;
     QString latStr = QString::number(info.lat, 'f', 6);
-    QString lonStr = QString::number(adjLon, 'f', 6);
+    QString lonStr = QString::number(info.lon, 'f', 6);
     QString altStr = QString::number(info.alt, 'f', 4);
 
     QDateTime t = QDateTime::fromString(info.date + " " + info.time, "yyyy-MM-dd HH:mm:ss.zzz");
@@ -323,7 +323,7 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
 
     // ✅ UTM
     QString utmStr, mgrsStr;
-    latLonToUTMAndMGRS(info.lat, adjLon, utmStr, mgrsStr, 5);
+    latLonToUTMAndMGRS(info.lat, info.lon, utmStr, mgrsStr, 5);
 
     emit updateLocationLatLongFromGPS(
         latStr,
@@ -335,7 +335,7 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
 
     emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
 
-    emit updateGpsMarker(Serialnumber ,controllerName,info.lat,adjLon,info.alt,GPS_DateStr,GPS_TimeStr);
+    emit updateGpsMarker(Serialnumber ,controllerName,info.lat,info.lon,info.alt,GPS_DateStr,GPS_TimeStr);
 
     state1_ = info;
 
@@ -344,7 +344,7 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
         obj["menuID"]   = "UpdateGPSMarker";  // ฝั่ง JS เช็คจาก menuID นี้
         obj["source"]   = "GPS1";             // แยกหมุด GPS1 / GPS2
         obj["lat"]      = info.lat;          // ใช้ double ตรง ๆ
-        obj["lon"]      = adjLon;
+        obj["lon"]      = info.lon;
         obj["alt"]      = info.alt;
         obj["date"]     = GPS_DateStr;
         obj["time"]     = GPS_TimeStr;

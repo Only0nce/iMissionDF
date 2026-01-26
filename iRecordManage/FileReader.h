@@ -144,14 +144,14 @@ public:
 
     // ===================== SAVE SELECTED WAV FILES =====================
     Q_INVOKABLE bool saveWaveSelectionState(
-            const QVariantList &files,
-            int totalFiles,
-            int sampleCount,
-            int totalMs,
-            double totalDurationSec,
-            int samplesLength,
-            double totalSizeKB,
-            const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
+        const QVariantList &files,
+        int totalFiles,
+        int sampleCount,
+        int totalMs,
+        double totalDurationSec,
+        int samplesLength,
+        double totalSizeKB,
+        const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
     {
         const QString p = normalizePath(txtPath);
 
@@ -209,14 +209,14 @@ public:
 
         // 3) write summary section
         // ---- section: summary ----
-           ts << "#SUMMARY "
-              << "totalFiles=" << totalFiles
-              << " sampleCount=" << sampleCount
-              << " totalMs=" << totalMs
-              << " totalDurationSec=" << QString::number(totalDurationSec, 'f', 3)
-              << " samplesLength=" << samplesLength
-              << " totalSizeKB=" << QString::number(totalSizeKB, 'f', 3)   // ✅ เพิ่ม
-              << "\n";
+        ts << "#SUMMARY "
+           << "totalFiles=" << totalFiles
+           << " sampleCount=" << sampleCount
+           << " totalMs=" << totalMs
+           << " totalDurationSec=" << QString::number(totalDurationSec, 'f', 3)
+           << " samplesLength=" << samplesLength
+           << " totalSizeKB=" << QString::number(totalSizeKB, 'f', 3)   // ✅ เพิ่ม
+           << "\n";
 
         // 4) flush + close
         ts.flush();
@@ -229,70 +229,70 @@ public:
         return true;
     }
 
-//    Q_INVOKABLE bool saveWaveSelectionState(
-//            const QVariantList &files,
-//            int totalFiles,
-//            int sampleCount,
-//            int totalMs,
-//            double totalDurationSec,
-//            int samplesLength,
-//            const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
-//    {
-//        const QString p = normalizePath(txtPath);
+    //    Q_INVOKABLE bool saveWaveSelectionState(
+    //            const QVariantList &files,
+    //            int totalFiles,
+    //            int sampleCount,
+    //            int totalMs,
+    //            double totalDurationSec,
+    //            int samplesLength,
+    //            const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
+    //    {
+    //        const QString p = normalizePath(txtPath);
 
-//        qDebug() << "================ saveWaveSelectionState ================";
-//        qDebug() << "[PATH]" << p;
-//        qDebug() << "[INPUT] files.size=" << files.size()
-//                 << "totalFiles=" << totalFiles
-//                 << "sampleCount=" << sampleCount
-//                 << "totalMs=" << totalMs
-//                 << "totalDurationSec=" << totalDurationSec
-//                 << "samplesLength=" << samplesLength;
+    //        qDebug() << "================ saveWaveSelectionState ================";
+    //        qDebug() << "[PATH]" << p;
+    //        qDebug() << "[INPUT] files.size=" << files.size()
+    //                 << "totalFiles=" << totalFiles
+    //                 << "sampleCount=" << sampleCount
+    //                 << "totalMs=" << totalMs
+    //                 << "totalDurationSec=" << totalDurationSec
+    //                 << "samplesLength=" << samplesLength;
 
-//        QFile f(p);
-//        if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
-//            qCritical() << "[ERROR] open failed:" << p << f.errorString();
-//            qDebug() << "========================================================";
-//            return false;
-//        }
+    //        QFile f(p);
+    //        if (!f.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate)) {
+    //            qCritical() << "[ERROR] open failed:" << p << f.errorString();
+    //            qDebug() << "========================================================";
+    //            return false;
+    //        }
 
-//        QTextStream ts(&f);
-//        ts.setCodec("UTF-8");
+    //        QTextStream ts(&f);
+    //        ts.setCodec("UTF-8");
 
-//        // ---- section: files ----
-//        ts << "#FILES\n";
+    //        // ---- section: files ----
+    //        ts << "#FILES\n";
 
-//        int countWrite = 0;
-//        for (const QVariant &v : files) {
-//            QString s = v.toString().trimmed();   // ✅ QML ส่งเป็น string list มาเลยดีที่สุด
-//            if (s.isEmpty())
-//                continue;
-//            ts << s << "\n";
-//            qDebug() << "[WRITE FILE]" << s;
-//            countWrite++;
-//        }
+    //        int countWrite = 0;
+    //        for (const QVariant &v : files) {
+    //            QString s = v.toString().trimmed();   // ✅ QML ส่งเป็น string list มาเลยดีที่สุด
+    //            if (s.isEmpty())
+    //                continue;
+    //            ts << s << "\n";
+    //            qDebug() << "[WRITE FILE]" << s;
+    //            countWrite++;
+    //        }
 
-//        // ---- section: summary ----
-//        ts << "#SUMMARY "
-//           << "totalFiles=" << totalFiles
-//           << " sampleCount=" << sampleCount
-//           << " totalMs=" << totalMs
-//           << " totalDurationSec=" << QString::number(totalDurationSec, 'f', 3)
-//           << " samplesLength=" << samplesLength
-//           << "\n";
+    //        // ---- section: summary ----
+    //        ts << "#SUMMARY "
+    //           << "totalFiles=" << totalFiles
+    //           << " sampleCount=" << sampleCount
+    //           << " totalMs=" << totalMs
+    //           << " totalDurationSec=" << QString::number(totalDurationSec, 'f', 3)
+    //           << " samplesLength=" << samplesLength
+    //           << "\n";
 
-//        ts.flush();
-//        f.close();
+    //        ts.flush();
+    //        f.close();
 
-//        qDebug() << "[DONE] wroteFiles=" << countWrite << "closeOK";
-//        qDebug() << "========================================================";
-//        return true;
-//    }
+    //        qDebug() << "[DONE] wroteFiles=" << countWrite << "closeOK";
+    //        qDebug() << "========================================================";
+    //        return true;
+    //    }
 
     // ===================== LOAD SELECTED WAV FILES + SUMMARY =====================
     // return: { ok:bool, files:[string...], summary:{totalFiles, sampleCount, totalMs, totalDurationSec, samplesLength} }
     Q_INVOKABLE QVariantMap loadWaveSelectionState(
-            const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
+        const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
     {
         QVariantMap ret;
         QVariantList outFiles;
@@ -367,9 +367,9 @@ public:
         qDebug() << "========================================================";
         return ret;
     }
-//================================ClearWaveSelectionState===================================
+    //================================ClearWaveSelectionState===================================
     Q_INVOKABLE bool clearWaveSelectionState(
-            const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
+        const QString &txtPath = "/home/orinnx/saveFileName/filesNameWave.txt")
     {
         const QString p = normalizePath(txtPath);
         QFile f(p);
@@ -387,7 +387,7 @@ public:
         return true;
     }
 
-//===========================================================================================
+    //===========================================================================================
 
 private:
     static QString normalizePath(QString p) {

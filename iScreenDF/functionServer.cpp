@@ -9,12 +9,12 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
     QString broadcastID =  QJsonValue(obj["broadcastID"]).toString();
     QString objectName = QJsonValue(obj["objectName"]).toString();
 
-    if (!broadcastID.isEmpty()) {
+    if (!broadcastID.isEmpty())
+    {
         handleBroadcastMessage(obj);
     }
-
-
-    if (objectName == "AddDevice") {
+    if (objectName == "AddDevice")
+    {
         QString name      = obj["Name"].toString();
         QString ip        = obj["ip"].toString();
         QString deviceUid = obj["deviceUniqueId"].toString();
@@ -33,7 +33,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             db->addNewDevice(name, ip, deviceUid);
         });
     }
-    else if (objectName == "UpdateDevice") {
+    else if (objectName == "UpdateDevice")
+    {
         QString name  = obj["Name"].toString();
         QString ip    = obj["ip"].toString();
 
@@ -53,7 +54,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             db->updateDeviceByUniqueId(oldUid, newUid, name, ip);
         });
     }
-    else if (objectName == "DeleteDevice") {
+    else if (objectName == "DeleteDevice")
+    {
         int id        = obj["id"].toInt();
         QString name  = obj["Name"].toString();
         QString ip    = obj["ip"].toString();
@@ -62,7 +64,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             db->deleteDeviceByUniqueId(deviceUniqueId);
         });
     }
-    else if (objectName == "EditGroup") {
+    else if (objectName == "EditGroup")
+    {
         QString action          = obj["action"].toString();
         int     groupID         = obj["groupID"].toInt(-1);
         QString groupName       = obj["groupName"].toString();
@@ -97,7 +100,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             db->deleteGroupByUID(uniqueIdInGroup);
         }
     }
-    else if (objectName == "EditGroupDevices"){
+    else if (objectName == "EditGroupDevices")
+    {
         QString action          = obj["action"].toString();
         int     groupID         = obj["groupID"].toInt(-1);
         QString groupName       = obj["groupName"].toString();
@@ -146,7 +150,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             }
         }
     }
-    else if (objectName == "editName") {
+    else if (objectName == "editName")
+    {
         int id = obj["id"].toInt();
         QString GroupsName = obj["GroupsName"].toString();
         QString uniqueIdInGroup = obj["uniqueIdInGroup"].toString();
@@ -155,10 +160,12 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         });
         // db->editGroupName(id, GroupsName);
     }
-    else if (objectName == "scanDevices") {
+    else if (objectName == "scanDevices")
+    {
         scanDevices();
     }
-    if(menuID == "getSystem"){
+    if(menuID == "getSystem")
+    {
         hardwareInfo();
         QJsonDocument jsonDoc;
         QJsonObject Param;
@@ -178,23 +185,27 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
         chatServerDF->broadcastMessage(raw_data);
     }
-    else if(menuID == "updateNTPServer"){
+    else if(menuID == "updateNTPServer")
+    {
         //        qDebug() << "updateNTPServer";
         networks->ip_timeserver = obj["ntpServer"].toString();
         //        qDebug() << "updateNTPServer:" << networks->ip_timeserver;
         networking->setNTPServer(networks->ip_timeserver);
         db->setNTPServer(networks->ip_timeserver);
     }
-    else if(menuID == "rebootSystem"){
+    else if(menuID == "rebootSystem")
+    {
         QString reboot = QString("reboot");
         system(reboot.toStdString().c_str());
     }
-    else if(menuID == "updateFirmware"){
+    else if(menuID == "updateFirmware")
+    {
         //        qDebug() << "updateFirmware";
         QThread::msleep(100);
         updateFirmware();
     }
-    else if(menuID == "setLocation"){
+    else if(menuID == "setLocation")
+    {
         //        qDebug() << "setLocation";
         networks->location = obj["location"].toString();
         //        qDebug() << "updateNTPServer:" << networks->location;
@@ -205,7 +216,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         });
         // db->setNTPServerLocation(networks->location);
     }
-    else if(menuID == "updateLocalNetwork"){
+    else if(menuID == "updateLocalNetwork")
+    {
         networks->phyName = obj["phyNetworkName"].toString();
         networks->dhcpmethod = obj["dhcpmethod"].toString();
         networks->ip_address = obj["ipaddress"].toString();
@@ -252,22 +264,23 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         // QString sendJson = QString::fromUtf8(QJsonDocument(single).toJson(QJsonDocument::Compact));
         // chatServer->broadcastMessage(sendJson);
     // }
-    else if (menuID == "connectGroupSingle") {
-
+    else if (menuID == "connectGroupSingle")
+    {
         handleConnectGroupSingle(obj);
     }
-    else if (menuID == "SetConnectionMode") {
+    else if (menuID == "SetConnectionMode")
+    {
         QString mode = obj["mode"].toString();
         setMode(mode);
     }
-    else if (menuID == "getRolesPage") {
+    else if (menuID == "getRolesPage")
+    {
         QJsonObject obj;
         obj["menuID"]   = "updateParameterMode";
         obj["mode"]   = RemoteStatus;
         QJsonDocument doc(obj);
         const QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
         chatServerDF->broadcastMessage(jsonStr);
-
         // QJsonDocument jsonDoc2;
         // QJsonObject Param2;
         // QString raw_data2;
@@ -285,6 +298,76 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         QTimer::singleShot(0, db, [db = db, roleID]() {
             db->getDevicesInGroupJson(roleID);
         });
+    }
+    else if (menuID == "DFLOG_delete_selected") {
+        QJsonArray files = obj.value("files").toArray();
+
+        QJsonArray results;
+        int deleted = 0;
+
+        for (const QJsonValue &v : files) {
+            const QString rel = v.toString();
+            QString reason;
+            const bool ok = deleteRel(rel, &reason);
+            if (ok) deleted++;
+
+            // results.append(QJsonObject{
+            //     {"rel", rel},
+            //     {"ok", ok},
+            //     {"reason", reason}
+            // });
+        }
+
+        qDebug() << "[DFLOG selected]" << files.size() << "deleted=" << deleted;
+
+        QJsonObject resp{
+            {"menuID","reloadweb"},
+        };
+        sendResult(resp);
+        return;
+    }
+    else if (menuID == "DFLOG_delete_one") {
+        const QString rel = obj.value("rel").toString();
+
+        QString reason;
+        const bool ok = deleteRel(rel, &reason);
+
+        qDebug() << "[DFLOG one]" << rel << ok << reason;
+        QJsonObject resp{
+         {"menuID","reloadweb"},
+         };
+        sendResult(resp);
+        return;
+    }
+    else if (menuID == "SHOWIMG_delete_one") {
+        const QString rel = obj.value("rel").toString();
+        QString reason;
+        const bool ok = deleteImageRel(rel, &reason);
+
+        qDebug().noquote() << "[SHOWIMG_delete_one]" << rel << "ok=" << ok << "reason=" << reason;
+
+        // ✅ หน้าเว็บต้องการ reload
+        sendReloadWeb();
+        return;
+    }
+    else if (menuID == "SHOWIMG_delete_selected") {
+        const QJsonArray files = obj.value("files").toArray();
+
+        int okCount = 0;
+        for (const QJsonValue &v : files) {
+            const QString rel = v.toString();
+            QString reason;
+            const bool ok = deleteImageRel(rel, &reason);
+            if (ok) okCount++;
+
+            qDebug().noquote() << "  - del" << rel << "ok=" << ok << "reason=" << reason;
+        }
+
+        qDebug().noquote() << "[SHOWIMG_delete_selected] total=" << files.size() << "deleted=" << okCount;
+
+        // ✅ หน้าเว็บต้องการ reload
+        sendReloadWeb();
+        return;
     }
     // else {
     //      qDebug() << "[functionServer] else:" << message;
@@ -375,6 +458,118 @@ void iScreenDF::updateNTPServerSlot(const QString &ip,const QString &location,co
     networks->location = location;
     networks->ip_timeserver = ip;
     networks->method_timeserver = method;
+}
+
+void iScreenDF::sendResult(const QJsonObject &o)
+{
+    if (!chatServerDF) return;
+    chatServerDF->broadcastMessage(QString::fromUtf8(
+        QJsonDocument(o).toJson(QJsonDocument::Compact)
+        ));
+}
+
+void iScreenDF::cleanupEmptyDirs(const QString &absFilePath)
+{
+    QDir base(m_txBaseDir);
+    const QString baseAbs = QDir(base.absolutePath()).absolutePath();
+
+    QDir d(QFileInfo(absFilePath).absolutePath());
+    while (true) {
+        const QString dirAbs = QDir(d.absolutePath()).absolutePath();
+        if (dirAbs == baseAbs) break;              // หยุดที่ baseDir
+        if (!d.exists()) break;
+
+        // มีรายการอื่นอยู่ -> หยุด
+        if (!d.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+            break;
+
+        // ลบโฟลเดอร์ว่าง
+        const QString name = d.dirName();
+        d.cdUp();
+        d.rmdir(name);
+    }
+}
+
+bool iScreenDF::deleteRel(const QString &relIn, QString *reasonOut)
+{
+    QString rel = relIn.trimmed();
+    if (rel.isEmpty() || rel.contains("..")) { if(reasonOut) *reasonOut="invalid_rel"; return false; }
+
+    QDir base(m_txBaseDir);
+    const QString abs = base.absoluteFilePath(rel);
+
+    QFileInfo fi(abs);
+    if (fi.suffix().toLower() != "csv") { if(reasonOut) *reasonOut="not_allowed"; return false; }
+    if (!fi.exists()) { if(reasonOut) *reasonOut="not_found"; return false; }
+    if (!fi.isFile()) { if(reasonOut) *reasonOut="not_a_file"; return false; }
+
+    QFile f(abs);
+    if (!f.remove()) { if(reasonOut) *reasonOut="remove_failed:"+f.errorString(); return false; }
+
+    cleanupEmptyDirs(abs);
+    if (reasonOut) *reasonOut="deleted";
+    return true;
+}
+
+static inline bool isAllowedImgExt(const QString &absPath)
+{
+    const QString ext = QFileInfo(absPath).suffix().toLower();
+    return (ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif" || ext == "webp");
+}
+
+bool iScreenDF::deleteImageRel(const QString &relIn, QString *reasonOut)
+{
+    QString rel = relIn.trimmed();
+    rel.replace('\\', '/');
+    while (rel.startsWith('/')) rel.remove(0, 1);
+
+    if (rel.isEmpty() || rel.contains("..")) { if(reasonOut) *reasonOut="invalid_rel"; return false; }
+
+    QDir base(m_imgBaseDir);
+    const QString abs = base.absoluteFilePath(rel);
+
+    if (!isAllowedImgExt(abs)) { if(reasonOut) *reasonOut="not_allowed"; return false; }
+
+    QFileInfo fi(abs);
+    if (!fi.exists()) { if(reasonOut) *reasonOut="not_found"; return false; }
+    if (!fi.isFile()) { if(reasonOut) *reasonOut="not_a_file"; return false; }
+
+    QFile f(abs);
+    if (!f.remove()) { if(reasonOut) *reasonOut="remove_failed:" + f.errorString(); return false; }
+
+    pruneEmptyDirs(abs);
+
+    if (reasonOut) *reasonOut="deleted";
+    return true;
+}
+
+void iScreenDF::pruneEmptyDirs(const QString &absFilePath)
+{
+    QDir base(m_imgBaseDir);
+    const QString baseAbs = QDir(base.absolutePath()).absolutePath();
+
+    QDir d(QFileInfo(absFilePath).absolutePath());
+    while (true) {
+        const QString dirAbs = QDir(d.absolutePath()).absolutePath();
+        if (dirAbs == baseAbs) break; // ไม่ลบ baseDir
+
+        // ถ้ามีอะไรอยู่ในโฟลเดอร์ -> หยุด
+        if (!d.entryList(QDir::NoDotAndDotDot | QDir::AllEntries).isEmpty())
+            break;
+
+        const QString name = d.dirName();
+        d.cdUp();
+        d.rmdir(name);
+    }
+}
+
+void iScreenDF::sendReloadWeb()
+{
+    if (!chatServerDF) return;
+    QJsonObject resp{{"menuID","reloadweb"}};
+    chatServerDF->broadcastMessage(QString::fromUtf8(
+        QJsonDocument(resp).toJson(QJsonDocument::Compact)
+        ));
 }
 
 // void iScreenDF::reConnectSlot(){

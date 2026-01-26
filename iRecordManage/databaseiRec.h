@@ -107,7 +107,7 @@ public slots:
     void checkFlieAndRemoveDB();
     void getCurrentPath();
     void upDateTableFileRecord();
-
+    void deletedFileWave(const QString &jsonString, QWebSocket *wClient);
 private:
     void addMissingColumn(const QString &tableName, const QString &columnName, const QString &columnType);  // ✅ เพิ่มบรรทัดนี้
     QSqlDatabase db;

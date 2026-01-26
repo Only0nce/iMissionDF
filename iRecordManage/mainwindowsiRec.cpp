@@ -82,7 +82,7 @@ void mainwindowsiRec::VerifyFolderAndText()
     // ===== สร้างไฟล์ + เนื้อหาเริ่มต้น =====
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        return;   // เปิดไม่ได้ก็เงียบ ๆ ตามที่ขอ
+        return;
     }
 
     QTextStream out(&file);
@@ -100,19 +100,23 @@ void mainwindowsiRec::onVerifyUserDatabaseDone(bool ok, const QString& message)
     RestartSystemServicesAfter30s();
 }
 void mainwindowsiRec::RestartSystemServicesAfter30s(){
+    qDebug() << "<<<<<<<---Restart service system--->>>>>>>";
     system("systemctl reset-failed alsarecd.service");
+    system("systemctl stop alsarecd.service");
     QTimer::singleShot(30000, this, [this]() {
         system("systemctl restart irecd.service");
         system("systemctl restart iplayd.service");
-        QTimer::singleShot(45000, this, [this]() {
-            system("systemctl restart alsarecd.service");
+        QTimer::singleShot(15000, this, [this]() {
             system("systemctl restart iGateRec@1.service");
+            QTimer::singleShot(30000, this, [this]() {
+                qDebug() << "<<<<<<<---Restart service system alsarecd.service--->>>>>>>";
+                system("systemctl restart alsarecd.service");
+            });
         });
     });
 }
 void mainwindowsiRec::enableI2SLoopback()
 {
-    // ใช้ I2S1 เป็นตัวตัดสินหลัก
     const QString checkCmd =
         "amixer -c APE sget 'I2S1 Loopback' | grep -qi '\\bon\\b'";
 
@@ -121,7 +125,6 @@ void mainwindowsiRec::enableI2SLoopback()
         check.start("/bin/bash", QStringList() << "-lc" << checkCmd);
         check.waitForFinished(2000);
 
-        // grep เจอคำว่า on → exit code = 0
         if (check.exitCode() == 0) {
             qDebug() << "[I2S Loopback] already ON → skip enable";
             return;
@@ -188,7 +191,6 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
 
     auto ensureRealDir = [&]() -> bool {
         if (QFileInfo::exists(realDir)) {
-            // ต้องเป็น directory เท่านั้น
             if (!QFileInfo(realDir).isDir()) {
                 qWarning() << "[voicex] /var/ivoicex exists but not a directory -> remove";
                 return false;
@@ -196,7 +198,6 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
             return true;
         }
 
-        // ไม่เจอ folder -> สร้าง
         if (!QDir().mkpath(realDir)) {
             qCritical() << "[voicex] failed to create directory:" << realDir;
             return false;
@@ -208,11 +209,9 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     auto ensureSymlink = [&]() -> bool {
         QFileInfo linkInfo(linkDir);
 
-        // ถ้ามีอยู่แล้ว ตรวจว่ามันคือ symlink ที่ชี้ถูกไหม
         if (linkInfo.exists() || linkInfo.isSymLink()) {
             if (linkInfo.isSymLink()) {
                 const QString target = linkInfo.symLinkTarget();
-                // symLinkTarget() อาจเป็น relative → เทียบแบบ canonical
                 const QString targetCanon = canonicalOrAbs(target);
                 const QString realCanon   = canonicalOrAbs(realDir);
 
@@ -226,13 +225,11 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
                 qWarning() << "[voicex] /var/voicex exists but not a symlink -> remove";
             }
 
-            // มีแต่ไม่ถูก ต้องลบทิ้งก่อน
             QProcess p;
             p.start("/bin/bash", QStringList() << "-lc" << "rm -rf /var/voicex");
             p.waitForFinished(30000);
         }
 
-        // สร้าง symlink
         if (!QFile::link(realDir, linkDir)) {
             qCritical() << "[voicex] failed to create symlink:" << linkDir << "->" << realDir;
             return false;
@@ -281,7 +278,6 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     if (!ensureSymlink())
         return;
 
-    // ถ้าคุณต้องการให้ restart เฉพาะตอน “แก้/สร้างจริง ๆ” บอกได้
     RestartSystemServicesAfter30s();
 }
 
@@ -308,15 +304,15 @@ void mainwindowsiRec::getDateTime()
     int targetMinute = 0;
     int targetSecond = 0;
 
-    //        if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
-    //            int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
-    //            if (ret == 0) {
-    //                qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
-    //                lastRunHour = nowTime.hour();
-    //            } else {
-    //                qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
-    //            }
-    //        }
+    if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
+        int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
+        if (ret == 0) {
+            qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
+            lastRunHour = nowTime.hour();
+        } else {
+            qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
+        }
+    }
 
 }
 
@@ -363,12 +359,6 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
 
             InitializingRTCtoSystem();
             mysql->updateRecordVolume();
-
-            //            if (max9850->initialize(sampleRate)) {
-            //                qDebug() << "MAX9850 initialized successfully";
-            //            } else {
-            //                qWarning() << "Failed to initialize MAX9850";
-            //            }
         }
     }else if(menuID ==  "getRecordFiles"){
         qDebug() << "getRecordFiles:" << qmlJson;
@@ -681,6 +671,9 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
         mysql->fetchAllRecordFiles(qmlJson,clientSocket);
     }else if (menuID == "getSystemPageWeb") {
         qDebug() << "getSystemPageWeb:";
+    }else if (obj["menuID"].toString() == "deletedFileWave") {
+        qDebug() << "deletedFileWave:";
+        mysql->deletedFileWave(qmlJson, wClient);
     }else {
         qWarning() << "[cppSubmitTextFiledMySQL] unknown menuID:" << menuID << qmlJson;
     }
@@ -754,12 +747,13 @@ void mainwindowsiRec::InitializingRTCtoSystem()
         checkAndUpdateRTC();  // เรียกทันทีตอนเริ่มแรก
         initialized = true;
     }
-//    QTimer::singleShot(15000, this, [=]() {
-//        qDebug() << "Restarting irecd.service after 20s delay...";
-//        system("systemctl restart irecd.service");
-//        system("systemctl restart iplayd.service");
-//    });
+    //    QTimer::singleShot(15000, this, [=]() {
+    //        qDebug() << "Restarting irecd.service after 20s delay...";
+    //        system("systemctl restart irecd.service");
+    //        system("systemctl restart iplayd.service");
+    //    });
 }
+
 
 // ===== helper แปลง size จาก lsblk =====
 static qulonglong parseLsblkSize(const QJsonValue &val)
@@ -1473,8 +1467,8 @@ void mainwindowsiRec::onUnixSocketMessage(const QString &msg)
     QJsonParseError err;
     QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8(), &err);
     if (err.error != QJsonParseError::NoError) {
-        // qWarning() << "[UnixSocket] JSON parse error:" << err.errorString()
-        // << "msg =" << msg;
+        qWarning() << "[UnixSocket] JSON parse error:" << err.errorString()
+        << "msg =" << msg;
     }
 
     //    recordDeviceLiveStream(msg, wClient);
@@ -1552,7 +1546,7 @@ void* mainwindowsiRec::ThreadFuncDateTime(void* pTr)
     qDebug() << "ThreadFuncDateTime start";
     while (pThis->m_threadRunning) {
         if (pThis->m_qmlConnected.load(std::memory_order_relaxed)) {
-            // pThis->calendar();
+            //            pThis->calendar();
         }
         QThread::msleep(1000);
     }

@@ -161,6 +161,7 @@ private Q_SLOTS:
     void commandProcess(QString message, QWebSocket *pSender);
     void processMessage(QString message);
     void socketDisconnected();
+
 private:
     QWebSocketServer *m_pWebSocketServer;
     QList<QWebSocket *> m_clients;
