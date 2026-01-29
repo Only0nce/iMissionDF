@@ -573,6 +573,8 @@ void Mainwindows::sendSquelchStatus(bool sqlVal)
     qDebug() << "onSendSquelchStatus_to_Alsarecd:" << softPhoneID
              << pttOn << sqlOn << callState << freqHz << sqlOn << freqMHz;
     emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, freqMHz);
+    emit frequencyChangedToQml(freqHz, freqMHz);
+
 //    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, (double)freqHz);
 }
 

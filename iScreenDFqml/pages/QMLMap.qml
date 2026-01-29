@@ -684,31 +684,32 @@ Item {
                 rms: txEstimate.rms,
                 updatedMs: txEstimate.updatedMs
             })
-            return
-        }
-
-        const h = txHistoryModel.get(0)
-        const d = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
-
-        if (d <= txSnapDistanceM) {
-            // อยู่จุดเดิม -> update จุดเดิม
-            txHistoryModel.set(0, {
-                lat: h.lat,
-                lon: h.lon,
-                rms: txEstimate.rms,
-                updatedMs: txEstimate.updatedMs
-            })
         } else {
-            // จุดใหม่ -> insert ใหม่
-            txHistoryModel.insert(0, {
-                lat: txEstimate.lat,
-                lon: txEstimate.lon,
-                rms: txEstimate.rms,
-                updatedMs: txEstimate.updatedMs
-            })
-            while (txHistoryModel.count > txHistoryMax)
-                txHistoryModel.remove(txHistoryModel.count - 1)
+            const h = txHistoryModel.get(0)
+            const d = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
+
+            if (d <= txSnapDistanceM) {
+                // อยู่จุดเดิม -> update จุดเดิม
+                txHistoryModel.set(0, {
+                    lat: h.lat,
+                    lon: h.lon,
+                    rms: txEstimate.rms,
+                    updatedMs: txEstimate.updatedMs
+                })
+            } else {
+                // จุดใหม่ -> insert ใหม่
+                txHistoryModel.insert(0, {
+                    lat: txEstimate.lat,
+                    lon: txEstimate.lon,
+                    rms: txEstimate.rms,
+                    updatedMs: txEstimate.updatedMs
+                })
+            }
         }
+
+        // ✅ trim ให้เหลือ 100 เสมอ (กันกรณี insert รัว)
+        while (txHistoryModel.count > txHistoryMax)
+            txHistoryModel.remove(txHistoryModel.count - 1)
     }
     // =====================================================================
     // TX ESTIMATE (same as before)
@@ -717,13 +718,13 @@ Item {
     property var  txEstimate: ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
     property var  txCandidate: ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
 
-    property int  txStableHoldMs: 3000
+    property int  txStableHoldMs: 2000
 
     property int  txHistoryMax: 100
     ListModel { id: txHistoryModel }
 
     property real intersectionMaxResidualM: 250
-    property real txSnapDistanceM: 1000
+    property real txSnapDistanceM: 250
 
     function _deg2rad(d){ return Number(d) * Math.PI / 180.0 }
     function _rad2deg(r){ return Number(r) * 180.0 / Math.PI }
@@ -825,10 +826,168 @@ Item {
         if (isFinite(s) && s > 0) return s
         return 15000
     }
+    // function rebuildTxEstimateKrakenLike() {
+    //     // ถ้าปิด txVisible -> ล้างทุกอย่าง
+    //     if (!txVisible) {
+    //         txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //         txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //         txHistoryModel.clear()
+    //         return
+    //     }
+
+    //     // ===== collect active doa items =====
+    //     let items = []
+    //     for (let i=0; i<doaPinsModel.count; ++i) {
+    //         const it = doaPinsModel.get(i)
+    //         if (!mapviewer.isDoaActive(it)) continue
+
+    //         const lat = Number(it.lat), lon = Number(it.lon)
+    //         let deg = Number(it.doaDeg)
+    //         if (!isFinite(lat) || !isFinite(lon) || !isFinite(deg)) continue
+    //         deg = mapviewer.wrap360(deg)
+
+    //         items.push({ lat:lat, lon:lon, deg:deg, key:it.key })
+    //     }
+
+    //     if (items.length < 2) {
+    //         txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //         txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //         // txHistoryModel.clear()
+    //         return
+    //     }
+
+    //     // ===== ref point =====
+    //     let refLat=0, refLon=0
+    //     for (let i=0; i<items.length; ++i) { refLat += items[i].lat; refLon += items[i].lon }
+    //     refLat /= items.length; refLon /= items.length
+
+    //     let pts = []
+    //     let uvs = []
+    //     for (let i=0; i<items.length; ++i) {
+    //         pts.push(_latLonToXY_m(items[i].lat, items[i].lon, refLat, refLon))
+    //         uvs.push(_bearingToUnitENU(items[i].deg)) // unit ENU
+    //     }
+
+    //     const maxLineM = Number(currentMaxDoaLineMeters())
+    //     const maxM = (isFinite(maxLineM) && maxLineM > 0) ? maxLineM : 15000
+
+    //     // ===== compute intersection/best point in meters (ENU) =====
+    //     let x=0, y=0, rms=0
+
+    //     if (items.length === 2) {
+    //         const r = _intersect2Lines(pts[0], uvs[0], pts[1], uvs[1])
+    //         if (!r.ok) {
+    //             txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //             txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //             // txHistoryModel.clear()
+    //             return
+    //         }
+
+    //         // ✅ ต้องไปข้างหน้า + ต้องไม่เกิน max line
+    //         if (!(r.t >= 0 && r.t <= maxM && r.s >= 0 && r.s <= maxM)) {
+    //             txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //             txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //             // txHistoryModel.clear()
+    //             return
+    //         }
+
+    //         x = r.x; y = r.y; rms = 0
+    //     } else {
+    //         const best = _bestPointForLines(pts, uvs)
+    //         if (!best.ok || best.rms > mapviewer.intersectionMaxResidualM) {
+    //             txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //             txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //             txHistoryModel.clear()
+    //             return
+    //         }
+
+    //         // ✅ ต้องอยู่ในระยะ max line สำหรับ "ทุกเส้น" ที่ใช้คำนวณ
+    //         for (let i=0; i<pts.length; ++i) {
+    //             const dx = best.x - pts[i].x
+    //             const dy = best.y - pts[i].y
+    //             const t  = dx*uvs[i].ux + dy*uvs[i].uy  // projection on unit direction
+    //             if (!(t >= 0 && t <= maxM)) {
+    //                 txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //                 txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+    //                 txHistoryModel.clear()
+    //                 return
+    //             }
+    //         }
+
+    //         x = best.x; y = best.y; rms = best.rms
+    //     }
+
+    //     // ===== convert to lat/lon =====
+    //     const ll = _xyToLatLon(x, y, refLat, refLon)
+
+    //     let cand = ({
+    //         valid: true,
+    //         lat: ll.lat,
+    //         lon: ll.lon,
+    //         rms: rms,
+    //         count: items.length,
+    //         updatedMs: Date.now(),
+    //         firstSeenMs: 0
+    //     })
+
+    //     // ===== "อยู่ที่เดิมครบ 3 วิ" ด้วย txSnapDistanceM =====
+    //     if (txCandidate.valid) {
+    //         const dSame = _haversineMeters(cand.lat, cand.lon, txCandidate.lat, txCandidate.lon)
+    //         if (dSame <= mapviewer.txSnapDistanceM) {
+    //             // ✅ ถือว่าเป็นจุดเดิม -> lock ให้เท่าจุดเดิม (กัน jitter)
+    //             cand.lat = txCandidate.lat
+    //             cand.lon = txCandidate.lon
+    //             cand.firstSeenMs = Number(txCandidate.firstSeenMs || txCandidate.updatedMs || Date.now())
+    //         } else {
+    //             // ✅ เปลี่ยนตำแหน่ง -> reset timer
+    //             cand.firstSeenMs = Date.now()
+    //         }
+    //     } else {
+    //         cand.firstSeenMs = Date.now()
+    //     }
+
+    //     txCandidate = cand
+
+    //     // ===== check stable 3 seconds =====
+    //     const ageMs = Date.now() - Number(txCandidate.firstSeenMs || 0)
+    //     const stableOk = isFinite(ageMs) && ageMs >= txStableHoldMs
+
+    //     if (!stableOk) {
+    //         // ✅ ยังไม่ผ่าน -> ไม่ commit / ไม่วาด / ไม่ส่ง
+    //         txEstimate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+    //         // txHistoryModel.clear()
+    //         return
+    //     }
+
+    //     // ===== commit =====
+    //     txEstimate = ({
+    //         valid: true,
+    //         lat: txCandidate.lat,
+    //         lon: txCandidate.lon,
+    //         rms: txCandidate.rms,
+    //         count: txCandidate.count,
+    //         updatedMs: Date.now()
+    //     })
+
+    //     // ===== history commit (only after stable) =====
+    //     if (txHistoryModel.count === 0) {
+    //         txHistoryModel.insert(0, { lat: txEstimate.lat, lon: txEstimate.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
+    //     } else {
+    //         const h = txHistoryModel.get(0)
+    //         const d2 = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
+
+    //         if (d2 <= mapviewer.txSnapDistanceM) {
+    //             txHistoryModel.set(0, { lat: h.lat, lon: h.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
+    //         } else {
+    //             txHistoryModel.insert(0, { lat: txEstimate.lat, lon: txEstimate.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
+    //             while (txHistoryModel.count > txHistoryMax)
+    //                 txHistoryModel.remove(txHistoryModel.count - 1)
+    //         }
+    //     }
+    // }
     function rebuildTxEstimateKrakenLike() {
-        // ถ้าปิด txVisible -> ล้างทุกอย่าง
+        // ถ้าปิด txVisible -> ล้างทุกอย่าง (อันนี้อนุญาตให้ clear ได้)
         if (!txVisible) {
-            _txMarkWasVisible = false
             txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
             txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
             txHistoryModel.clear()
@@ -849,10 +1008,11 @@ Item {
             items.push({ lat:lat, lon:lon, deg:deg, key:it.key })
         }
 
+        // ต้องมีอย่างน้อย 2 เส้น
         if (items.length < 2) {
             txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
             txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-            txHistoryModel.clear()
+            // ✅ ไม่ล้าง history
             return
         }
 
@@ -879,7 +1039,7 @@ Item {
             if (!r.ok) {
                 txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
                 txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-                txHistoryModel.clear()
+                // ✅ ไม่ล้าง history
                 return
             }
 
@@ -887,7 +1047,7 @@ Item {
             if (!(r.t >= 0 && r.t <= maxM && r.s >= 0 && r.s <= maxM)) {
                 txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
                 txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-                txHistoryModel.clear()
+                // ✅ ไม่ล้าง history
                 return
             }
 
@@ -897,7 +1057,7 @@ Item {
             if (!best.ok || best.rms > mapviewer.intersectionMaxResidualM) {
                 txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
                 txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-                txHistoryModel.clear()
+                // ✅ ไม่ล้าง history
                 return
             }
 
@@ -909,7 +1069,7 @@ Item {
                 if (!(t >= 0 && t <= maxM)) {
                     txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
                     txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-                    txHistoryModel.clear()
+                    // ✅ ไม่ล้าง history
                     return
                 }
             }
@@ -948,18 +1108,17 @@ Item {
 
         txCandidate = cand
 
-        // ===== check stable 3 seconds =====
+        // ===== check stable hold =====
         const ageMs = Date.now() - Number(txCandidate.firstSeenMs || 0)
         const stableOk = isFinite(ageMs) && ageMs >= txStableHoldMs
 
         if (!stableOk) {
-            // ✅ ยังไม่ผ่าน -> ไม่ commit / ไม่วาด / ไม่ส่ง
+            // ✅ ยังไม่ผ่าน -> ซ่อน marker/estimate ชั่วคราว แต่ "ไม่ล้าง history"
             txEstimate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-            txHistoryModel.clear()
             return
         }
 
-        // ===== commit =====
+        // ===== commit estimate =====
         txEstimate = ({
             valid: true,
             lat: txCandidate.lat,
@@ -971,21 +1130,39 @@ Item {
 
         // ===== history commit (only after stable) =====
         if (txHistoryModel.count === 0) {
-            txHistoryModel.insert(0, { lat: txEstimate.lat, lon: txEstimate.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
+            txHistoryModel.insert(0, {
+                lat: txEstimate.lat,
+                lon: txEstimate.lon,
+                rms: txEstimate.rms,
+                updatedMs: txEstimate.updatedMs
+            })
         } else {
             const h = txHistoryModel.get(0)
             const d2 = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
 
             if (d2 <= mapviewer.txSnapDistanceM) {
-                txHistoryModel.set(0, { lat: h.lat, lon: h.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
+                // update จุดเดิม
+                txHistoryModel.set(0, {
+                    lat: h.lat,
+                    lon: h.lon,
+                    rms: txEstimate.rms,
+                    updatedMs: txEstimate.updatedMs
+                })
             } else {
-                txHistoryModel.insert(0, { lat: txEstimate.lat, lon: txEstimate.lon, rms: txEstimate.rms, updatedMs: txEstimate.updatedMs })
-                while (txHistoryModel.count > txHistoryMax)
-                    txHistoryModel.remove(txHistoryModel.count - 1)
+                // insert จุดใหม่
+                txHistoryModel.insert(0, {
+                    lat: txEstimate.lat,
+                    lon: txEstimate.lon,
+                    rms: txEstimate.rms,
+                    updatedMs: txEstimate.updatedMs
+                })
             }
         }
-    }
 
+        // ✅ trim ให้เหลือ txHistoryMax เสมอ
+        while (txHistoryModel.count > txHistoryMax)
+            txHistoryModel.remove(txHistoryModel.count - 1)
+    }
     // =====================================================================
     // MAX DOA monitor (for logger only) - HUD reads from selectedKey directly
     // =====================================================================
@@ -1103,11 +1280,11 @@ Item {
             mapviewer.updateMaxDoaMonitor()
 
             // ✅ COMMIT HISTORY WHEN TX MARK APPEARS
-            var nowVisible = (mapviewer.txVisible && mapviewer.txEstimate && mapviewer.txEstimate.valid)
-            if (nowVisible && !mapviewer._txMarkWasVisible) {
-                mapviewer.commitTxHistoryNow()
-            }
-            mapviewer._txMarkWasVisible = nowVisible
+            // var nowVisible = (mapviewer.txVisible && mapviewer.txEstimate && mapviewer.txEstimate.valid)
+            // if (nowVisible && !mapviewer._txMarkWasVisible) {
+            //     mapviewer.commitTxHistoryNow()
+            // }
+            // mapviewer._txMarkWasVisible = nowVisible
 
             if (mapLoader.item) {
                 if (mapLoader.item.headingLineCanvas) mapLoader.item.headingLineCanvas.safeRequestPaint()
@@ -1158,7 +1335,7 @@ Item {
 
             if (!mapviewer.hasAnyActiveMaxDoa()) {
                 mapviewer.txEstimate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-                txHistoryModel.clear()
+                // txHistoryModel.clear()
             }
         }
     }
@@ -1900,18 +2077,42 @@ Item {
                 // ============================================================
                 // TX MARKER (trail) + main marker
                 // ============================================================
+                // MapItemView {
+                //     model: txHistoryModel
+                //     // visible: mapviewer.txEstimate.valid && mapviewer.txVisible
+                //     visible: (txHistoryModel.count > 0) && mapviewer.txVisible
+                //     delegate: MapQuickItem {
+                //         z: 1500
+                //         coordinate: QtPositioning.coordinate(model.lat, model.lon)
+                //         anchorPoint.x: 3
+                //         anchorPoint.y: 3
+                //         sourceItem: Rectangle {
+                //             width: 6; height: 6; radius: 3
+                //             color: "#FFB300"
+                //             opacity: Math.max(0.05, 0.45 - (index * 0.02))
+                //         }
+                //     }
+                // }
+
                 MapItemView {
                     model: txHistoryModel
-                    // visible: mapviewer.txEstimate.valid && mapviewer.txVisible
                     visible: (txHistoryModel.count > 0) && mapviewer.txVisible
+
                     delegate: MapQuickItem {
                         z: 1500
                         coordinate: QtPositioning.coordinate(model.lat, model.lon)
                         anchorPoint.x: 3
                         anchorPoint.y: 3
+
+                        // ✅ สี trail ตามธีม
                         sourceItem: Rectangle {
                             width: 6; height: 6; radius: 3
-                            color: "#FFB300"
+
+                            // dark: ทอง / light: น้ำเงิน / satellite: ชมพู (ปรับได้)
+                            color: (mapviewer.styleIndex === 0) ? "#FFB300"
+                                 : (mapviewer.styleIndex === 1) ? "#2D9CDB"
+                                 : "#FF4D9D"
+
                             opacity: Math.max(0.05, 0.45 - (index * 0.02))
                         }
                     }
@@ -1919,7 +2120,7 @@ Item {
 
                 MapQuickItem {
                     id: txMarker
-                    z: 2000
+                    z: 9999
                     visible: mapviewer.txEstimate.valid && mapviewer.txVisible
                     coordinate: QtPositioning.coordinate(mapviewer.txEstimate.lat, mapviewer.txEstimate.lon)
                     anchorPoint.x: txRoot.width/2

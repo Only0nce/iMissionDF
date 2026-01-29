@@ -249,6 +249,7 @@ public:
 signals:
     ////DISPLAY
     void updateNetworkToDisplay(QString);
+    void frequencyChangedToQml(qint64 freqHz, double freqMHz);
 
 
 

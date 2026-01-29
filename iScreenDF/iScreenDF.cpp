@@ -296,7 +296,6 @@ static void latLonToUTMAndMGRS(double lat, double lon, QString &utmStr, QString 
                  .arg(northp ? "N" : "S")
                  .arg(QString::number(x, 'f', 3))
                  .arg(QString::number(y, 'f', 3));
-
     // MGRS
     std::string mgrs;
     GeographicLib::MGRS::Forward(zone, northp, x, y, mgrsPrecision, mgrs);

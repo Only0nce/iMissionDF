@@ -1,3 +1,4 @@
+//RecordFiles.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -37,14 +38,14 @@ Item {
 
     PopUPDeletedFileWave {
         id: popupDeleteWave
-        listoFDevice: listoFDevice
+//        listoFDevice: listoFDevice
         deviceTexte: deviceTexte
         customMode: customMode
         presetDays: presetDays
     }
 
     onStatusSearchingFromMainChanged: {
-        console.log("statusSearchingFromMain changed:", statusSearchingFromMain)
+//        console.log("statusSearchingFromMain changed:", statusSearchingFromMain)
 
         if (!searchStatusPopup.visible)
             return
@@ -58,7 +59,7 @@ Item {
     }
 
     onStatusScanFromMainChanged: {
-        console.log("[RecordFiles] statusScanFromMainChanged:", statusScanFromMain)
+//        console.log("[RecordFiles] statusScanFromMainChanged:", statusScanFromMain)
 
         if (!scanStatusPopup.visible)
             return
@@ -151,6 +152,14 @@ Item {
             if (p && p.length) arr.push(p);
         }
         return arr;
+    }
+    function handleUnmountDone(ok) {
+        if (ok) {
+            deviceFound = false
+            window.statusScan = ""
+            popupScanText.text = ""
+            scanStatusPopup.close()
+        }
     }
 
     /* ================== Background ================== */
@@ -436,7 +445,7 @@ Item {
                                 currentIndex = -1
                                 selectedExportMountPoint = ""
                                 selectedExportDevPath   = ""
-                                console.log("[comboExportTarget] cleared (empty model)")
+//                                console.log("[comboExportTarget] cleared (empty model)")
                                 return
                             }
 
@@ -445,7 +454,7 @@ Item {
                             if (item) {
                                 selectedExportMountPoint = item.mountPoint || ""
                                 selectedExportDevPath   = item.devPath   || ""
-                                console.log("[comboExportTarget] auto-select", selectedExportMountPoint)
+//                                console.log("[comboExportTarget] auto-select", selectedExportMountPoint)
                             } else {
                                 selectedExportMountPoint = ""
                                 selectedExportDevPath   = ""
@@ -457,46 +466,78 @@ Item {
                             var item = model[i]
                             selectedExportMountPoint = (item && item.mountPoint) ? item.mountPoint : ""
                             selectedExportDevPath   = (item && item.devPath)   ? item.devPath   : ""
-                            console.log("[comboExportTarget] selected:", selectedExportMountPoint)
+//                            console.log("[comboExportTarget] selected:", selectedExportMountPoint)
                         }
                     }
-
                     Button {
-                        id: scanButton
-                        text: qsTr("Scan")
+                        id: scanUnmountButton
+                        text: deviceFound ? qsTr("Unmount") : qsTr("Mount")
                         Layout.preferredWidth: 100
 
                         onClicked: {
-                            // ตั้งข้อความไว้ก่อนเลย
-                            popupScanText.text = statusDeviceScan
-                            window.statusScan = "Scanning..."
+                            if (!deviceFound) {
+                                // SCAN
+                                popupScanText.text = statusDeviceScan
+                                window.statusScan = "Scanning..."
 
-                            // ให้ popup ขึ้นตรงข้าง ๆ Export File
-                            var p = exportButton.mapToItem(recordFiles, 0, 0)
-                            scanStatusPopup.x = p.x + exportButton.width + 10
-                            scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
-                            scanStatusPopup.open()
+                                var p = exportButton.mapToItem(recordFiles, 0, 0)
+                                scanStatusPopup.x = p.x + exportButton.width + 10
+                                scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
+                                scanStatusPopup.open()
 
-                            // ค่อยยิงคำสั่งไปหา C++
-                            var msg = { menuID: "scanDeivce" }
-                            qmlCommand(JSON.stringify(msg))
-                        }
-                    }
+                                qmlCommand(JSON.stringify({ menuID: "scanDeivce" }))
 
+                            } else {
+                                // UNMOUNT
+                                qmlCommand(JSON.stringify({ menuID: "unmountDeivce" }))
 
-
-                    Button {
-                        id: unmountButton
-                        text: qsTr("Unmount")
-                        Layout.preferredWidth: 100
-
-                        onClicked: {
-                            var msg = {
-                                menuID: "unmountDeivce"
+                                // ✅ กลับเป็น Scan ทันที
+                                deviceFound = false
+                                window.statusScan = ""
+                                popupScanText.text = ""
+                                scanStatusPopup.close()
                             }
-                            qmlCommand(JSON.stringify(msg))
                         }
+
                     }
+
+//                    Button {
+//                        id: scanButton
+//                        text: qsTr("Scan")
+//                        Layout.preferredWidth: 100
+
+//                        onClicked: {
+//                            // ตั้งข้อความไว้ก่อนเลย
+//                            popupScanText.text = statusDeviceScan
+//                            window.statusScan = "Scanning..."
+
+//                            // ให้ popup ขึ้นตรงข้าง ๆ Export File
+//                            var p = exportButton.mapToItem(recordFiles, 0, 0)
+//                            scanStatusPopup.x = p.x + exportButton.width + 10
+//                            scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
+//                            scanStatusPopup.open()
+
+//                            // ค่อยยิงคำสั่งไปหา C++
+//                            var msg = { menuID: "scanDeivce" }
+//                            qmlCommand(JSON.stringify(msg))
+//                        }
+//                    }
+
+
+
+//                    Button {
+//                        id: unmountButton
+//                        text: qsTr("Unmount")
+//                        Layout.preferredWidth: 100
+
+//                        onClicked: {
+//                            var msg = {
+//                                menuID: "unmountDeivce"
+//                            }
+//                            qmlCommand(JSON.stringify(msg))
+//                        }
+//                    }
+
                 }
                 Button {
                     id: exportButton
@@ -506,7 +547,7 @@ Item {
                     onClicked: {
                         var items = collectSelectedFiles()
                         if (items.length === 0) {
-                            console.log("[Export] no file selected")
+//                            console.log("[Export] no file selected")
                             return
                         }
 
@@ -515,13 +556,12 @@ Item {
 
                         // แค่เตือน แต่ "ไม่ return"
                         if (!window.label || window.label === "") {
-                            console.log("[Export] no USB target selected, open popup anyway")
+//                            console.log("[Export] no USB target selected, open popup anyway")
                         } else {
-                            console.log("[Export] use mountPoint:", window.label)
+//                            console.log("[Export] use mountPoint:", window.label)
                         }
                         pathToSave = window.label
-                        console.log("[Export] total size =", selectedTotalSizeBytes,
-                                    "total dur_sec =", selectedTotalDurationSec)
+//                        console.log("[Export] total size =", selectedTotalSizeBytes,"total dur_sec =", selectedTotalDurationSec)
 
                         // ถ้าไม่มี mountPoint ก็ส่ง "" ไปก่อน
                         var mp = window.selectedExportMountPoint || ""
@@ -630,7 +670,6 @@ Item {
                 anchors.fill: parent
                 source: "CalendarPopup.qml"
                 active: calendarOverlay.visible
-
                 onLoaded: {
                     if (!item) return;
                     var dt = (calendarOverlay.target === "start") ? startDT : endDT;
@@ -696,6 +735,8 @@ Item {
         }
     }
 
+
+
     // ===================== Export Overlay =====================
     Rectangle {
         id: exportOverlay
@@ -708,6 +749,14 @@ Item {
         property var    exportFiles: []
         property string exportMountPoint: ""
         property string exportDefaultName: ""
+        property string exportFrequencyHz: targetFrequencyHz
+        property real   exportFrequencyMHz: targetFrequencyMHz
+        onExportFrequencyHzChanged: {
+            console.log("[ExportFilesRecord] exportFrequencyHz CHANGED ->", exportFrequencyHz)
+        }
+        onExportFrequencyMHzChanged: {
+            console.log("[ExportFilesRecord] exportFrequencyMHz CHANGED ->", exportFrequencyMHz)
+        }
 
         function openFor(files, mountPoint, defName) {
             exportFiles       = files || []
@@ -739,7 +788,6 @@ Item {
                 anchors.fill: parent
                 source: "ExportFilesRecord.qml"
                 active: exportOverlay.visible
-
                 onLoaded: {
                     if (!item) return
 
@@ -748,14 +796,11 @@ Item {
                     if (item.defaultName  !== undefined) item.defaultName  = exportOverlay.exportDefaultName
                     if (item.qmlCommandFn !== undefined) item.qmlCommandFn = window.qmlCommand
 
-                    // 🔹 รีเซ็ต progress ทุกครั้งที่ popup ถูกสร้างใหม่
-                    if (item.resetState) {
-                        item.resetState()
-                    } else {
-                        if (item.progress   !== undefined) item.progress   = 0
-                        if (item.statusText !== undefined) item.statusText = ""
-                        if (item.exporting  !== undefined) item.exporting  = false
-                    }
+                    // ✅ ใส่ Hz เข้าไปให้ popup ตั้งชื่อได้ทันที
+                    if (item.exportFrequencyHz !== undefined) item.exportFrequencyHz = recordFiles.exportFrequencyHz
+                    console.log("[RecordFiles] send Hz to ExportFilesRecord:", recordFiles.exportFrequencyHz)
+
+                    if (item.resetState) item.resetState()
 
                     if (item.requestClose) {
                         item.requestClose.connect(function() {
@@ -763,6 +808,31 @@ Item {
                         })
                     }
                 }
+
+//                onLoaded: {
+//                    if (!item) return
+
+//                    if (item.files        !== undefined) item.files        = exportOverlay.exportFiles
+//                    if (item.mountPoint   !== undefined) item.mountPoint   = exportOverlay.exportMountPoint
+//                    if (item.defaultName  !== undefined) item.defaultName  = exportOverlay.exportDefaultName
+//                    if (item.qmlCommandFn !== undefined) item.qmlCommandFn = window.qmlCommand
+
+//                    // 🔹 รีเซ็ต progress ทุกครั้งที่ popup ถูกสร้างใหม่
+//                    if (item.resetState) {
+//                        item.resetState()
+//                    } else {
+//                        if (item.progress   !== undefined) item.progress   = 0
+//                        if (item.statusText !== undefined) item.statusText = ""
+//                        if (item.exporting  !== undefined) item.exporting  = false
+//                    }
+
+//                    if (item.requestClose) {
+//                        item.requestClose.connect(function() {
+//                            exportOverlay.close()
+//                        })
+//                    }
+//                }
+
             }
 
         }
@@ -802,12 +872,12 @@ Item {
             pageSize: 25
         };
         if (typeof qmlCommand === "function") qmlCommand(JSON.stringify(payload));
-        console.log("Search payload:", JSON.stringify(payload));
+//        console.log("Search payload:", JSON.stringify(payload));
         enableSearch = true
     }
 
     function resetFiltersAndReload() {
-        console.log("resetFiltersAndReload")
+//        console.log("resetFiltersAndReload")
         recordListFrozen = false
         startDT = new Date();
         startText = Qt.formatDateTime(startDT, fmt);
@@ -873,7 +943,7 @@ Item {
         target: Backend
 
         function onExportProgress(percent, status) {
-            console.log("[RecordFiles] exportProgress", percent, status)
+//            console.log("[RecordFiles] exportProgress", percent, status)
             if (exportLoader.status === Loader.Ready &&
                     exportLoader.item && exportLoader.item.updateProgress) {
                 exportLoader.item.updateProgress(percent, status)
@@ -881,7 +951,7 @@ Item {
         }
 
         function onExportFinished(ok, outPath, error) {
-            console.log("[RecordFiles] exportFinished", ok, outPath, error)
+//            console.log("[RecordFiles] exportFinished", ok, outPath, error)
             if (exportLoader.status === Loader.Ready &&
                     exportLoader.item && exportLoader.item.updateProgress) {
                 exportLoader.item.updateProgress(
@@ -895,17 +965,17 @@ Item {
 
 
     Component.onCompleted: {
-        console.log("[RecordFiles] Component.onCompleted -> pageReady = true")
+//        console.log("[RecordFiles] Component.onCompleted -> pageReady = true")
         pageReady = true
         Backend.recordFilesPageActive = true
 
         if (freezeRecordFilesUpdate) {
-            console.log("[RecordFiles] freezeRecordFilesUpdate=true -> restoreSelectionFromTxtAndSyncModel()")
+//            console.log("[RecordFiles] freezeRecordFilesUpdate=true -> restoreSelectionFromTxtAndSyncModel()")
             restoreSelectionFromTxtAndSyncModel()
         }
     }
     onVisibleChanged: {
-        console.log("[RecordFiles] visible =", visible)
+//        console.log("[RecordFiles] visible =", visible)
         Backend.recordFilesPageActive = visible
     }
 

@@ -187,7 +187,6 @@ void iScreenDF::GetrfsocParameter(bool  setDoaEnable, bool spectrumEnabled, int 
              << "Offset=" << p->m_TargetOffsetHz
              << "BW=" << p->m_doaBwHz
              << "TH=" << p->m_doaPowerThresholdDb;
-
 }
 void iScreenDF::sendMaxDoaLineMeters(int meters)
 {
@@ -837,6 +836,7 @@ void iScreenDF::updateReceiverParametersFreqandbw(int frequencyHz, int bandwidth
     Parameter *p = m_parameter.first();
 
     p->m_Frequency = frequencyHz;
+    p->m_doaBwHz = bandwidthHz;
     const double offsetHz = bandwidthHz * 1.0; // 0.51
     updateReceiverParametersFreqOffsetBw((qint64)frequencyHz, offsetHz, (double)bandwidthHz);
 

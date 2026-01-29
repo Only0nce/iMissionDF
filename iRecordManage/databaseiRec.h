@@ -108,6 +108,8 @@ public slots:
     void getCurrentPath();
     void upDateTableFileRecord();
     void deletedFileWave(const QString &jsonString, QWebSocket *wClient);
+    void playRecording();
+
 private:
     void addMissingColumn(const QString &tableName, const QString &columnName, const QString &columnType);  // ✅ เพิ่มบรรทัดนี้
     QSqlDatabase db;
@@ -116,10 +118,9 @@ private:
     qint64 getTimeDuration(QString filePath);
     void getLastEvent();
     void startProject(QString filePath, QString radioEvent);
-
     QString getSerial();
     QStringList getMac();
-    void updateHashTable(QString mac, QString challenge ,QString meta, QString serial, QString password);
+    void updateHashTable(QString mac, QString challenge, QString meta, QString serial, QString password);
     //    int deviceId;
     //    double inputFrequency;
     //    QString inputMode;

@@ -85,12 +85,12 @@ Item {
             onClicked: {
                 if(scanSqlLevels === 0) scanSqlLevels = mainWindows.getSqlLevel()
                 var wantPlay = !playerControllerRoot.playing
-                console.log("wantPlay::",wantPlay," and scanSqlLevels::", scanSqlLevels)
+//                console.log("wantPlay::",wantPlay," and scanSqlLevels::", scanSqlLevels)
                 if(wantPlay === true){
                     wsClient.setSpeakerVolumeMute(1)
-                    console.log("set scanSqlLevels::", scanSqlLevels)
+//                    console.log("set scanSqlLevels::", scanSqlLevels)
                     mainWindows.setSqlLevel(scanSqlLevels)
-                    console.log("set scanSqlLevels::", scanSqlLevels)
+//                    console.log("set scanSqlLevels::", scanSqlLevels)
                     mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevels-255)/2).toFixed(1)+'}}')
                     scanSqlLevels = 0
                 }
@@ -135,4 +135,3 @@ Designer {
     D{i:0;formeditorZoom:3}
 }
 ##^##*/
-

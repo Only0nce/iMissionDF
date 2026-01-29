@@ -68,7 +68,7 @@ Item {
                         onWaveFilesSelected: tapBarRecorderFilesRoot.waveFilesSelected(filesArray)
 
                         onWavePlayToggleRequested: {
-                            console.log("[TapBarRecordFiles] wavePlayToggleRequested from RecordFiles")
+//                            console.log("[TapBarRecordFiles] wavePlayToggleRequested from RecordFiles")
                             tapBarRecorderFilesRoot.wavePlayToggleRequested(
                                         wantPlay,
                                         filesArray,

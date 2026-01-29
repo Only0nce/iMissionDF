@@ -6,7 +6,7 @@ Item {
     id: scanpage
     // width: 1195
     // height: 400
-    property real freqMin: 30e6
+    property real freqMin: 10e6
     property real freqMax: 3.8e9
     property real freqScan: freqScan
     property bool keyfreqEdit: false
@@ -226,9 +226,9 @@ Item {
                 bottomPadding: -20
                 anchors.topMargin: 0
                 anchors.rightMargin: 72
-                placeholderText: "30 - 3200"
+                placeholderText: "10 - 3200"
                 validator: DoubleValidator {
-                    bottom: 30.0
+                    bottom: 10.0
                     top: 3200.0
                     notation: DoubleValidator.StandardNotation
                 }
@@ -252,6 +252,9 @@ Item {
                     {
                         console.log("onAccepted setManualOffset::",freqScan)
                         spectrumGLPlot.setManualOffset(freqScan)
+                    }
+                    else{
+                        console.log("onAccepted Error setManualOffset::",freqScan," freqMin:",freqMin," freqMax",freqMax)
                     }
                 }
                 onTextChanged: {

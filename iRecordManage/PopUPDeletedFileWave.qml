@@ -9,7 +9,7 @@ Item {
     z: 999999
 
     // ===== external inputs =====
-    property var listoFDevice: null
+//    property var listoFDevice: null
     property string deviceTexte: "1"
 //    property var qmlCommand: function(jsonString) { console.log("qmlCommand not set:", jsonString) }
 
@@ -20,7 +20,10 @@ Item {
     // ===== helpers =====
     function open()  { popUpbuttonDeletedFiles.open() }
     function close() { popUpbuttonDeletedFiles.close() }
-    function selectedDevice() { return deviceCombo.currentText }
+//    function selectedDevice() { return deviceCombo.currentText }
+    function selectedDevice() {
+        return deviceNumBox ? deviceNumBox.currentText : ""
+    }
 
     function pad2(n) {
         n = Number(n)
@@ -32,6 +35,8 @@ Item {
         var label = ""
         var fromStr = ""
         var toStr = ""
+
+//        console.log("<<<<<---- buildDeleteWaveJson --->>>>>", customMode, presetDays)
 
         if (!customMode) {
             if (presetDays === 1) label = "24 hr"
@@ -45,16 +50,50 @@ Item {
             if (tumblerDateTime && tumblerDateTime.toText)   toStr   = tumblerDateTime.toText()
         }
 
-        return {
+        var dev = selectedDevice()
+//        console.log("buildDeleteWaveJson dev =", dev)
+
+        var obj = {
             menuID: "deletedFileWave",
-            device: selectedDevice(),
+            device: dev,
             mode: customMode ? "custom" : "preset",
             days: customMode ? 0 : presetDays,
             label: label,
             from: fromStr,
             to: toStr
         }
+
+//        console.log("buildDeleteWaveJson obj ready")
+        return obj
     }
+
+//    function buildDeleteWaveJson() {
+//        var label = ""
+//        var fromStr = ""
+//        var toStr = ""
+//        console.log("<<<<<---- buildDeleteWaveJson --->>>>>" ,customMode,presetDays)
+//        if (!customMode) {
+//            if (presetDays === 1) label = "24 hr"
+//            else if (presetDays === 3) label = "3 days"
+//            else if (presetDays === 5) label = "5 days"
+//            else if (presetDays === 7) label = "7 days"
+//            else label = presetDays + " days"
+//        } else {
+//            label = "custom"
+//            if (tumblerDateTime && tumblerDateTime.fromText) fromStr = tumblerDateTime.fromText()
+//            if (tumblerDateTime && tumblerDateTime.toText)   toStr   = tumblerDateTime.toText()
+//        }
+
+//        return {
+//            menuID: "deletedFileWave",
+//            device: selectedDevice(),
+//            mode: customMode ? "custom" : "preset",
+//            days: customMode ? 0 : presetDays,
+//            label: label,
+//            from: fromStr,
+//            to: toStr
+//        }
+//    }
 
     // ===== Popup =====
     Popup {
@@ -114,54 +153,96 @@ Item {
                     spacing: 6
 
                     Text { text: "Device"; color: "#C7D2DA"; font.pixelSize: 13 }
-
                     ComboBox {
-                        id: deviceCombo
-                        Layout.preferredWidth: 320
-                        Layout.preferredHeight: 60
-
-                        property var sourceModel: rootPopUPDeletedFileWave.listoFDevice
+                        id: deviceNumBox
+                        property var sourceModel: listoFDevice
                         property var ids: []
                         model: ids
-
                         font.pixelSize: 18
-
-                        background: Rectangle {
-                            radius: 6
-                            color: "#0e1116"
-                            border.color: "#2a2f37"
-                        }
+                        Layout.preferredHeight: 55
+                        implicitWidth: 320
+                        Layout.preferredWidth: 320
+                        background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
 
                         function rebuild() {
-                            var out = []
-
+                            const out = []
                             if (sourceModel && sourceModel.count > 0) {
                                 for (var i = 0; i < sourceModel.count; ++i) {
-                                    var it = sourceModel.get(i)
+                                    const it = sourceModel.get(i)
                                     if (!it || it.idDevice === undefined) continue
-                                    var s = String(it.idDevice)
+                                    const s = String(it.idDevice)
                                     if (out.indexOf(s) === -1) out.push(s)
                                 }
                                 out.sort(function(a,b){ return Number(a) - Number(b) })
                             } else {
                                 for (var k = 1; k <= 24; ++k) out.push(String(k))
                             }
-
                             ids = out
 
-                            var wanted = String(rootPopUPDeletedFileWave.deviceTexte || (ids[0] || "1"))
-                            var idx = ids.indexOf(wanted)
+                            const wanted = String(deviceTexte || (ids[0] || "1"))
+                            const idx = ids.indexOf(wanted)
                             currentIndex = (idx >= 0) ? idx : 0
                         }
 
                         Component.onCompleted: rebuild()
-
-                        onActivated: rootPopUPDeletedFileWave.deviceTexte = currentText
-                        onCurrentIndexChanged: {
-                            if (currentIndex >= 0 && currentIndex < ids.length)
-                                rootPopUPDeletedFileWave.deviceTexte = ids[currentIndex]
-                        }
+                        onActivated: deviceTexte = currentText
+                        onCurrentIndexChanged: if (currentIndex >= 0 && currentIndex < ids.length)
+                                                   deviceTexte = ids[currentIndex]
                     }
+
+                    Connections {
+                        target: window
+                        function onDeviceListUpdated() { deviceNumBox.rebuild() }
+                    }
+
+//                    ComboBox {
+//                        id: deviceCombo
+//                        Layout.preferredWidth: 320
+//                        Layout.preferredHeight: 60
+
+//                        property var sourceModel: rootPopUPDeletedFileWave.listoFDevice
+//                        property var ids: []
+//                        model: ids
+
+//                        font.pixelSize: 18
+
+//                        background: Rectangle {
+//                            radius: 6
+//                            color: "#0e1116"
+//                            border.color: "#2a2f37"
+//                        }
+
+//                        function rebuild() {
+//                            var out = []
+
+//                            if (sourceModel && sourceModel.count > 0) {
+//                                for (var i = 0; i < sourceModel.count; ++i) {
+//                                    var it = sourceModel.get(i)
+//                                    if (!it || it.idDevice === undefined) continue
+//                                    var s = String(it.idDevice)
+//                                    if (out.indexOf(s) === -1) out.push(s)
+//                                }
+//                                out.sort(function(a,b){ return Number(a) - Number(b) })
+//                            } else {
+//                                for (var k = 1; k <= 24; ++k) out.push(String(k))
+//                            }
+
+//                            ids = out
+
+//                            var wanted = String(rootPopUPDeletedFileWave.deviceTexte || (ids[0] || "1"))
+//                            var idx = ids.indexOf(wanted)
+//                            currentIndex = (idx >= 0) ? idx : 0
+//                        }
+
+//                        Component.onCompleted: rebuild()
+
+//                        onActivated: rootPopUPDeletedFileWave.deviceTexte = currentText
+//                        onCurrentIndexChanged: {
+//                            if (currentIndex >= 0 && currentIndex < ids.length)
+//                                rootPopUPDeletedFileWave.deviceTexte = ids[currentIndex]
+//                        }
+//                    }
+
                 }
 
                 // divider
@@ -252,22 +333,36 @@ Item {
                     Button {
                         text: "Cancel"
                         background: Rectangle { radius: 8; color: "#9c9798" }
-                        onClicked: popUpbuttonDeletedFiles.close()
+                        onClicked:{
+//                            console.log("<<<<<<<<<<<<Cancel>>>>>>>>>>")
+                            popUpbuttonDeletedFiles.close()
+                        }
                     }
 
                     Button {
                         text: "Delete"
                         background: Rectangle { radius: 8; color: "#ff004c" }
                         onClicked: {
-                            var payload = rootPopUPDeletedFileWave.buildDeleteWaveJson()
-                            var json = JSON.stringify(payload)
-                            console.log("json:",json)
-                            qmlCommand(json)
-//                            rootPopUPDeletedFileWave.qmlCommand(json)
-                            popUpbuttonDeletedFiles.close()
+//                            console.log("<<<<<<<<<<<<Delete>>>>>>>>>>")
+                            try {
+                                var payload = rootPopUPDeletedFileWave.buildDeleteWaveJson()
+//                                console.log("payload:", payload)
+
+                                var json = JSON.stringify(payload)
+//                                console.log("json:", json)
+
+                                // ถ้า qmlCommand เป็น signal ของ window:
+                                window.qmlCommand(json)
+
+                                popUpbuttonDeletedFiles.close()
+                            } catch (e) {
+//                                console.log("Delete ERROR:", e)
+                            }
                         }
                     }
+
                 }
+
             }
         }
 
@@ -275,6 +370,7 @@ Item {
             // default = preset 24hr
             rootPopUPDeletedFileWave.customMode = false
             rootPopUPDeletedFileWave.presetDays = 1
+            deviceCombo.rebuild()
         }
 
     }

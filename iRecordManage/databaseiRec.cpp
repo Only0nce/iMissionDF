@@ -36,11 +36,8 @@ DatabaseiRec::DatabaseiRec(QString dbName, QString user, QString password, QStri
 }
 
 //========================================================================================================================================
-
 void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClient)
 {
-    Q_UNUSED(wClient);
-
     qDebug() << "[deletedFileWave] incoming:" << jsonString;
 
     // ---------- parse JSON ----------
@@ -59,13 +56,12 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
         if (v.isBool())   return v.toBool() ? "1" : "0";
         return QString();
     };
-
     auto iFlex = [](const QJsonValue &v, int def) -> int {
         if (v.isUndefined() || v.isNull()) return def;
         if (v.isDouble()) return v.toInt();
         if (v.isString()) {
             QString s = v.toString().trimmed();
-            if (s.isEmpty() || s.compare("NULL", Qt::CaseInsensitive) == 0) return def;
+            if (s.isEmpty()) return def;
             bool ok=false;
             int n=s.toInt(&ok);
             return ok ? n : def;
@@ -79,16 +75,15 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
         return;
     }
 
-    const QString deviceStr = sTrim(obj.value("device"));
-    const int device        = deviceStr.toInt();
-    const QString mode      = sTrim(obj.value("mode"));   // "preset" / "custom"
-    const int days          = iFlex(obj.value("days"), 0);
-    const QString label     = sTrim(obj.value("label"));
-    const QString fromStr   = sTrim(obj.value("from"));
-    const QString toStr     = sTrim(obj.value("to"));
+    const int device      = sTrim(obj.value("device")).toInt();
+    const QString mode    = sTrim(obj.value("mode"));   // "preset" / "custom"
+    const int days        = iFlex(obj.value("days"), 0);
+    const QString label   = sTrim(obj.value("label"));
+    const QString fromStr = sTrim(obj.value("from"));
+    const QString toStr   = sTrim(obj.value("to"));
 
     if (device <= 0) {
-        qWarning() << "[deletedFileWave] invalid device:" << deviceStr;
+        qWarning() << "[deletedFileWave] invalid device";
         return;
     }
 
@@ -98,7 +93,7 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
     QDateTime timeMax = now;
 
     auto parseUserDateTime = [](const QString &s) -> QDateTime {
-        const QString t = s.trimmed();
+        QString t = s.trimmed();
         if (t.isEmpty()) return QDateTime();
 
         QDateTime dt = QDateTime::fromString(t, "yyyy-MM-dd HH:mm");
@@ -108,7 +103,7 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
             dt = QDateTime::fromString(t, Qt::ISODate);
 
         if (dt.isValid())
-            dt.setTimeSpec(Qt::LocalTime); // ใช้ local time ชัดเจน
+            dt.setTimeSpec(Qt::LocalTime);
 
         return dt;
     };
@@ -117,47 +112,26 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
         QDateTime f = parseUserDateTime(fromStr);
         QDateTime t = parseUserDateTime(toStr);
 
-        if (f.isValid() && t.isValid()) {
-            timeMin = f;
-            timeMax = t;
-        } else if (f.isValid() && !t.isValid()) {
-            timeMin = f;
-            timeMax = now;
-        } else if (!f.isValid() && t.isValid()) {
-            timeMin = t.addDays(-1);
-            timeMax = t;
-        } else {
-            // from/to ว่างทั้งคู่ -> ignore เวลา -> fallback preset days ถ้ามี
-            if (days > 0) {
-                timeMin = now.addDays(-days);
-                timeMax = now;
-            } else {
-                qWarning() << "[deletedFileWave] custom mode but no from/to and days=0 -> abort";
-                return;
-            }
+        if (!f.isValid() || !t.isValid()) {
+            qWarning() << "[deletedFileWave] custom mode but invalid from/to"
+                       << "from=" << fromStr << "to=" << toStr;
+            return;
         }
+
+        timeMin = f;
+        timeMax = t;
     } else {
-        // preset
+        // preset: now - days
         if (days <= 0) {
             qWarning() << "[deletedFileWave] preset mode but days invalid:" << days;
             return;
         }
-        timeMin = now.addDays(-days);
+        timeMin = now.addSecs(-(days * 24 * 3600));
         timeMax = now;
     }
 
-    if (!timeMin.isValid() || !timeMax.isValid()) {
-        qWarning() << "[deletedFileWave] invalid time range";
-        return;
-    }
+    if (timeMin > timeMax) std::swap(timeMin, timeMax);
 
-    if (timeMin > timeMax) {
-        QDateTime tmp = timeMin;
-        timeMin = timeMax;
-        timeMax = tmp;
-    }
-
-    // ✅ สำคัญ: ใช้ format นี้คุยกับ MySQL ให้ชัวร์
     const QString tminStr = timeMin.toString("yyyy-MM-dd HH:mm:ss");
     const QString tmaxStr = timeMax.toString("yyyy-MM-dd HH:mm:ss");
 
@@ -165,47 +139,22 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
              << "mode=" << mode
              << "days=" << days
              << "label=" << label
-             << "timeMin=" << timeMin.toString(Qt::ISODate)
-             << "timeMax=" << timeMax.toString(Qt::ISODate)
              << "tminStr=" << tminStr
              << "tmaxStr=" << tmaxStr;
 
     // ---------- open DB ----------
     if (!db.isValid()) {
-        qWarning() << "[deletedFileWave] Database connection invalid!";
+        qWarning() << "[deletedFileWave] db invalid";
         return;
     }
     if (!db.isOpen()) {
         if (!db.open()) {
-            qWarning() << "[deletedFileWave] Failed to open DB:" << db.lastError().text();
+            qWarning() << "[deletedFileWave] open db failed:" << db.lastError().text();
             return;
         }
     }
 
-    // ---------- DEBUG 1: latest 5 rows (แค่ดูว่ามีข้อมูลอะไรบ้าง) ----------
-    {
-        QSqlQuery dbg(db);
-        dbg.prepare(
-            "SELECT created_at, filename "
-            "FROM record_files "
-            "WHERE device = :device "
-            "ORDER BY created_at DESC "
-            "LIMIT 5"
-        );
-        dbg.bindValue(":device", device);
-
-        if (dbg.exec()) {
-            qDebug() << "[deletedFileWave][dbg] latest 5 rows for device" << device;
-            while (dbg.next()) {
-                qDebug() << "  created_at=" << dbg.value(0).toString()
-                         << " filename=" << dbg.value(1).toString();
-            }
-        } else {
-            qWarning() << "[deletedFileWave][dbg] latest failed:" << dbg.lastError().text();
-        }
-    }
-
-    // ---------- DEBUG 2: count rows IN RANGE (นี่แหละตัวจริง) ----------
+    // ---------- debug count ----------
     {
         QSqlQuery c(db);
         c.prepare(
@@ -220,176 +169,532 @@ void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClien
         c.bindValue(":tmax", tmaxStr);
 
         if (c.exec() && c.next()) {
-            qDebug() << "[deletedFileWave][dbg] rows in range =" << c.value(0).toInt()
-                     << " (device" << device << ", " << tminStr << "->" << tmaxStr << ")";
+            qDebug() << "[deletedFileWave][dbg] rows in range =" << c.value(0).toInt();
         } else {
-            qWarning() << "[deletedFileWave][dbg] count range failed:" << c.lastError().text();
+            qWarning() << "[deletedFileWave][dbg] count failed:" << c.lastError().text();
         }
     }
 
-    // ---------- DEBUG 3: show 5 sample rows IN RANGE ----------
-    {
-        QSqlQuery s(db);
-        s.prepare(
-            "SELECT created_at, filename "
-            "FROM record_files "
-            "WHERE device = :device "
-            "  AND created_at >= :tmin "
-            "  AND created_at <= :tmax "
-            "ORDER BY created_at DESC "
-            "LIMIT 5"
-        );
-        s.bindValue(":device", device);
-        s.bindValue(":tmin", tminStr);
-        s.bindValue(":tmax", tmaxStr);
-
-        if (s.exec()) {
-            qDebug() << "[deletedFileWave][dbg] sample 5 rows IN RANGE:";
-            while (s.next()) {
-                qDebug() << "  created_at=" << s.value(0).toString()
-                         << " filename=" << s.value(1).toString();
-            }
-        } else {
-            qWarning() << "[deletedFileWave][dbg] sample range failed:" << s.lastError().text();
-        }
-    }
-
-    // ---------- SELECT rows to delete (ใช้ช่วงเวลาเท่านั้น) ----------
-    QSqlQuery q(db);
-    q.prepare(
-        "SELECT id, filename, created_at, file_path "
+    // ---------- SELECT candidates (device + time range) ----------
+    QSqlQuery sel(db);
+    sel.prepare(
+        "SELECT filename, created_at, file_path, name "
         "FROM record_files "
         "WHERE device = :device "
         "  AND created_at >= :tmin "
         "  AND created_at <= :tmax "
         "ORDER BY created_at DESC"
     );
+    sel.bindValue(":device", device);
+    sel.bindValue(":tmin", tminStr);
+    sel.bindValue(":tmax", tmaxStr);
 
-    q.bindValue(":device", device);
-    q.bindValue(":tmin", tminStr);
-    q.bindValue(":tmax", tmaxStr);
-
-    if (!q.exec()) {
-        qWarning() << "[deletedFileWave] select failed:" << q.lastError().text();
+    if (!sel.exec()) {
+        qWarning() << "[deletedFileWave] select failed:" << sel.lastError().text();
         return;
     }
 
-    // ---------- helper: build real path ----------
+    // ---------- helper build real path (ตามโครงสร้างไฟล์ของคุณ) ----------
     auto buildRealPath = [](const QString &storagePath, const QString &filename) -> QString {
-        // filename: "22-IScanRM_20260119_083757_1340136_88.0269.wav"
+        // ex: "40-iMission_20260122_165149_....wav"
         const QString noExt = filename.section('.', 0, 0);
         const QStringList parts = noExt.split('_');
-        const QString deviceName = (parts.size() >= 1) ? parts[0] : ""; // "22-IScanRM"
-        const QString date = (parts.size() >= 2) ? parts[1] : "";       // "20260119"
+
+        const QString deviceName = (parts.size() >= 1) ? parts[0] : ""; // "40-iMission"
+        const QString date       = (parts.size() >= 2) ? parts[1] : ""; // "20260122"
+
+        // /var/ivoicex/<deviceName>/<date>/<filename>
         return QString("%1/%2/%3/%4").arg(storagePath, deviceName, date, filename);
     };
 
-    // ---------- delete loop (transaction) ----------
-    int totalCandidates = 0;
-    int deletedOk = 0;
-    int deletedFail = 0;
-    int dbDeleted = 0;
+    // ---------- delete loop (file + db) ----------
+    int total = 0;
+    int fileOk = 0;
+    int fileFail = 0;
+    int dbOk = 0;
+    int dbFail = 0;
 
-    QJsonArray deletedItems;
-    QJsonArray failedItems;
+    const bool deleteDbEvenIfFileMissing = true;
 
-    const bool deleteDbWhenFileMissing = true;
-
-    if (!db.transaction()) {
-        qWarning() << "[deletedFileWave] db.transaction() failed:" << db.lastError().text();
-        // ยังพอทำต่อได้ แต่แนะนำให้มี transaction
+    bool txn = db.transaction();
+    if (!txn) {
+        qWarning() << "[deletedFileWave] transaction failed:" << db.lastError().text()
+                   << "(continue without transaction)";
     }
 
-    while (q.next()) {
-        ++totalCandidates;
+    while (sel.next()) {
+        ++total;
 
-        const QByteArray idBin   = q.value("id").toByteArray();   // ✅ สำคัญ
-        const QString filename   = q.value("filename").toString().trimmed();
-        const QString createdAt  = q.value("created_at").toString();
-        const QString storagePath= q.value("file_path").toString().trimmed();
-        const QString realPath   = buildRealPath(storagePath, filename);
+        const QString filename    = sel.value("filename").toString().trimmed();
+        const QString createdAtDb = sel.value("created_at").toString(); // "2026-01-22T16:51:49.000" หรือ "2026-01-22 16:51:49"
+        const QString storagePath = sel.value("file_path").toString().trimmed();
 
+        // แปลง created_at ให้เป็น format เดียวกับ tmin/tmax (เพื่อใช้ลบ DB ให้ match)
+        QDateTime createdDt = sel.value("created_at").toDateTime();
+        QString createdStr = createdDt.isValid()
+                ? createdDt.toString("yyyy-MM-dd HH:mm:ss")
+                : createdAtDb.left(19).replace('T', ' '); // fallback ถ้าเป็น ISO มี .000
+
+        const QString realPath = buildRealPath(storagePath, filename);
+
+        // ---- delete file ----
+        bool okFile = false;
         QFileInfo fi(realPath);
-        bool existedBefore = fi.exists() && fi.isFile();
-        bool fileOk = false;
-
-        if (existedBefore) {
+        if (fi.exists() && fi.isFile()) {
             QFile f(realPath);
-            fileOk = f.remove();
+            okFile = f.remove();
+            if (okFile) ++fileOk;
+            else {
+                ++fileFail;
+                qWarning() << "[deletedFileWave] remove file failed:" << realPath;
+            }
         } else {
-            fileOk = deleteDbWhenFileMissing;
+            // ไม่เจอไฟล์จริง (เช่นโดนลบไปก่อน) -> ตาม policy จะลบ DB ต่อได้
+            okFile = deleteDbEvenIfFileMissing;
+            if (okFile) ++fileOk;
+            else {
+                ++fileFail;
+                qWarning() << "[deletedFileWave] file missing (policy stop):" << realPath;
+            }
         }
 
-        if (!fileOk) {
-            ++deletedFail;
-            qWarning() << "[deletedFileWave] file remove failed:" << realPath;
+        if (!okFile) continue;
+
+        // ---- delete DB row (NO id) ----
+        // ใช้ device + created_at + filename เพื่อให้ชัวร์ว่าแถวเดียวกัน
+        QSqlQuery del(db);
+        del.prepare(
+            "DELETE FROM record_files "
+            "WHERE device = :device "
+            "  AND filename = :filename "
+            "  AND created_at = :created_at"
+        );
+        del.bindValue(":device", device);
+        del.bindValue(":filename", filename);
+        del.bindValue(":created_at", createdStr);
+
+        if (!del.exec()) {
+            ++dbFail;
+            qWarning() << "[deletedFileWave] DB delete failed:"
+                       << "device=" << device
+                       << "filename=" << filename
+                       << "created_at=" << createdStr
+                       << "err=" << del.lastError().text();
             continue;
         }
 
-        // ✅ DELETE DB (BINARY-safe)
-        QSqlQuery dq(db);
-        dq.prepare("DELETE FROM record_files WHERE id = :id");
-        dq.bindValue(":id", idBin, QSql::In | QSql::Binary);
-
-        if (!dq.exec()) {
-            ++deletedFail;
-            qWarning() << "[deletedFileWave] DB delete failed id="
-                       << idBin.toHex() << dq.lastError().text();
-            continue;
+        if (del.numRowsAffected() > 0) {
+            ++dbOk;
+            qDebug() << "[deletedFileWave] deleted OK:"
+                     << "created_at=" << createdStr
+                     << "file=" << realPath;
+        } else {
+            // ถ้าเกิดกรณีนี้ ให้เปลี่ยน DELETE เป็นช่วงเวลา + filename แทน (ดูด้านล่าง)
+            ++dbFail;
+            qWarning() << "[deletedFileWave] DB delete affected=0 (created_at format mismatch?)"
+                       << "created_at(raw)=" << createdAtDb
+                       << "created_at(bind)=" << createdStr
+                       << "filename=" << filename;
         }
-
-        ++deletedOk;
-        dbDeleted += dq.numRowsAffected();
-
-        qDebug() << "[deletedFileWave] deleted id="
-                 << idBin.toHex()
-                 << "created_at=" << createdAt
-                 << "file=" << realPath
-                 << "rowsAffected=" << dq.numRowsAffected();
     }
 
-    if (db.isOpen()) {
-        // commit ถ้าไม่มี fail ใน transaction (คุณจะเลือก commit แม้มี fail ก็ได้)
+    if (txn) {
         if (!db.commit()) {
-            qWarning() << "[deletedFileWave] db.commit() failed:" << db.lastError().text();
+            qWarning() << "[deletedFileWave] commit failed:" << db.lastError().text();
             db.rollback();
         }
     }
 
-    // ---------- respond back (optional แต่แนะนำ) ----------
+    qDebug() << "[deletedFileWave] done total=" << total
+             << "fileOk=" << fileOk << "fileFail=" << fileFail
+             << "dbOk=" << dbOk << "dbFail=" << dbFail;
+    fetchAllRecordFiles(jsonString, wClient);
+
+//    // ---------- respond back ----------
 //    QJsonObject resp;
 //    resp["menuID"] = "deletedFileWaveResult";
-//    resp["device"] = device;
+//    resp["device"] = QString::number(device);
 //    resp["mode"] = mode;
 //    resp["days"] = days;
 //    resp["label"] = label;
 //    resp["from"] = tminStr;
 //    resp["to"] = tmaxStr;
-//    resp["totalCandidates"] = totalCandidates;
-//    resp["deletedOk"] = deletedOk;
-//    resp["deletedFail"] = deletedFail;
-//    resp["dbRowsDeleted"] = dbDeleted;
-//    resp["deletedItems"] = deletedItems;
-//    resp["failedItems"] = failedItems;
+//    resp["total"] = total;
+//    resp["fileOk"] = fileOk;
+//    resp["fileFail"] = fileFail;
+//    resp["dbOk"] = dbOk;
+//    resp["dbFail"] = dbFail;
 
 //    const QString out = QString::fromUtf8(QJsonDocument(resp).toJson(QJsonDocument::Compact));
-//    qDebug() << "[deletedFileWave] result:" << out;
+//    emit commandMysqlToWeb(out);
 
-//    emit commandMysqlToCpp(out);
-
-//    // ---------- refresh list (สำคัญ: เรียกให้ถูก menuID) ----------
-//    {
+//    // ---------- refresh UI list ----------
+//    if (wClient) {
 //        QJsonObject req;
-//        req["menuID"] = "getRecordFiles";
-//        // ถ้าฟังก์ชัน fetchAllRecordFiles ใช้ device filter ด้วย ใส่เพิ่มได้
+//        req["menuID"] = "getRecordFiles";      // <-- ให้ตรงกับฝั่ง fetchAllRecordFiles ของคุณ
 //        req["device"] = QString::number(device);
+//        req["startDate"] = tminStr;            // ถ้าฝั่ง query รองรับก็ส่งไปได้
+//        req["endDate"]   = tmaxStr;
 
 //        const QString refreshJson = QString::fromUtf8(QJsonDocument(req).toJson(QJsonDocument::Compact));
 //        fetchAllRecordFiles(refreshJson, wClient);
 //    }
-    fetchAllRecordFiles(jsonString, wClient);
-
 }
+
+//void DatabaseiRec::deletedFileWave(const QString &jsonString, QWebSocket *wClient)
+//{
+//    Q_UNUSED(wClient);
+
+//    qDebug() << "[deletedFileWave] incoming:" << jsonString;
+
+//    // ---------- parse JSON ----------
+//    QJsonParseError perr;
+//    QJsonDocument doc = QJsonDocument::fromJson(jsonString.toUtf8(), &perr);
+//    if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
+//        qWarning() << "[deletedFileWave] JSON parse error:" << perr.errorString();
+//        return;
+//    }
+//    QJsonObject obj = doc.object();
+
+//    auto sTrim = [](const QJsonValue &v) -> QString {
+//        if (v.isUndefined() || v.isNull()) return QString();
+//        if (v.isString()) return v.toString().trimmed();
+//        if (v.isDouble()) return QString::number(v.toDouble());
+//        if (v.isBool())   return v.toBool() ? "1" : "0";
+//        return QString();
+//    };
+
+//    auto iFlex = [](const QJsonValue &v, int def) -> int {
+//        if (v.isUndefined() || v.isNull()) return def;
+//        if (v.isDouble()) return v.toInt();
+//        if (v.isString()) {
+//            QString s = v.toString().trimmed();
+//            if (s.isEmpty() || s.compare("NULL", Qt::CaseInsensitive) == 0) return def;
+//            bool ok=false;
+//            int n=s.toInt(&ok);
+//            return ok ? n : def;
+//        }
+//        return def;
+//    };
+
+//    const QString menuID = sTrim(obj.value("menuID"));
+//    if (menuID != QLatin1String("deletedFileWave")) {
+//        qWarning() << "[deletedFileWave] wrong menuID:" << menuID;
+//        return;
+//    }
+
+//    const QString deviceStr = sTrim(obj.value("device"));
+//    const int device        = deviceStr.toInt();
+//    const QString mode      = sTrim(obj.value("mode"));   // "preset" / "custom"
+//    const int days          = iFlex(obj.value("days"), 0);
+//    const QString label     = sTrim(obj.value("label"));
+//    const QString fromStr   = sTrim(obj.value("from"));
+//    const QString toStr     = sTrim(obj.value("to"));
+
+//    if (device <= 0) {
+//        qWarning() << "[deletedFileWave] invalid device:" << deviceStr;
+//        return;
+//    }
+
+//    // ---------- compute time range ----------
+//    QDateTime now = QDateTime::currentDateTime();
+//    QDateTime timeMin;
+//    QDateTime timeMax = now;
+
+//    auto parseUserDateTime = [](const QString &s) -> QDateTime {
+//        const QString t = s.trimmed();
+//        if (t.isEmpty()) return QDateTime();
+
+//        QDateTime dt = QDateTime::fromString(t, "yyyy-MM-dd HH:mm");
+//        if (!dt.isValid())
+//            dt = QDateTime::fromString(t, "yyyy-MM-dd HH:mm:ss");
+//        if (!dt.isValid())
+//            dt = QDateTime::fromString(t, Qt::ISODate);
+
+//        if (dt.isValid())
+//            dt.setTimeSpec(Qt::LocalTime); // ใช้ local time ชัดเจน
+
+//        return dt;
+//    };
+
+//    if (mode == QLatin1String("custom")) {
+//        QDateTime f = parseUserDateTime(fromStr);
+//        QDateTime t = parseUserDateTime(toStr);
+
+//        if (f.isValid() && t.isValid()) {
+//            timeMin = f;
+//            timeMax = t;
+//        } else if (f.isValid() && !t.isValid()) {
+//            timeMin = f;
+//            timeMax = now;
+//        } else if (!f.isValid() && t.isValid()) {
+//            timeMin = t.addDays(-1);
+//            timeMax = t;
+//        } else {
+//            // from/to ว่างทั้งคู่ -> ignore เวลา -> fallback preset days ถ้ามี
+//            if (days > 0) {
+//                timeMin = now.addDays(-days);
+//                timeMax = now;
+//            } else {
+//                qWarning() << "[deletedFileWave] custom mode but no from/to and days=0 -> abort";
+//                return;
+//            }
+//        }
+//    } else {
+//        // preset
+//        if (days <= 0) {
+//            qWarning() << "[deletedFileWave] preset mode but days invalid:" << days;
+//            return;
+//        }
+//        timeMin = now.addDays(-days);
+//        timeMax = now;
+//    }
+
+//    if (!timeMin.isValid() || !timeMax.isValid()) {
+//        qWarning() << "[deletedFileWave] invalid time range";
+//        return;
+//    }
+
+//    if (timeMin > timeMax) {
+//        QDateTime tmp = timeMin;
+//        timeMin = timeMax;
+//        timeMax = tmp;
+//    }
+
+//    // ✅ สำคัญ: ใช้ format นี้คุยกับ MySQL ให้ชัวร์
+//    const QString tminStr = timeMin.toString("yyyy-MM-dd HH:mm:ss");
+//    const QString tmaxStr = timeMax.toString("yyyy-MM-dd HH:mm:ss");
+
+//    qDebug() << "[deletedFileWave] device=" << device
+//             << "mode=" << mode
+//             << "days=" << days
+//             << "label=" << label
+//             << "timeMin=" << timeMin.toString(Qt::ISODate)
+//             << "timeMax=" << timeMax.toString(Qt::ISODate)
+//             << "tminStr=" << tminStr
+//             << "tmaxStr=" << tmaxStr;
+
+//    // ---------- open DB ----------
+//    if (!db.isValid()) {
+//        qWarning() << "[deletedFileWave] Database connection invalid!";
+//        return;
+//    }
+//    if (!db.isOpen()) {
+//        if (!db.open()) {
+//            qWarning() << "[deletedFileWave] Failed to open DB:" << db.lastError().text();
+//            return;
+//        }
+//    }
+
+//    // ---------- DEBUG 1: latest 5 rows (แค่ดูว่ามีข้อมูลอะไรบ้าง) ----------
+//    {
+//        QSqlQuery dbg(db);
+//        dbg.prepare(
+//            "SELECT created_at, filename "
+//            "FROM record_files "
+//            "WHERE device = :device "
+//            "ORDER BY created_at DESC "
+//            "LIMIT 5"
+//        );
+//        dbg.bindValue(":device", device);
+
+//        if (dbg.exec()) {
+//            qDebug() << "[deletedFileWave][dbg] latest 5 rows for device" << device;
+//            while (dbg.next()) {
+//                qDebug() << "  created_at=" << dbg.value(0).toString()
+//                         << " filename=" << dbg.value(1).toString();
+//            }
+//        } else {
+//            qWarning() << "[deletedFileWave][dbg] latest failed:" << dbg.lastError().text();
+//        }
+//    }
+
+//    // ---------- DEBUG 2: count rows IN RANGE (นี่แหละตัวจริง) ----------
+//    {
+//        QSqlQuery c(db);
+//        c.prepare(
+//            "SELECT COUNT(*) "
+//            "FROM record_files "
+//            "WHERE device = :device "
+//            "  AND created_at >= :tmin "
+//            "  AND created_at <= :tmax"
+//        );
+//        c.bindValue(":device", device);
+//        c.bindValue(":tmin", tminStr);
+//        c.bindValue(":tmax", tmaxStr);
+
+//        if (c.exec() && c.next()) {
+//            qDebug() << "[deletedFileWave][dbg] rows in range =" << c.value(0).toInt()
+//                     << " (device" << device << ", " << tminStr << "->" << tmaxStr << ")";
+//        } else {
+//            qWarning() << "[deletedFileWave][dbg] count range failed:" << c.lastError().text();
+//        }
+//    }
+
+//    // ---------- DEBUG 3: show 5 sample rows IN RANGE ----------
+//    {
+//        QSqlQuery s(db);
+//        s.prepare(
+//            "SELECT created_at, filename "
+//            "FROM record_files "
+//            "WHERE device = :device "
+//            "  AND created_at >= :tmin "
+//            "  AND created_at <= :tmax "
+//            "ORDER BY created_at DESC "
+//            "LIMIT 5"
+//        );
+//        s.bindValue(":device", device);
+//        s.bindValue(":tmin", tminStr);
+//        s.bindValue(":tmax", tmaxStr);
+
+//        if (s.exec()) {
+//            qDebug() << "[deletedFileWave][dbg] sample 5 rows IN RANGE:";
+//            while (s.next()) {
+//                qDebug() << "  created_at=" << s.value(0).toString()
+//                         << " filename=" << s.value(1).toString();
+//            }
+//        } else {
+//            qWarning() << "[deletedFileWave][dbg] sample range failed:" << s.lastError().text();
+//        }
+//    }
+
+//    // ---------- SELECT rows to delete (ใช้ช่วงเวลาเท่านั้น) ----------
+//    QSqlQuery q(db);
+//    q.prepare(
+//        "SELECT id, filename, created_at, file_path "
+//        "FROM record_files "
+//        "WHERE device = :device "
+//        "  AND created_at >= :tmin "
+//        "  AND created_at <= :tmax "
+//        "ORDER BY created_at DESC"
+//    );
+
+//    q.bindValue(":device", device);
+//    q.bindValue(":tmin", tminStr);
+//    q.bindValue(":tmax", tmaxStr);
+
+//    if (!q.exec()) {
+//        qWarning() << "[deletedFileWave] select failed:" << q.lastError().text();
+//        return;
+//    }
+
+//    // ---------- helper: build real path ----------
+//    auto buildRealPath = [](const QString &storagePath, const QString &filename) -> QString {
+//        // filename: "22-IScanRM_20260119_083757_1340136_88.0269.wav"
+//        const QString noExt = filename.section('.', 0, 0);
+//        const QStringList parts = noExt.split('_');
+//        const QString deviceName = (parts.size() >= 1) ? parts[0] : ""; // "22-IScanRM"
+//        const QString date = (parts.size() >= 2) ? parts[1] : "";       // "20260119"
+//        return QString("%1/%2/%3/%4").arg(storagePath, deviceName, date, filename);
+//    };
+
+//    // ---------- delete loop (transaction) ----------
+//    int totalCandidates = 0;
+//    int deletedOk = 0;
+//    int deletedFail = 0;
+//    int dbDeleted = 0;
+
+//    QJsonArray deletedItems;
+//    QJsonArray failedItems;
+
+//    const bool deleteDbWhenFileMissing = true;
+
+//    if (!db.transaction()) {
+//        qWarning() << "[deletedFileWave] db.transaction() failed:" << db.lastError().text();
+//        // ยังพอทำต่อได้ แต่แนะนำให้มี transaction
+//    }
+
+//    while (q.next()) {
+//        ++totalCandidates;
+
+//        const QByteArray idBin   = q.value("id").toByteArray();   // ✅ สำคัญ
+//        const QString filename   = q.value("filename").toString().trimmed();
+//        const QString createdAt  = q.value("created_at").toString();
+//        const QString storagePath= q.value("file_path").toString().trimmed();
+//        const QString realPath   = buildRealPath(storagePath, filename);
+
+//        QFileInfo fi(realPath);
+//        bool existedBefore = fi.exists() && fi.isFile();
+//        bool fileOk = false;
+
+//        if (existedBefore) {
+//            QFile f(realPath);
+//            fileOk = f.remove();
+//        } else {
+//            fileOk = deleteDbWhenFileMissing;
+//        }
+
+//        if (!fileOk) {
+//            ++deletedFail;
+//            qWarning() << "[deletedFileWave] file remove failed:" << realPath;
+//            continue;
+//        }
+
+//        // ✅ DELETE DB (BINARY-safe)
+//        QSqlQuery dq(db);
+//        dq.prepare("DELETE FROM record_files WHERE id = :id");
+//        dq.bindValue(":id", idBin, QSql::In | QSql::Binary);
+
+//        if (!dq.exec()) {
+//            ++deletedFail;
+//            qWarning() << "[deletedFileWave] DB delete failed id="
+//                       << idBin.toHex() << dq.lastError().text();
+//            continue;
+//        }
+
+//        ++deletedOk;
+//        dbDeleted += dq.numRowsAffected();
+
+//        qDebug() << "[deletedFileWave] deleted id="
+//                 << idBin.toHex()
+//                 << "created_at=" << createdAt
+//                 << "file=" << realPath
+//                 << "rowsAffected=" << dq.numRowsAffected();
+//    }
+
+//    if (db.isOpen()) {
+//        // commit ถ้าไม่มี fail ใน transaction (คุณจะเลือก commit แม้มี fail ก็ได้)
+//        if (!db.commit()) {
+//            qWarning() << "[deletedFileWave] db.commit() failed:" << db.lastError().text();
+//            db.rollback();
+//        }
+//    }
+
+//    // ---------- respond back (optional แต่แนะนำ) ----------
+////    QJsonObject resp;
+////    resp["menuID"] = "deletedFileWaveResult";
+////    resp["device"] = device;
+////    resp["mode"] = mode;
+////    resp["days"] = days;
+////    resp["label"] = label;
+////    resp["from"] = tminStr;
+////    resp["to"] = tmaxStr;
+////    resp["totalCandidates"] = totalCandidates;
+////    resp["deletedOk"] = deletedOk;
+////    resp["deletedFail"] = deletedFail;
+////    resp["dbRowsDeleted"] = dbDeleted;
+////    resp["deletedItems"] = deletedItems;
+////    resp["failedItems"] = failedItems;
+
+////    const QString out = QString::fromUtf8(QJsonDocument(resp).toJson(QJsonDocument::Compact));
+////    qDebug() << "[deletedFileWave] result:" << out;
+
+////    emit commandMysqlToCpp(out);
+
+////    // ---------- refresh list (สำคัญ: เรียกให้ถูก menuID) ----------
+////    {
+////        QJsonObject req;
+////        req["menuID"] = "getRecordFiles";
+////        // ถ้าฟังก์ชัน fetchAllRecordFiles ใช้ device filter ด้วย ใส่เพิ่มได้
+////        req["device"] = QString::number(device);
+
+////        const QString refreshJson = QString::fromUtf8(QJsonDocument(req).toJson(QJsonDocument::Compact));
+////        fetchAllRecordFiles(refreshJson, wClient);
+////    }
+//    fetchAllRecordFiles(jsonString, wClient);
+
+//}
+
 //========================================================================================================================================
 
 bool DatabaseiRec::execSql(QSqlDatabase& d, const QString& sql, QString* errOut)
@@ -626,6 +931,137 @@ void DatabaseiRec::getCurrentPath() {
         qWarning() << err;
     }
 }
+
+void DatabaseiRec::playRecording()
+{
+    // ---------------------------
+    // 1) open db
+    // ---------------------------
+    if (!db.isOpen()) {
+        if (!db.open()) {
+            QJsonObject err;
+            err["menuID"]  = "playRecordingDeviceStationResult";
+            err["ok"]      = false;
+            err["error"]   = "db_open_failed";
+            err["details"] = db.lastError().text();
+
+            const QString payload = QJsonDocument(err).toJson(QJsonDocument::Compact);
+            emit commandMysqlToWeb(payload);
+            return;
+        }
+    }
+
+    // ---------------------------
+    // 2) build query (default: visible=1)
+    // ---------------------------
+    const bool visibleOnly = true;
+
+    QString sql =
+        "SELECT id, sid, payload_size, terminal_type, name, ip, uri, freq, ambient, `group`, visible, "
+        "last_access, storage_path, chunk, updated_at "
+        "FROM device_station ";
+
+    if (visibleOnly)
+        sql += "WHERE visible = 1 ";
+
+    sql += "ORDER BY id ASC";
+
+    QSqlQuery q(db);
+    if (!q.prepare(sql)) {
+        QJsonObject err;
+        err["menuID"]  = "playRecordingDeviceStationResult";
+        err["ok"]      = false;
+        err["error"]   = "prepare_failed";
+        err["details"] = q.lastError().text();
+
+        const QString payload = QJsonDocument(err).toJson(QJsonDocument::Compact);
+        emit commandMysqlToWeb(payload);
+        return;
+    }
+
+    if (!q.exec()) {
+        QJsonObject err;
+        err["menuID"]  = "playRecordingDeviceStationResult";
+        err["ok"]      = false;
+        err["error"]   = "query_failed";
+        err["details"] = q.lastError().text();
+
+        const QString payload = QJsonDocument(err).toJson(QJsonDocument::Compact);
+        emit commandMysqlToWeb(payload);
+        return;
+    }
+
+    // ---------------------------
+    // 3) build "jetson form" rows
+    // ---------------------------
+    QJsonArray rows;
+
+    while (q.next()) {
+        QJsonObject r;
+
+        const int     id          = q.value("id").toInt();
+        const int     sid         = q.value("sid").toInt();
+        const int     payloadSize = q.value("payload_size").toInt();
+        const int     terminal    = q.value("terminal_type").toInt();
+        const QString name        = q.value("name").toString();
+        const QString ip          = q.value("ip").toString();
+        const QString uri         = q.value("uri").toString();
+        const double  freq        = q.value("freq").toDouble();
+        const int     ambient     = q.value("ambient").toInt();
+        const int     groupVal    = q.value("group").toInt();
+        const int     visible     = q.value("visible").toInt();
+        const QString lastAcc     = q.value("last_access").toString();
+        const QString storage     = q.value("storage_path").toString();
+        const int     chunk       = q.value("chunk").toInt();
+        const QString updatedAt   = q.value("updated_at").toString();
+
+        // ---- jetson form keys
+        r["id"]            = id;
+        r["sid"]           = sid;
+        r["name"]          = name;
+        r["ip"]            = ip;
+        r["uri"]           = uri;
+
+        // ให้ทั้ง string และ number (เว็บจะใช้แบบไหนก็ได้)
+        r["freq"]     = QString::number(freq, 'f', 3);
+        r["freq_mhz"] = freq;
+
+        r["terminal_type"] = terminal;
+        r["payload_size"]  = payloadSize;
+        r["ambient"]       = ambient;
+        r["group"]         = groupVal;
+        r["visible"]       = visible;
+        r["chunk"]         = chunk;
+        r["last_access"]   = lastAcc.isEmpty() ? "" : lastAcc;
+        r["updated_at"]    = updatedAt;
+
+        r["storage_path"] = storage;
+        r["storage_root"] = QDir::cleanPath(storage);
+
+        // /var/ivoicex/40-iMission
+        if (!storage.isEmpty() && id > 0 && !name.isEmpty()) {
+            r["device_folder"] = QDir::cleanPath(storage + "/" + QString::number(id) + "-" + name);
+        } else {
+            r["device_folder"] = "";
+        }
+
+        rows.append(r);
+    }
+
+    // ---------------------------
+    // 4) send to web only
+    // ---------------------------
+    QJsonObject out;
+    out["menuID"]  = "playRecordingDeviceStationResult";
+    out["ok"]      = true;
+    out["count"]   = rows.size();
+    out["records"] = rows;
+
+    const QString payload = QJsonDocument(out).toJson(QJsonDocument::Compact);
+    emit commandMysqlToWeb(payload);
+}
+
+
 bool restartMySQLService() {
     qDebug() << "Restarting MySQL service...";
     QProcess process;
@@ -1042,6 +1478,7 @@ void DatabaseiRec::searchRecordFilesMysql(QString msg, QWebSocket* wClient)
 
         emit commandMysqlToWeb(jsonReply);   // <-- ตรงนี้จะไป ChatServerWebRec::broadcastMessage
     }
+
 }
 
 
@@ -4284,11 +4721,11 @@ void DatabaseiRec::checkFlieAndRemoveDB() {
         QSqlDatabase::removeDatabase(connectionName);
     }
 
-//    QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL", connectionName);
-//    db.setDatabaseName("recorder");
-//    db.setUserName("root");
-//    db.setPassword("OTL324$");
-//    db.setHostName("localhost");
+    QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL", connectionName);
+    db.setDatabaseName("recorder");
+    db.setUserName("root");
+    db.setPassword("OTL324$");
+    db.setHostName("localhost");
 
     if (!db.open()) {
         qWarning() << "Failed to open DB:" << db.lastError().text();
@@ -4936,7 +5373,7 @@ void DatabaseiRec::UpdateDeviceInDatabase(const QString& jsonString, QWebSocket*
     // ส่งกลับทั้งสองฝั่ง
     {
         QJsonObject outScreen;
-        outScreen["menuID"] = "updateDevice";
+        outScreen["menuID"] = "deviceList";
         outScreen["device"] = dev;
         QString msgScreen = QString::fromUtf8(QJsonDocument(outScreen).toJson(QJsonDocument::Compact));
         qDebug() << "commandMysqlToCpp ->" << msgScreen;

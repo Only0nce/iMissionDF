@@ -154,7 +154,8 @@ int main(int argc, char *argv[])
     mainwindowsiRec recMain("desktop");
     engine.rootContext()->setContextProperty("mainwindows", &recMain);
     engine.rootContext()->setContextProperty("Backend",     &recMain);
-
+    QObject::connect(&mainWindows, &Mainwindows::frequencyChangedToQml,
+                     &recMain,     &mainwindowsiRec::onFrequencyChangedFromMain);
     // DOAViewer
 
     DoaClient doaClient;

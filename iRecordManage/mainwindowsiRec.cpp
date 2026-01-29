@@ -52,6 +52,43 @@ mainwindowsiRec::mainwindowsiRec(QString platform,QObject *parent) : QObject(par
         ensureVoicexSymlinkAndFix();
     });
     VerifyFolderAndText();
+    installFfmpegIfNeeded();
+}
+void mainwindowsiRec::onFrequencyChangedFromMain(qint64 freqHz, double freqMHz)
+{
+    qDebug() << "onFrequencyChangedFromMain:" << freqHz << freqMHz;
+    QJsonObject o;
+    o["menuID"] = "receiverFrequency";
+    o["frequencyHz"] = QString::number(freqHz);
+    o["frequencyMHz"] = freqMHz;
+    cppCommand(QJsonDocument(o).toJson(QJsonDocument::Compact));
+
+}
+
+bool isFfmpegInstalled()
+{
+    QProcess p;
+    p.start("which", QStringList() << "ffmpeg");
+    p.waitForFinished();
+
+    return (p.exitCode() == 0);
+}
+
+void mainwindowsiRec::installFfmpegIfNeeded()
+{
+    if (isFfmpegInstalled()) {
+        qDebug() << "ffmpeg already installed";
+        return;
+    }
+
+    qDebug() << "ffmpeg not found, installing...";
+
+    QProcess p;
+    p.start("bash", QStringList() << "-c"
+             << "apt update && apt install -y ffmpeg");
+    p.waitForFinished(-1);
+
+    qDebug() << "ffmpeg install finished, exitCode =" << p.exitCode();
 }
 
 mainwindowsiRec::~mainwindowsiRec()
@@ -82,7 +119,7 @@ void mainwindowsiRec::VerifyFolderAndText()
     // ===== สร้างไฟล์ + เนื้อหาเริ่มต้น =====
     QFile file(filePath);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        return;
+        return;   // เปิดไม่ได้ก็เงียบ ๆ ตามที่ขอ
     }
 
     QTextStream out(&file);
@@ -117,6 +154,7 @@ void mainwindowsiRec::RestartSystemServicesAfter30s(){
 }
 void mainwindowsiRec::enableI2SLoopback()
 {
+    // ใช้ I2S1 เป็นตัวตัดสินหลัก
     const QString checkCmd =
         "amixer -c APE sget 'I2S1 Loopback' | grep -qi '\\bon\\b'";
 
@@ -125,6 +163,7 @@ void mainwindowsiRec::enableI2SLoopback()
         check.start("/bin/bash", QStringList() << "-lc" << checkCmd);
         check.waitForFinished(2000);
 
+        // grep เจอคำว่า on → exit code = 0
         if (check.exitCode() == 0) {
             qDebug() << "[I2S Loopback] already ON → skip enable";
             return;
@@ -191,6 +230,7 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
 
     auto ensureRealDir = [&]() -> bool {
         if (QFileInfo::exists(realDir)) {
+            // ต้องเป็น directory เท่านั้น
             if (!QFileInfo(realDir).isDir()) {
                 qWarning() << "[voicex] /var/ivoicex exists but not a directory -> remove";
                 return false;
@@ -198,6 +238,7 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
             return true;
         }
 
+        // ไม่เจอ folder -> สร้าง
         if (!QDir().mkpath(realDir)) {
             qCritical() << "[voicex] failed to create directory:" << realDir;
             return false;
@@ -209,9 +250,11 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     auto ensureSymlink = [&]() -> bool {
         QFileInfo linkInfo(linkDir);
 
+        // ถ้ามีอยู่แล้ว ตรวจว่ามันคือ symlink ที่ชี้ถูกไหม
         if (linkInfo.exists() || linkInfo.isSymLink()) {
             if (linkInfo.isSymLink()) {
                 const QString target = linkInfo.symLinkTarget();
+                // symLinkTarget() อาจเป็น relative → เทียบแบบ canonical
                 const QString targetCanon = canonicalOrAbs(target);
                 const QString realCanon   = canonicalOrAbs(realDir);
 
@@ -225,11 +268,13 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
                 qWarning() << "[voicex] /var/voicex exists but not a symlink -> remove";
             }
 
+            // มีแต่ไม่ถูก ต้องลบทิ้งก่อน
             QProcess p;
             p.start("/bin/bash", QStringList() << "-lc" << "rm -rf /var/voicex");
             p.waitForFinished(30000);
         }
 
+        // สร้าง symlink
         if (!QFile::link(realDir, linkDir)) {
             qCritical() << "[voicex] failed to create symlink:" << linkDir << "->" << realDir;
             return false;
@@ -278,6 +323,7 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     if (!ensureSymlink())
         return;
 
+    // ถ้าคุณต้องการให้ restart เฉพาะตอน “แก้/สร้างจริง ๆ” บอกได้
     RestartSystemServicesAfter30s();
 }
 
@@ -304,15 +350,15 @@ void mainwindowsiRec::getDateTime()
     int targetMinute = 0;
     int targetSecond = 0;
 
-    if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
-        int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
-        if (ret == 0) {
-            qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
-            lastRunHour = nowTime.hour();
-        } else {
-            qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
-        }
-    }
+    //        if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
+    //            int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
+    //            if (ret == 0) {
+    //                qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
+    //                lastRunHour = nowTime.hour();
+    //            } else {
+    //                qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
+    //            }
+    //        }
 
 }
 
@@ -674,12 +720,13 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
     }else if (obj["menuID"].toString() == "deletedFileWave") {
         qDebug() << "deletedFileWave:";
         mysql->deletedFileWave(qmlJson, wClient);
+    }else if (obj["menuID"].toString() == "playRecording") {
+        qDebug() << "playRecording:";
+        mysql->playRecording();
     }else {
         qWarning() << "[cppSubmitTextFiledMySQL] unknown menuID:" << menuID << qmlJson;
     }
 }
-
-
 
 
 void mainwindowsiRec::cppSubmitTextFiledMySQL(QString qmlJson){
@@ -747,11 +794,11 @@ void mainwindowsiRec::InitializingRTCtoSystem()
         checkAndUpdateRTC();  // เรียกทันทีตอนเริ่มแรก
         initialized = true;
     }
-    //    QTimer::singleShot(15000, this, [=]() {
-    //        qDebug() << "Restarting irecd.service after 20s delay...";
-    //        system("systemctl restart irecd.service");
-    //        system("systemctl restart iplayd.service");
-    //    });
+//    QTimer::singleShot(15000, this, [=]() {
+//        qDebug() << "Restarting irecd.service after 20s delay...";
+//        system("systemctl restart irecd.service");
+//        system("systemctl restart iplayd.service");
+//    });
 }
 
 
@@ -932,28 +979,40 @@ bool mainwindowsiRec::mountSdDevice(const QString &devName) const
 
 bool mainwindowsiRec::unmountSdDevice(const QString &devName) const
 {
-    qDebug() << "unmountSdDevice:" << devName;
+    qDebug() << "[unmountSdDevice] request:" << devName;
+
     QString baseName = devName;
     if (baseName.startsWith("/dev/"))
-        baseName = baseName.mid(5);   // "/dev/sda1" -> "sda1"
+        baseName = baseName.mid(5);
 
-    // ถ้าเป็น pattern sda1, sdb1, ... จะเอาแค่ 3 ตัวแรกให้ได้ root disk
-    // เพื่อให้ path เป็น /media/usb_sda, /media/usb_sdb
     if (baseName.startsWith("sd") && baseName.size() >= 4)
-        baseName = baseName.left(3);  // "sda1" -> "sda"
+        baseName = baseName.left(3);   // sda1 -> sda
 
-    QString mountPoint = "/media/usb_" + baseName;  // /media/usb_sda, /media/usb_sdb, ...
+    QString mountPoint = "/media/usb_" + baseName;
 
-    qDebug() << "[unmountSdDevice] trying umount" << mountPoint;
+    if (!QDir(mountPoint).exists()) {
+        qWarning() << "[unmountSdDevice] mountPoint not exist:" << mountPoint;
+        return false;
+    }
 
+    // ✅ เช็คว่ามัน mount อยู่จริงไหม
+    QProcess check;
+    check.start("mount");
+    check.waitForFinished(2000);
+
+    if (!check.readAllStandardOutput().contains(mountPoint.toUtf8())) {
+        qWarning() << "[unmountSdDevice] not mounted:" << mountPoint;
+        return false;
+    }
+
+    qDebug() << "[unmountSdDevice] lazy umount:" << mountPoint;
+
+    // ✅ Lazy umount (Jetson-safe)
     QProcess p;
-    QStringList args;
-    args << mountPoint;
+    p.start("umount", QStringList() << "-l" << mountPoint);
 
-    // ใช้ umount ตามที่คุณบอก (ไม่ใช่ rm)
-    p.start("umount", args);
-    if (!p.waitForFinished(5000)) {
-        qWarning() << "[unmountSdDevice] umount timeout for" << mountPoint;
+    if (!p.waitForFinished(3000)) {
+        qWarning() << "[unmountSdDevice] umount timeout";
         return false;
     }
 
@@ -963,107 +1022,93 @@ bool mainwindowsiRec::unmountSdDevice(const QString &devName) const
         return false;
     }
 
-    qDebug() << "[unmountSdDevice] umount success for" << mountPoint;
-
-    // ถ้าไม่อยากให้โฟลเดอร์ค้างอยู่ใน /media และมันว่างเปล่าแล้ว
-    // สามารถลบโฟลเดอร์แบบปลอดภัยด้วย rmdir (ไม่ใช่ rm -rf)
-    // QDir dir;
-    // dir.rmdir(mountPoint); // จะลบได้เฉพาะตอนโฟลเดอร์ว่าง
-
+    qDebug() << "[unmountSdDevice] umount success (lazy)";
     return true;
 }
 
 bool mainwindowsiRec::unmountAllUsbSd() const
 {
-    // 0) DEBUG: current working directory
-    QString cwd = QDir::currentPath();
+    // 0) move CWD away from /media/usb_* to avoid "device busy"
+    const QString cwd = QDir::currentPath();
     qDebug() << "[unmountAllUsbSd] currentPath =" << cwd;
 
-    // ถ้าอยู่ใน USB → ต้องออกมาก่อน
-    if (cwd.startsWith("/media/usb_sd")) {
+    if (cwd.startsWith("/media/usb_")) {
         QDir::setCurrent("/");
         qDebug() << "[unmountAllUsbSd] changed CWD to /";
     }
 
-    // 1) SYNC ก่อน unmount
-    ::sync();
-    qDebug() << "[unmountAllUsbSd] sync() done";
-
-    // 2) หา directory usb_sd*
     QDir mediaDir("/media");
     if (!mediaDir.exists()) {
         qWarning() << "[unmountAllUsbSd] /media not exists";
         return false;
     }
 
+    // 1) find mount dirs you actually use:
+    //    - /media/usb_sdb (your df -h shows this)
+    //    - also support legacy /media/usb_sd*
     QStringList dirs = mediaDir.entryList(
-        QStringList() << "usb_sd*",
+        QStringList() << "usb_sd*" << "usb_sd?" << "usb_sd??" << "usb_sd???"
+                      << "usb_sd"  // just in case
+                      << "usb_sda" << "usb_sdb" << "usb_sdc" << "usb_sdd" << "usb_sde" << "usb_sdf"
+                      << "usb_sdg" << "usb_sdh" << "usb_sdi" << "usb_sdj" << "usb_sdk" << "usb_sdl"
+                      << "usb_sdm" << "usb_sdn" << "usb_sdo" << "usb_sdp" << "usb_sdq" << "usb_sdr"
+                      << "usb_sds" << "usb_sdt" << "usb_sdu" << "usb_sdv" << "usb_sdw" << "usb_sdx"
+                      << "usb_sdy" << "usb_sdz",
         QDir::Dirs | QDir::NoDotAndDotDot);
 
+    // กันซ้ำ
+    dirs.removeDuplicates();
+
     if (dirs.isEmpty()) {
-        qWarning() << "[unmountAllUsbSd] no usb_sd* dirs found";
+        qWarning() << "[unmountAllUsbSd] no /media/usb_* dirs found";
         return false;
     }
 
+    // 2) confirm what is mounted (avoid umount on non-mount dirs)
+    QProcess mountProc;
+    mountProc.start("mount");
+    if (!mountProc.waitForFinished(2000)) {
+        qWarning() << "[unmountAllUsbSd] mount command timeout";
+        // ยังพอทำต่อได้แบบ "ลอง umount -l" แต่จะ noisy
+    }
+    const QByteArray mountOut = mountProc.readAllStandardOutput();
+
     bool anyOk = false;
 
-    // 3) Loop unmount ทุกอัน
     for (const QString &dName : dirs) {
+        const QString mountPoint = mediaDir.absoluteFilePath(dName);
 
-        QString mountPoint = mediaDir.absoluteFilePath(dName);
-        qDebug() << "[unmountAllUsbSd] try umount" << mountPoint;
-
-        // 3.1) SYNC ต่ออีกรอบ เผื่อ background flush
-        ::sync();
-
-        // 3.2) ใช้ fuser เช็กว่า process ไหนจับอยู่ (แบบ verbose)
-        QProcess fuser;
-        fuser.start("fuser", QStringList() << "-vm" << mountPoint);
-        fuser.waitForFinished(1500);
-
-        QString busyOut = QString::fromLocal8Bit(fuser.readAllStandardOutput());
-        QString busyErr = QString::fromLocal8Bit(fuser.readAllStandardError());
-
-        if (!busyOut.trimmed().isEmpty() || !busyErr.trimmed().isEmpty()) {
-            qWarning() << "[unmountAllUsbSd] fuser output:\n" << busyOut << busyErr;
-        }
-        // แปลง list ของ PID จาก fuser
-        QStringList pids;
-        for (const QString &tok : busyOut.split(QRegExp("\\s+"), QString::SkipEmptyParts)) {            bool ok = false;
-            int pid = tok.toInt(&ok);
-            if (ok) {
-                pids << tok;
-            }
+        // ถ้าไม่ได้ mount อยู่จริง ข้าม
+        if (!mountOut.isEmpty() && !mountOut.contains(mountPoint.toUtf8())) {
+            qDebug() << "[unmountAllUsbSd] skip (not mounted):" << mountPoint;
+            continue;
         }
 
-        if (!pids.isEmpty()) {
-            qWarning() << "[unmountAllUsbSd] try kill PIDs:" << pids;
-            for (const QString &pid : pids) {
-                // ส่ง SIGTERM ก่อน
-                QProcess::execute("kill", QStringList() << "-TERM" << pid);
-            }
-            ::sync();
-        }
+        qDebug() << "[unmountAllUsbSd] try lazy umount" << mountPoint;
 
-        // 3.3) ทำการ unmount
+        // 3) Jetson-safe: use lazy umount to avoid long kernel stall
         QProcess p;
-        p.start("umount", QStringList() << mountPoint);
+        p.start("umount", QStringList() << "-l" << mountPoint);
 
-        if (!p.waitForFinished(5000)) {
-            qWarning() << "[unmountAllUsbSd] umount timeout for" << mountPoint;
+        if (!p.waitForFinished(3000)) {
+            qWarning() << "[unmountAllUsbSd] umount -l timeout for" << mountPoint;
             continue;
         }
 
         if (p.exitCode() != 0) {
-            qWarning() << "[unmountAllUsbSd] umount error for" << mountPoint
+            qWarning() << "[unmountAllUsbSd] umount -l error for" << mountPoint
                        << ":" << p.readAllStandardError();
             continue;
         }
 
-        qDebug() << "[unmountAllUsbSd] umount success for" << mountPoint;
+        qDebug() << "[unmountAllUsbSd] umount -l success for" << mountPoint;
 
-        // 3.4) ลบ directory ถ้าว่าง
-        mediaDir.rmdir(dName);
+        // 4) remove directory if empty (safe)
+        // NOTE: after lazy umount, directory might still be busy for a moment, so rmdir may fail.
+        // It's OK to ignore.
+        if (!mediaDir.rmdir(dName)) {
+            qDebug() << "[unmountAllUsbSd] rmdir skipped/failed (ok):" << mountPoint;
+        }
 
         anyOk = true;
     }
@@ -1546,7 +1591,7 @@ void* mainwindowsiRec::ThreadFuncDateTime(void* pTr)
     qDebug() << "ThreadFuncDateTime start";
     while (pThis->m_threadRunning) {
         if (pThis->m_qmlConnected.load(std::memory_order_relaxed)) {
-            //            pThis->calendar();
+//            pThis->calendar();
         }
         QThread::msleep(1000);
     }

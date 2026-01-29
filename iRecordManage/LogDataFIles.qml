@@ -138,7 +138,7 @@ Item {
                                         items = collectSelectedFiles()
                                     }
 
-                                    console.log("[AutoSelectFiles] items.length =", items.length)
+//                                    console.log("[AutoSelectFiles] items.length =", items.length)
 
                                     if (items.length > 0) {
                                         editor.setFiles(items)   // ✅ คำนวณ summary เสร็จใน editor แล้ว
@@ -223,117 +223,6 @@ Item {
 //=======================================================================================
                         }
                     }
-
-//                    C1.TableViewColumn {
-//                        role: "selected"
-//                        title: ""
-//                        width: 56
-
-//                        delegate: Item {
-//                            anchors.fill: parent
-
-//                            // กล่องติ๊ก (สีเขียว/ขาว)
-//                            Rectangle {
-//                                id: box
-//                                anchors.centerIn: parent
-//                                width: 45
-//                                height: 45
-//                                radius: 10
-//                                border.width: 1
-//                                border.color: styleData.value ? "#10b981" : "#9aa3af"
-//                                color:        styleData.value ? "#34d399" : "#ffffff"
-
-//                                Rectangle {
-//                                    anchors.centerIn: parent
-//                                    width: parent.width  - 6
-//                                    height: parent.height - 6
-//                                    radius: 3
-//                                    color: styleData.value ? "#34d399" : "transparent"
-//                                    opacity: styleData.value ? 0.7 : 0.0
-//                                }
-//                            }
-
-//                            // จัดการคลิกเอง
-//                            MouseArea {
-//                                anchors.fill: parent
-//                                onClicked: {
-//                                    var cur  = !!styleData.value       // ค่าปัจจุบันใน model
-//                                    var next = !cur                    // toggle
-//                                    listFileRecord.setProperty(styleData.row, "selected", next)
-//                                    window.toggleSelection(styleData.row, next)
-
-//                                    var it = listFileRecord.get(styleData.row)
-//                                    console.log("[SelectBox]", next ? "✔" : "✖",
-//                                                "row:", styleData.row,
-//                                                "idDevice:", String(it.idDevice || it.filename || it.file_path || styleData.row),
-//                                                "filename:", String(it.filename || ""))
-//                                }
-//                            }
-//                        }
-//                    }
-
-//                    C1.TableViewColumn {
-//                        role: "selected"
-//                        title: ""
-//                        width: 56
-//                        delegate: Item {
-//                            anchors.fill: parent
-
-//                            C1.CheckBox {
-//                                id: chk
-//                                anchors.centerIn: parent
-//                                scale: 1.5
-//                                checked: !!styleData.value
-//                                style: CheckBoxStyle {
-//                                    label: Item {}
-//                                    indicator: Rectangle {
-//                                        implicitWidth: 18
-//                                        implicitHeight: 18
-//                                        radius: 4
-//                                        border.width: 1
-//                                        border.color: control.checked ? "#10b981" : "#9aa3af"
-//                                        color: control.checked ? "#34d399" : "#ffffff"
-
-//                                        Rectangle {
-//                                            anchors.centerIn: parent
-//                                            width: parent.width - 6
-//                                            height: parent.height - 6
-//                                            radius: 3
-//                                            color: control.checked ? "#34d399" : "transparent"
-//                                            opacity: control.checked ? 0.7 : 0.0
-//                                        }
-//                                    }
-//                                }
-
-//                                onClicked: {
-//                                    listFileRecord.setProperty(styleData.row, "selected", checked)
-//                                    window.toggleSelection(styleData.row, checked)
-//                                    const it = listFileRecord.get(styleData.row)
-//                                    console.log("[Checkbox]", checked ? "✔" : "✖",
-//                                                "row:", styleData.row,
-//                                                "idDevice:", String(it.idDevice || it.filename || it.file_path || styleData.row),
-//                                                "filename:", String(it.filename||""))
-//                                    console.log("[Selected IDs]", JSON.stringify(window.getSelectedIds()))
-//                                }
-//                            }
-//                        }
-//                    }
-
-
-//                    C1.TableViewColumn {
-//                        role: "selected"
-//                        title: ""
-//                        width: 56
-//                        delegate: Item {
-//                            anchors.fill: parent
-//                            C1.CheckBox {
-//                                anchors.centerIn: parent
-//                                checked: styleData.value
-//                                scale: 1.5
-//                                onClicked: listFileRecord.setProperty(styleData.row, "selected", checked)
-//                            }
-//                        }
-//                    }
                     C1.TableViewColumn { role: "device";       title: "device";      width: 100 }
                     C1.TableViewColumn { role: "filename";     title: "File Name";   width: 720 }
                     C1.TableViewColumn { role: "size";         title: "Size(KB)";    width: 120 }
@@ -481,17 +370,17 @@ Item {
     }
 
     function uncheckAll() {
-        console.log("uncheckAll()")
+//        console.log("uncheckAll()")
         var m = recordFileSDatebase.model
         if (!m || m.count <= 0) {
-            console.log("uncheckAll: model empty")
+//            console.log("uncheckAll: model empty")
             return
         }
 
-        console.log("uncheckAll: model.count =", m.count)
+//        console.log("uncheckAll: model.count =", m.count)
         for (var i = 0; i < m.count; ++i) {
             if (m.get(i).selected)
-                console.log("  -> clear row", i, "was selected")
+//                console.log("  -> clear row", i, "was selected")
             m.setProperty(i, "selected", false)
         }
 
@@ -533,7 +422,7 @@ Item {
 
     function applyRecordFilesChunk(obj) {
         var recs = obj.records || []
-        console.log("[LogDataFiles] applyRecordFilesChunk, recs =", recs.length)
+//        console.log("[LogDataFiles] applyRecordFilesChunk, recs =", recs.length)
 
         listFileRecord.clear()
 
@@ -563,7 +452,7 @@ Item {
             })
         }
 
-        console.log("[LogDataFiles] after apply, listFileRecord.count =", listFileRecord.count)
+//        console.log("[LogDataFiles] after apply, listFileRecord.count =", listFileRecord.count)
     }
 
 }

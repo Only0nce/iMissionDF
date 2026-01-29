@@ -213,32 +213,32 @@ Item {
         // ใช้ enginePlaying แทน playbackState เพื่อรู้ว่า "ผู้ใช้ตั้งใจเล่นอยู่"
         var resume = enginePlaying
 
-        console.log("[ensure] ms=", ms,
-                    " -> seg#", currentSegIndex,
-                    " segStartMs=", segStartMs,
-                    " offsetMs=", f.offsetMs,
-                    " want=", want,
-                    " resume(enginePlaying)=", resume)
+//        console.log("[ensure] ms=", ms,
+//                    " -> seg#", currentSegIndex,
+//                    " segStartMs=", segStartMs,
+//                    " offsetMs=", f.offsetMs,
+//                    " want=", want,
+//                    " resume(enginePlaying)=", resume)
 
         // เปลี่ยนไฟล์ถ้าไม่ตรง
         if (player.source !== want) {
             player.stop()
             player.source = want
-            console.log("[ensure] source set =>", want)
+//            console.log("[ensure] source set =>", want)
         }
 
         // seek ได้ทันทีถ้า loaded แล้ว
         if (player.status === Audio.Loaded || player.status === Audio.Buffered || player.duration > 0) {
             var off = Math.max(0, Math.min(segList[currentSegIndex].durationMs - 1, f.offsetMs))
-            console.log("[ensure] instant seek to", off, "ms")
+//            console.log("[ensure] instant seek to", off, "ms")
             player.seek(off)
             if (resume) player.play()
         } else {
             _pendingSeekMs = f.offsetMs
             _pendingResume = resume
-            console.log("[ensure] defer seek => pendingSeekMs=", _pendingSeekMs,
-                        " pendingResume=", _pendingResume,
-                        " status=", player.status)
+//            console.log("[ensure] defer seek => pendingSeekMs=", _pendingSeekMs,
+//                        " pendingResume=", _pendingResume,
+//                        " status=", player.status)
         }
     }
 
@@ -365,11 +365,11 @@ Item {
 
     /* ===== File intake (Combine) ===== */
     function setFiles(items, restoreSummary) {
-        console.log("setFiles:", items)
+//        console.log("setFiles:", items)
 
         var arr = items || []
         loadedFiles = arr
-        console.log("[WaveEditor] setFiles:", arr.length, "file(s)")
+//        console.log("[WaveEditor] setFiles:", arr.length, "file(s)")
 
         // --- 1) sort ตาม timestamp ในชื่อไฟล์ ---
         var tmp = []
@@ -486,22 +486,22 @@ Item {
                 totalSizeKB = rsSizeKB
             }
 
-            console.log("[WaveEditor] APPLY RESTORE SUMMARY ->",
-                        "totalMs=", durationMs,
-                        "totalDurationSec=", totalDurationSec,
-                        "totalSizeKB=", totalSizeKB)
+//            console.log("[WaveEditor] APPLY RESTORE SUMMARY ->",
+//                        "totalMs=", durationMs,
+//                        "totalDurationSec=", totalDurationSec,
+//                        "totalSizeKB=", totalSizeKB)
         }
 
-        console.log("[SUMMARY] totalFiles=", totalFiles,
-                    "sampleCount=", sampleCount,
-                    "totalMs=", durationMs,
-                    "totalDurationSec=", totalDurationSec.toFixed(3),
-                    "totalSizeKB=", (isFinite(totalSizeKB) ? totalSizeKB.toFixed(3) : totalSizeKB),
-                    "samples.length:", samples.length)
+//        console.log("[SUMMARY] totalFiles=", totalFiles,
+//                    "sampleCount=", sampleCount,
+//                    "totalMs=", durationMs,
+//                    "totalDurationSec=", totalDurationSec.toFixed(3),
+//                    "totalSizeKB=", (isFinite(totalSizeKB) ? totalSizeKB.toFixed(3) : totalSizeKB),
+//                    "samples.length:", samples.length)
 
-        console.log("[PLAYER] total selected:", files.length, "file(s)")
+//        console.log("[PLAYER] total selected:", files.length, "file(s)")
         for (var idx = 0; idx < files.length; ++idx)
-            console.log("   [" + idx + "]", files[idx])
+//            console.log("   [" + idx + "]", files[idx])
 
         concatMode = (files.length > 1)
 
@@ -827,28 +827,28 @@ Item {
         }
 
         onPlaybackStateChanged: {
-            console.log("[Audio] playbackState=", playbackState,
-                        "pos=", position,
-                        "concatMode=", concatMode,
-                        "playPosMs=", playPosMs,
-                        "duration=", duration,
-                        "durationMs(total)=", durationMs)
+//            console.log("[Audio] playbackState=", playbackState,
+//                        "pos=", position,
+//                        "concatMode=", concatMode,
+//                        "playPosMs=", playPosMs,
+//                        "duration=", duration,
+//                        "durationMs(total)=", durationMs)
         }
 
         onDurationChanged: {
-            console.log("[Audio] durationChanged:", duration,
-                        " ourDurationMs:", durationMs,
-                        " parsed(seg0):", segList.length ? segList[0].durationMs : -1)
+//            console.log("[Audio] durationChanged:", duration,
+//                        " ourDurationMs:", durationMs,
+//                        " parsed(seg0):", segList.length ? segList[0].durationMs : -1)
         }
 
         onStatusChanged: {
-            console.log("[Audio] status=", status,
-                        "duration=", duration,
-                        "pos=", position,
-                        "concatMode=", concatMode,
-                        "playPosMs=", playPosMs,
-                        "durationMs(total)=", durationMs,
-                        "seg#", currentSegIndex)
+//            console.log("[Audio] status=", status,
+//                        "duration=", duration,
+//                        "pos=", position,
+//                        "concatMode=", concatMode,
+//                        "playPosMs=", playPosMs,
+//                        "durationMs(total)=", durationMs,
+//                        "seg#", currentSegIndex)
 
             // ---- pending seek (ของเดิมคุณ แต่ปรับ clamp ให้ใช้ seg duration ใน concat) ----
             if (_pendingSeekMs >= 0 &&
@@ -861,7 +861,7 @@ Item {
                 }
 
                 var off = Math.max(0, Math.min(maxDur - 1, _pendingSeekMs))
-                console.log("[Audio] do pending seek:", off, "ms; resume=", _pendingResume)
+//                console.log("[Audio] do pending seek:", off, "ms; resume=", _pendingResume)
 
                 seek(off)
                 if (_pendingResume)
@@ -876,7 +876,7 @@ Item {
 
             // ✅ EndOfMedia: ไป segment ถัดไปจริง
             if (status === Audio.EndOfMedia) {
-                console.log("[Audio] EndOfMedia reached, enginePlaying=", enginePlaying, "currentSegIndex=", currentSegIndex)
+//                console.log("[Audio] EndOfMedia reached, enginePlaying=", enginePlaying, "currentSegIndex=", currentSegIndex)
 
                 if (!enginePlaying) {
                     // ผู้ใช้ไม่ได้กด play ค้างไว้
@@ -886,7 +886,7 @@ Item {
                 var nextIndex = currentSegIndex + 1
                 if (nextIndex < files.length && nextIndex < segList.length) {
                     var nextMs = segBaseMs(nextIndex) // ✅ เวลาเริ่มของ segment ถัดไปใน timeline รวม
-                    console.log("[Audio] advance -> nextIndex=", nextIndex, "nextMs=", nextMs)
+//                    console.log("[Audio] advance -> nextIndex=", nextIndex, "nextMs=", nextMs)
 
                     // setPlayhead จะเรียก ensurePlayerSourceForMs และ seek ให้เอง
                     setPlayhead(nextMs)
@@ -894,7 +894,7 @@ Item {
                     // กันบางเคสที่ status เปลี่ยนแล้วไม่ auto play
                     player.play()
                 } else {
-                    console.log("[Audio] all segments finished")
+//                    console.log("[Audio] all segments finished")
                     ended = true
                     enginePlaying = false
                     player.stop()
@@ -921,7 +921,7 @@ Item {
 
             // ถ้า Audio หยุดเร็ว แต่เรายังไม่ถึงปลายจริง ให้สั่งเล่นต่อ
             if (!concatMode && player.playbackState === Audio.StoppedState && !ended && playPosMs < durationMs) {
-                console.log("[tick] single-file: backend stopped early, resume play() to keep clock running")
+//                console.log("[tick] single-file: backend stopped early, resume play() to keep clock running")
                 player.play()
             }
 
@@ -950,7 +950,7 @@ Item {
                 var maxStep = interval * speedInterval
                 var step = Math.max(-maxStep, Math.min(maxStep, diff))
                 playPosMs = clamp(playPosMs + step, 0, dur)
-                console.log("[playheadTimer]->","target:",target,"diff:",diff,"maxStep:",maxStep,"step:",step,"playPosMs:",playPosMs,"player.position:",player.position,"durationMs:",durationMs,"dur:",dur)
+//                console.log("[playheadTimer]->","target:",target,"diff:",diff,"maxStep:",maxStep,"step:",step,"playPosMs:",playPosMs,"player.position:",player.position,"durationMs:",durationMs,"dur:",dur)
             }
             updatePlayhead()
         }
@@ -1019,7 +1019,7 @@ Item {
 
     /* ===== Reset waveform when Clear pressed ===== */
     function clearWaveform() {
-        console.log("[WaveEditor] clearWaveform() called")
+//        console.log("[WaveEditor] clearWaveform() called")
         player.stop()
         player.source = ""
         samples = []
@@ -1097,11 +1097,11 @@ Item {
                     onTogglePlayRequested: function (wantPlay) {
                         enginePlaying = wantPlay
 
-                        console.log("[PlayerController] onTogglePlayRequested wantPlay=", wantPlay,
-                                    "ended=", ended, "concatMode=", concatMode,
-                                    "files.length=", files.length,
-                                    "durationMs(before)=", durationMs,
-                                    "player.source=", player.source)
+//                        console.log("[PlayerController] onTogglePlayRequested wantPlay=", wantPlay,
+//                                    "ended=", ended, "concatMode=", concatMode,
+//                                    "files.length=", files.length,
+//                                    "durationMs(before)=", durationMs,
+//                                    "player.source=", player.source)
 
                         if (wantPlay) {
                             if (ended) { setPlayhead(0); ended = false; }
@@ -1121,9 +1121,9 @@ Item {
                         } else {
                             player.pause()
                             wsClient.setSpeakerVolumeMute(1)
-                            console.log("set scanSqlLevels::", scanSqlLevels)
+//                            console.log("set scanSqlLevels::", scanSqlLevels)
                             mainWindows.setSqlLevel(scanSqlLevels)
-                            console.log("set scanSqlLevels::", scanSqlLevels)
+//                            console.log("set scanSqlLevels::", scanSqlLevels)
                             mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevels-255)/2).toFixed(1)+'}}')
                             scanSqlLevels = 0
                         }
@@ -1386,21 +1386,19 @@ Item {
     Component.onCompleted: {
         // ✅ เริ่ม restore
         restoringSelection = true
-        console.log("[RESTORE] start -> restoringSelection=true")
+//        console.log("[RESTORE] start -> restoringSelection=true")
 
         var st = fileReader.loadWaveSelectionState()
         if (st && st.ok && st.files && st.files.length > 0) {
             setFiles(st.files, st.summary)
-            console.log("[RESTORE] summary:", JSON.stringify(st.summary))
+//            console.log("[RESTORE] summary:", JSON.stringify(st.summary))
         } else {
-            console.log("[RESTORE] no saved selection")
+//            console.log("[RESTORE] no saved selection")
         }
 
         // ✅ จบ restore
         restoringSelection = false
-        console.log("[RESTORE] done -> restoringSelection=false")
+//        console.log("[RESTORE] done -> restoringSelection=false")
     }
-
-
 
 }

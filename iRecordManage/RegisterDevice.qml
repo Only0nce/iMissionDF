@@ -274,7 +274,7 @@ Item {
 
     function sendOut(msgObj) {
         var s = JSON.stringify(msgObj);
-        console.log("sendOut:", s);
+//        console.log("sendOut:", s);
         if (typeof qmlCommand === "function") {
             qmlCommand(s);
         } else if (typeof window !== "undefined" && typeof window.qmlCommand === "function") {

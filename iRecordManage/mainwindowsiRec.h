@@ -107,6 +107,7 @@ public slots:
     void onVerifyUserDatabaseDone(bool ok, const QString& message);
     void enableI2SLoopback();
     void ensureVoicexSymlinkAndFix();
+    void onFrequencyChangedFromMain(qint64 freqHz, double freqMHz);
 private:
     ChatServeriRec *SocketServer = nullptr;
     ChatServerWebRec *m_webServer = nullptr;   // << เพิ่มตัวนี้
@@ -194,7 +195,7 @@ private slots:
     void InitializingRTCtoSystem();
     void recLogging(int softPhoneID, int recorderID,QString recState, QString message);
     void VerifyFolderAndText();
-
+    void installFfmpegIfNeeded();
 };
 
 #endif // MAINWINDOWS_H

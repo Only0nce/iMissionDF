@@ -441,5 +441,6 @@
         <file>iScreenDFqml/images/chain_unlink.png</file>
         <file>iRecordManage/PopUPDeletedFileWave.qml</file>
         <file>iRecordManage/TumblerDateTime.qml</file>
+        <file>DoaViewer/WaterfallCanvas.qml</file>
     </qresource>
 </RCC>
