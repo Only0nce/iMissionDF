@@ -626,7 +626,6 @@ Item {
                 onClicked: {
                     var msg = { menuID: "refreshpage" }
                     qmlCommand(JSON.stringify(msg))
-
                 }
                 contentItem: Image {
                     anchors.fill: parent
@@ -807,6 +806,9 @@ Item {
                             exportOverlay.close()
                         })
                     }
+                    exportLoader.item.requestClose.connect(function() {
+                        exportOverlay.visible = false
+                    })
                 }
 
 //                onLoaded: {

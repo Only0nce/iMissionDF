@@ -103,7 +103,7 @@ int main(int argc, char *argv[])
 
     qputenv("QTWEBGL_PORT", QByteArray("8081"));
 
-    // qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
+    qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
 
     // qputenv("QT_IM_MODULE", QByteArray("qtvirtualkeyboard"));
     // QCoreApplication::setAttribute(Qt::AA_EnableHighDpiScaling);

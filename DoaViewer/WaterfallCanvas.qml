@@ -1,365 +1,523 @@
+// // WaterfallCanvas.qml (FULL FILE)
+// // - Newest row at TOP (flows top->down)
+// // - Aligns X scale with FftPlot by using same padLeft/padRight
+// // - Scrolls ONLY the plot area (inside padding)
+// // - Pull-based Timer (works even if waterfallRowDb has no NOTIFY)
+// // - Colors: array of 0xRRGGBB (decimal ok)
+
+// import QtQuick 2.15
+
+// Rectangle {
+//     id: root
+//     radius: 12
+//     color: "#060B16"
+//     border.color: "#1F2A44"
+//     border.width: 1
+//     clip: true
+
+//     // ===== Public API =====
+//     property bool enabled: true
+
+//     // 1 row = FFT magnitude dB array (e.g. doaClient.fftMagDb)
+//     property var  waterfallRowDb: []
+
+//     // dB scaling (match FFT)
+//     property real minDb: -150.0
+//     property real maxDb: -50.0
+
+//     // fps + row height
+//     property int  wfFps: 25
+//     property int  rowHeightPx: 1
+
+//     // colormap: array of decimal colors (0xRRGGBB)
+//     property var  waterfallColors: []
+
+//     // ===== IMPORTANT: align with FftPlot padding =====
+//     property int padLeft: 64
+//     property int padRight: 18
+//     property int padTop: 0
+//     property int padBottom: 0
+
+//     // show border of plot area
+//     property bool showFrame: true
+
+//     // debug overlay
+//     property bool showDebug: true
+
+//     // ===== Internal =====
+//     property int _frames: 0
+//     property int _lastLen: 0
+//     property int _sameCount: 0
+
+//     function _isValidArray(a) {
+//         return a !== undefined && a !== null && a.length !== undefined && a.length >= 8
+//     }
+//     function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+//     function _plotX0() { return Math.max(0, root.padLeft) }
+//     function _plotY0() { return Math.max(0, root.padTop) }
+//     function _plotW()  { return Math.max(0, root.width  - root.padLeft - root.padRight) }
+//     function _plotH()  { return Math.max(0, root.height - root.padTop  - root.padBottom) }
+
+//     function _colorIndexFromDb(db) {
+//         var mn = Number(root.minDb)
+//         var mx = Number(root.maxDb)
+//         if (!isFinite(mn)) mn = -150
+//         if (!isFinite(mx)) mx = -50
+//         if (mx <= mn) mx = mn + 1.0
+
+//         var t = (Number(db) - mn) / (mx - mn)
+//         if (!isFinite(t)) t = 0
+//         t = _clamp(t, 0, 1)
+
+//         // ✅ boost brightness (gamma < 1 => brighter)
+//         var gamma = 0.6
+//         t = Math.pow(t, gamma)
+
+//         var L = root.waterfallColors.length
+//         if (L <= 1) return -1
+//         return Math.floor(t * (L - 1) + 0.000001)
+//     }
+
+
+//     function _rgbCssFromColorInt(c) {
+//         var r = (c >> 16) & 255
+//         var g = (c >> 8) & 255
+//         var b = (c) & 255
+//         return "rgb(" + r + "," + g + "," + b + ")"
+//     }
+
+//     // ===== Canvas (persistent surface) =====
+//     Canvas {
+//         id: wfCanvas
+//         anchors.fill: parent
+//         visible: root.enabled
+//         antialiasing: false
+//         renderTarget: Canvas.FramebufferObject
+
+//         property var _pendingRow: null
+//         property bool _inited: false
+
+//         onPaint: {
+//             var ctx = getContext("2d")
+//             ctx.setTransform(1,0,0,1,0,0)
+
+//             var x0 = root._plotX0()
+//             var y0 = root._plotY0()
+//             var W  = root._plotW()
+//             var Hh = root._plotH()
+
+//             // init / reset
+//             if (!wfCanvas._inited) {
+//                 ctx.fillStyle = root.color
+//                 ctx.fillRect(0, 0, width, height)
+
+//                 // optional plot frame
+//                 if (root.showFrame && W > 2 && Hh > 2) {
+//                     ctx.strokeStyle = "rgba(36,49,76,0.9)"
+//                     ctx.lineWidth = 1
+//                     ctx.strokeRect(x0 + 0.5, y0 + 0.5, W - 1, Hh - 1)
+//                 }
+
+//                 wfCanvas._inited = true
+//                 return
+//             }
+
+//             var row = wfCanvas._pendingRow
+//             wfCanvas._pendingRow = null
+//             if (!_isValidArray(row)) return
+//             if (root.waterfallColors.length < 2) return
+//             if (W < 4 || Hh < 4) return
+
+//             var rh = Math.max(1, Math.floor(root.rowHeightPx))
+//             if (rh > Hh) rh = Hh
+
+//             // =========================================
+//             // ✅ SHIFT ONLY plot-area DOWN by rh pixels
+//             // =========================================
+//             // src: (x0, y0) .. (x0+W, y0+Hh-rh)
+//             // dst: (x0, y0+rh) .. (x0+W, y0+Hh)
+//             ctx.drawImage(wfCanvas,
+//                           x0, y0, W, Hh - rh,
+//                           x0, y0 + rh, W, Hh - rh)
+
+//             // clear TOP band inside plot-area for new row
+//             ctx.fillStyle = root.color
+//             ctx.fillRect(x0, y0, W, rh)
+
+//             // =========================================
+//             // ✅ DRAW NEW ROW AT TOP of plot-area
+//             // =========================================
+//             var y = y0
+//             var n = row.length
+
+//             for (var px = 0; px < W; px++) {
+//                 var bi = Math.floor(px * (n - 1) / Math.max(1, (W - 1)))
+//                 var db = Number(row[bi])
+//                 var ci = root._colorIndexFromDb(db)
+//                 if (ci < 0) continue
+//                 var c = root.waterfallColors[ci]
+//                 ctx.fillStyle = root._rgbCssFromColorInt(c)
+//                 ctx.fillRect(x0 + px, y, 1, rh)
+//             }
+
+//             // keep plot frame visible (redraw border lightly)
+//             if (root.showFrame) {
+//                 ctx.strokeStyle = "rgba(36,49,76,0.9)"
+//                 ctx.lineWidth = 1
+//                 ctx.strokeRect(x0 + 0.5, y0 + 0.5, W - 1, Hh - 1)
+//             }
+
+//             root._frames++
+//         }
+//     }
+
+//     function _pushRow(row) {
+//         if (!root.enabled) return
+//         if (!_isValidArray(row)) return
+//         if (root.waterfallColors.length < 2) return
+//         wfCanvas._pendingRow = row
+//         wfCanvas.requestPaint()
+//     }
+
+//     // ===== Pull-based update =====
+//     Timer {
+//         id: tick
+//         interval: Math.max(16, Math.floor(1000 / Math.max(1, root.wfFps)))
+//         running: root.enabled && root.visible
+//         repeat: true
+//         onTriggered: {
+//             var row = root.waterfallRowDb
+//             if (!_isValidArray(row)) { root._lastLen = 0; return }
+
+//             var len = row.length
+//             var a0  = Number(row[0])
+//             var aM  = Number(row[Math.floor(len/2)])
+//             var key = "" + len + "|" + a0.toFixed(2) + "|" + aM.toFixed(2)
+
+//             if (key === tick._lastKey) {
+//                 root._sameCount++
+//                 if (root._sameCount < 3) return
+//             } else {
+//                 root._sameCount = 0
+//                 tick._lastKey = key
+//             }
+
+//             root._lastLen = len
+//             root._pushRow(row)
+//         }
+//         property string _lastKey: ""
+//     }
+
+//     // ===== Debug overlay =====
+//     Rectangle {
+//         anchors.left: parent.left
+//         anchors.top: parent.top
+//         anchors.margins: 8
+//         radius: 8
+//         color: Qt.rgba(2/255, 6/255, 23/255, 0.65)
+//         border.color: "#24314C"
+//         border.width: 1
+//         visible: root.showDebug
+//         width: dbg.paintedWidth + 18
+//         height: 26
+
+//         Text {
+//             id: dbg
+//             anchors.centerIn: parent
+//             color: "#E5E7EB"
+//             font.pixelSize: 12
+//             text: "WF plotW=" + root._plotW()
+//                 + " len=" + root._lastLen
+//                 + " frames=" + root._frames
+//         }
+//     }
+
+//     // Disabled overlay
+//     Item {
+//         anchors.fill: parent
+//         visible: !root.enabled
+//         Rectangle { anchors.fill: parent; color: Qt.rgba(2/255, 6/255, 23/255, 0.55) }
+//         Text {
+//             anchors.centerIn: parent
+//             text: "WATERFALL OFF"
+//             color: "#F87171"
+//             font.pixelSize: 16
+//             font.bold: true
+//         }
+//     }
+
+//     function _reset() {
+//         wfCanvas._inited = false
+//         wfCanvas.requestPaint()
+//     }
+
+//     onWidthChanged:  _reset()
+//     onHeightChanged: _reset()
+//     onEnabledChanged: if (enabled) _reset()
+
+//     Component.onCompleted: _reset()
+// }
+// WaterfallCanvas.qml (FULL FILE)
+// - Pull-based (ไม่ต้องพึ่ง NOTIFY)
+// - New row goes to TOP, history shifts DOWN  ✅ (ไหลบนลงล่าง)
+// - Supports padLeft/padRight to align with FFT plot
+// - Uses colormap array of 0xRRGGBB ints
+// ---------------------------------------------------------------
+
 import QtQuick 2.15
-import QtQuick.Controls 2.15
 
 Rectangle {
     id: root
-    width: 640
-    height: 220
     radius: 12
     color: "#060B16"
     border.color: "#1F2A44"
     border.width: 1
     clip: true
 
-    // =========================
-    // Public API
-    // =========================
+    // ===== Public API =====
     property bool enabled: true
-    property var  freqHz: []          // optional
-    property var  magDb: []           // required
-    property int  fps: 20
 
-    // dB range (fixed)
-    property real minDb: -150
-    property real maxDb: -50
+    // 1 row = FFT magnitude dB array (e.g. doaClient.fftMagDb)
+    property var  waterfallRowDb: []
 
-    // Optional band overlay
-    property real bandCenterHz: 0
-    property real bandBwHz: 0
-    property bool showGrid: true
+    // shared with FFT
+    property bool autoDb: false
+    property real minDb: -150.0
+    property real maxDb: -50.0
 
-    // Plot padding
-    property int padLeft: 64
-    property int padRight: 12
-    property int padTop: 10
-    property int padBottom: 22
+    // fps + row height
+    property int  wfFps: 25
+    property int  rowHeightPx: 1
 
-    // Waterfall resolution
-    property int rowHeightPx: 1
+    // align with FFT plot
+    property int padLeft: 0
+    property int padRight: 0
 
-    // Palette (0xRRGGBB)
-    // (You can override from outside: colorLut: waterfallColors)
-    property var colorLut: [
-        0x30123b,0x311542,0x32184a,0x331b52,0x341e5a,0x352163,0x36246b,0x372773,
-        0x382a7c,0x392d84,0x3a308c,0x3b3395,0x3c369d,0x3d39a5,0x3e3cae,0x3f3fb6,
-        0x4042be,0x4145c7,0x4248cf,0x434bd7,0x444edf,0x4551e8,0x4654f0,0x4757f8,
-        0x465bff,0x4060ff,0x3766ff,0x2d6cff,0x2472ff,0x1b78ff,0x137eff,0x0c84ff,
-        0x078aff,0x0590ff,0x0896ff,0x109cff,0x19a2ff,0x23a8ff,0x2daeff,0x37b4ff,
-        0x41baff,0x4bc0ff,0x55c6ff,0x5fccff,0x69d2ff,0x73d8ff,0x7ddfff,0x87e5ff,
-        0x91ebff,0x9bf1ff,0xa5f7ff,0xaffdff,0xb7fffb,0xbfffef,0xc7ffe3,0xcfffd7,
-        0xd7ffcb,0xdfffbe,0xe7ffb2,0xefffa6,0xf7ff9a,0xfffd8e,0xfff282,0xffe776,
-        0xffdc6b,0xffd160,0xffc655,0xffbb4b,0xffb041,0xffa538,0xff9a30,0xff8f28,
-        0xff8421,0xff791b,0xff6e15,0xff6310,0xff580c,0xff4d08,0xff4205,0xff3702
-    ]
+    // colormap
+    property var  waterfallColors: []
 
-    // =========================
-    // Internal
-    // =========================
-    property bool _dirtyGrid: true
-    property int  _n: 0
-    property real _fmin: 0
-    property real _fmax: 1
+    // debug
+    property bool showDebug: true
+
+    // internal
+    property int _frames: 0
+    property int _lastLen: 0
+    property int _sameCount: 0
 
     function _isValidArray(a) {
         return a !== undefined && a !== null && a.length !== undefined && a.length >= 8
     }
 
-    function _plotW() { return Math.max(0, width  - padLeft - padRight) }
-    function _plotH() { return Math.max(0, height - padTop  - padBottom) }
+    function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 
-    function _calcXScale() {
-        var f = root.freqHz
-        var m = root.magDb
-        if (!_isValidArray(m)) { root._n = 0; return }
+    // map db -> color index
+    function _colorIndexFromDb(db) {
+        var mn = Number(root.minDb)
+        var mx = Number(root.maxDb)
+        if (!isFinite(mn)) mn = -150
+        if (!isFinite(mx)) mx = -50
+        if (mx <= mn) mx = mn + 1.0
 
-        var n = m.length
-        if (_isValidArray(f)) n = Math.min(f.length, m.length)
-        root._n = n
+        var t = (Number(db) - mn) / (mx - mn)
+        if (!isFinite(t)) t = 0
+        t = _clamp(t, 0, 1)
 
-        if (_isValidArray(f)) {
-            var f0 = Number(f[0])
-            var f1 = Number(f[n - 1])
-            var lo = Math.min(f0, f1)
-            var hi = Math.max(f0, f1)
-            if (!isFinite(lo) || !isFinite(hi) || hi <= lo) {
-                lo = 0
-                hi = Math.max(1, n - 1)
-            }
-            root._fmin = lo
-            root._fmax = hi
-        } else {
-            root._fmin = 0
-            root._fmax = Math.max(1, n - 1)
-        }
+        var L = root.waterfallColors.length
+        if (L <= 0) return -1
+        return Math.floor(t * (L - 1) + 0.000001)
     }
 
-    function _xFromFreq(hz) {
-        var W = _plotW()
-        return padLeft + ((hz - _fmin) / (_fmax - _fmin + 1e-12)) * W
+    function _rgbCssFromColorInt(c) {
+        var r = (c >> 16) & 255
+        var g = (c >> 8) & 255
+        var b = (c) & 255
+        return "rgb(" + r + "," + g + "," + b + ")"
     }
 
-    function _clamp01(x) {
-        if (x < 0) return 0
-        if (x > 1) return 1
-        return x
+    function _pushRow(row) {
+        if (!root.enabled) return
+        if (!_isValidArray(row)) return
+        if (root.width < 4 || root.height < 4) return
+        if (root.waterfallColors.length < 2) return
+
+        var H = Math.max(1, Math.floor(root.rowHeightPx))
+        if (H > root.height) H = root.height
+
+        // 1) shift history DOWN by H (make room at TOP)
+        scrollCanvas._rowH = H
+        scrollCanvas.requestPaint()
+
+        // 2) draw new row at TOP
+        drawCanvas._pendingRow = row
+        drawCanvas._rowH = H
+        drawCanvas.requestPaint()
+
+        root._frames++
     }
 
-    // Map dB -> LUT color (0xRRGGBB)
-    function _colorOfDb(db) {
-        var lo = Number(root.minDb)
-        var hi = Number(root.maxDb)
-        if (!isFinite(lo)) lo = -150
-        if (!isFinite(hi)) hi = -50
-        if (hi <= lo) hi = lo + 1
-
-        var t = (Number(db) - lo) / (hi - lo)
-        t = _clamp01(t)
-
-        var lut = root.colorLut
-        if (!lut || lut.length < 2) return 0x000000
-
-        var idx = Math.floor(t * (lut.length - 1))
-        if (idx < 0) idx = 0
-        if (idx >= lut.length) idx = lut.length - 1
-        return lut[idx] >>> 0
-    }
-
-    function _markGridDirty() { _dirtyGrid = true }
-
-    onFreqHzChanged:  { _calcXScale(); _markGridDirty() }
-    onMagDbChanged:   { _calcXScale() }             // (waterfall draws per-tick)
-    onMinDbChanged:   { }                           // (waterfall draws per-tick)
-    onMaxDbChanged:   { }                           // (waterfall draws per-tick)
-    onBandCenterHzChanged: _markGridDirty()
-    onBandBwHzChanged:     _markGridDirty()
-    onWidthChanged:  { _markGridDirty() }
-    onHeightChanged: { _markGridDirty() }
-
-    // ✅ Timer: always scroll+draw when data is present (no reliance on onMagDbChanged)
+    // ============ Pull-based update (NO NOTIFY needed) ============
     Timer {
         id: tick
-        interval: Math.max(16, Math.floor(1000 / Math.max(1, root.fps)))
-        running: root.visible
+        interval: Math.max(16, Math.floor(1000 / Math.max(1, root.wfFps)))
+        running: root.enabled && root.visible
         repeat: true
         onTriggered: {
-            // Keep n in sync even if backend mutates same array reference
-            root._calcXScale()
-
-            if (root._dirtyGrid) {
-                gridCanvas.requestPaint()
-                root._dirtyGrid = false
+            var row = root.waterfallRowDb
+            if (!_isValidArray(row)) {
+                root._lastLen = 0
+                return
             }
 
-            // draw 1 row continuously when enabled + has data
-            if (root.enabled && root._n >= 8 && root.magDb && root.magDb.length >= 8) {
-                wfCanvas.requestPaint()
+            var len = row.length
+            var a0  = Number(row[0])
+            var aM  = Number(row[Math.floor(len/2)])
+            var key = "" + len + "|" + a0.toFixed(2) + "|" + aM.toFixed(2)
+
+            if (key === tick._lastKey) {
+                root._sameCount++
+                if (root._sameCount < 3) return
+            } else {
+                root._sameCount = 0
+                tick._lastKey = key
             }
+
+            root._lastLen = len
+            root._pushRow(row)
         }
+        property string _lastKey: ""
     }
 
-    // =========================
-    // GRID / LABEL LAYER
-    // =========================
+    // ============ Canvas 1: keep history image ============
     Canvas {
-        id: gridCanvas
-        z: 2
+        id: scrollCanvas
         anchors.fill: parent
+        visible: root.enabled
         antialiasing: false
-        visible: true
-        renderTarget: Canvas.Image
+        renderTarget: Canvas.FramebufferObject
+
+        property bool _init: false
+        property int  _rowH: 1
 
         onPaint: {
             var ctx = getContext("2d")
             ctx.setTransform(1,0,0,1,0,0)
-            ctx.clearRect(0,0,width,height)
 
-            // background
-            ctx.fillStyle = "#060B16"
-            ctx.fillRect(0,0,width,height)
-
-            var left = root.padLeft
-            var top = root.padTop
-            var W = root._plotW()
-            var H = root._plotH()
-            if (W < 10 || H < 10) return
-
-            // plot border
-            ctx.strokeStyle = "rgba(36,49,76,0.9)"
-            ctx.lineWidth = 1
-            ctx.strokeRect(left + 0.5, top + 0.5, W - 1, H - 1)
-
-            // grid
-            if (root.showGrid) {
-                ctx.strokeStyle = "rgba(148,163,184,0.10)"
-                ctx.lineWidth = 1
-                for (var gx = 1; gx < 6; gx++) {
-                    var x = left + (gx / 6.0) * W
-                    ctx.beginPath()
-                    ctx.moveTo(x, top)
-                    ctx.lineTo(x, top + H)
-                    ctx.stroke()
-                }
+            if (scrollCanvas._init !== true) {
+                ctx.fillStyle = root.color
+                ctx.fillRect(0,0,width,height)
+                scrollCanvas._init = true
+                return
             }
 
-            // band overlay
-            if (root.bandBwHz > 0 && root._n >= 8) {
-                var b0 = root.bandCenterHz - root.bandBwHz * 0.5
-                var b1 = root.bandCenterHz + root.bandBwHz * 0.5
-                var inView = (b1 >= root._fmin && b0 <= root._fmax)
-                if (inView) {
-                    var xb0 = root._xFromFreq(Math.max(b0, root._fmin))
-                    var xb1 = root._xFromFreq(Math.min(b1, root._fmax))
-                    var xL = Math.min(xb0, xb1)
-                    var xR = Math.max(xb0, xb1)
-                    ctx.fillStyle = "rgba(34,197,94,0.07)"
-                    ctx.fillRect(xL, top, xR - xL, H)
+            var H = Math.max(1, Math.floor(scrollCanvas._rowH))
+            if (H > height) H = height
 
-                    if (root.bandCenterHz >= root._fmin && root.bandCenterHz <= root._fmax) {
-                        var xc = root._xFromFreq(root.bandCenterHz)
-                        ctx.strokeStyle = "rgba(34,197,94,0.55)"
-                        ctx.beginPath()
-                        ctx.moveTo(xc, top)
-                        ctx.lineTo(xc, top + H)
-                        ctx.stroke()
-                    }
-                }
-            }
+            // shift DOWN by H:
+            // copy (0..height-H) -> (H..height)
+            ctx.drawImage(scrollCanvas,
+                          0, 0, width, height - H,
+                          0, H, width, height - H)
 
-            // labels
-            ctx.fillStyle = "#AAB7D1"
-            ctx.font = "12px Arial, Helvetica, sans-serif"
-            ctx.fillText(root.maxDb.toFixed(0) + " dB", 10, top + 12)
-            ctx.fillText(root.minDb.toFixed(0) + " dB", 10, top + H)
+            // clear TOP band for new row
+            ctx.fillStyle = root.color
+            ctx.fillRect(0, 0, width, H)
         }
     }
 
-    // =========================
-    // WATERFALL LAYER (FAST SCROLL)
-    // =========================
+    // ============ Canvas 2: draw new row at TOP then composite into scrollCanvas ============
     Canvas {
-        id: wfCanvas
-        z: 1
+        id: drawCanvas
         anchors.fill: parent
+        visible: root.enabled
         antialiasing: false
-        visible: true
-        opacity: root.enabled ? 1.0 : 0.25
-        renderTarget: Canvas.Image
+        renderTarget: Canvas.FramebufferObject
 
-        // internal ImageData cache (W x H of plot area)
-        property var _img: null
-        property int _imgW: 0
-        property int _imgH: 0
-
-        function _ensureBuffer() {
-            var W = Math.floor(root._plotW())
-            var H = Math.floor(root._plotH())
-            if (W < 10 || H < 10) return false
-
-            if (_img === null || _imgW !== W || _imgH !== H) {
-                _imgW = W
-                _imgH = H
-                var ctx = getContext("2d")
-                _img = ctx.createImageData(W, H)
-
-                // clear to black
-                for (var i = 0; i < _img.data.length; i += 4) {
-                    _img.data[i] = 0
-                    _img.data[i+1] = 0
-                    _img.data[i+2] = 0
-                    _img.data[i+3] = 255
-                }
-            }
-            return true
-        }
+        property var _pendingRow: null
+        property int _rowH: 1
 
         onPaint: {
+            var row = drawCanvas._pendingRow
+            if (!_isValidArray(row)) return
+            if (root.waterfallColors.length < 2) return
+
             var ctx = getContext("2d")
             ctx.setTransform(1,0,0,1,0,0)
             ctx.clearRect(0,0,width,height)
 
-            if (root._n < 8 || !_isValidArray(root.magDb)) return
-            if (!_ensureBuffer()) return
+            var H = Math.max(1, drawCanvas._rowH)
+            if (H > height) H = height
 
-            var left = root.padLeft
-            var top = root.padTop
-            var W = _imgW
-            var H = _imgH
+            var yTop = 0
 
-            // 1) scroll DOWN by dy rows
-            var dy = Math.max(1, root.rowHeightPx)
-            if (dy >= H) dy = 1
+            // plot x range aligned with FFT padding
+            var left = Math.max(0, root.padLeft)
+            var rightPad = Math.max(0, root.padRight)
+            var xR = Math.max(left, Math.floor(width - rightPad))
+            var plotW = Math.max(1, xR - left)
 
-            var data = _img.data
-            var rowBytes = W * 4
+            // clear top band fully (including padding) to avoid leftover pixels
+            ctx.fillStyle = root.color
+            ctx.fillRect(0, yTop, width, H)
 
-            // copy backward to avoid overwrite
-            for (var y = H - 1; y >= dy; y--) {
-                var dst = y * rowBytes
-                var src = (y - dy) * rowBytes
-                for (var b = 0; b < rowBytes; b++) data[dst + b] = data[src + b]
+            var n = row.length
+
+            // draw only inside plot area (left..xR)
+            for (var px = 0; px < plotW; px++) {
+                var x = left + px
+                var bi = Math.floor(px * (n - 1) / Math.max(1, (plotW - 1)))
+                var db = Number(row[bi])
+                var ci = root._colorIndexFromDb(db)
+                if (ci < 0) continue
+                var c = root.waterfallColors[ci]
+                ctx.fillStyle = root._rgbCssFromColorInt(c)
+                ctx.fillRect(x, yTop, 1, H)
             }
 
-            // 2) write new top rows
-            var m = root.magDb
-            var n = root._n
-
-            for (var yy = 0; yy < dy; yy++) {
-                var base = yy * rowBytes
-                for (var x = 0; x < W; x++) {
-                    var iBin = Math.floor((x / (W - 1 + 1e-12)) * (n - 1))
-                    var rgb = root._colorOfDb(m[iBin])
-
-                    data[base + x*4 + 0] = (rgb >> 16) & 255
-                    data[base + x*4 + 1] = (rgb >>  8) & 255
-                    data[base + x*4 + 2] = (rgb >>  0) & 255
-                    data[base + x*4 + 3] = 255
-                }
-            }
-
-            // 3) draw to plot area
-            ctx.putImageData(_img, left, top)
-
-            // thin line for newest row
-            ctx.strokeStyle = "rgba(255,255,255,0.06)"
-            ctx.beginPath()
-            ctx.moveTo(left, top + 0.5)
-            ctx.lineTo(left + W, top + 0.5)
-            ctx.stroke()
+            // composite into scrollCanvas
+            var sctx = scrollCanvas.getContext("2d")
+            sctx.drawImage(drawCanvas, 0, 0, width, height, 0, 0, width, height)
         }
     }
 
-    // =========================
-    // DEBUG OVERLAY (always visible)
-    // =========================
+    // ============ Debug overlay ============
     Rectangle {
-        z: 10
-        visible: true
         anchors.left: parent.left
         anchors.top: parent.top
         anchors.margins: 8
         radius: 8
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: Qt.rgba(2/255, 6/255, 23/255, 0.65)
+        border.color: "#24314C"
         border.width: 1
-        opacity: 0.85
-        height: 24
-        width: debugText.paintedWidth + 16
+        visible: root.showDebug
+        width: dbg.paintedWidth + 18
+        height: 26
 
         Text {
-            id: debugText
+            id: dbg
             anchors.centerIn: parent
             color: "#E5E7EB"
             font.pixelSize: 12
-            text: "wf enabled=" + root.enabled
-                  + "  n=" + root._n
-                  + "  magLen=" + ((root.magDb && root.magDb.length !== undefined) ? root.magDb.length : "NA")
-                  + "  fps=" + root.fps
+            text: "WF len=" + root._lastLen + "  frames=" + root._frames + "  enabled=" + root.enabled
+        }
+    }
+
+    // Disabled overlay
+    Item {
+        anchors.fill: parent
+        visible: !root.enabled
+        Rectangle { anchors.fill: parent; color: Qt.rgba(2/255, 6/255, 23/255, 0.55) }
+        Text {
+            anchors.centerIn: parent
+            text: "WATERFALL OFF"
+            color: "#F87171"
+            font.pixelSize: 16
+            font.bold: true
         }
     }
 
     Component.onCompleted: {
-        _calcXScale()
-        _dirtyGrid = true
-        gridCanvas.requestPaint()
+        scrollCanvas._init = false
+        scrollCanvas.requestPaint()
     }
 }

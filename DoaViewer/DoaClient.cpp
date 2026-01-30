@@ -1,10 +1,14 @@
+// DoaClient.cpp  (FULL FILE) - Qt 5.15 compatible
 #include "DoaClient.h"
 
+#include <QTcpSocket>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QJsonParseError>
 #include <QtGlobal>
+#include <QVariantMap>
+#include <QVariantList>
 
 // =======================================================
 // Helpers for QVariantMap defaults (Qt 5.15 compatible)
@@ -266,6 +270,7 @@ void DoaClient::requestState()
     m["needAck"] = true;
     sendJson(m);
 }
+
 void DoaClient::setRfAgcEnable(int ch, bool enable, bool needAck)
 {
     QVariantMap obj;
@@ -440,7 +445,11 @@ void DoaClient::parseJsonLine(const QByteArray &line)
         const bool en    = agc.value("enabled").toBool();
         const QVariantList chs = agc.value("channels").toList();
 
-        const bool changed = (avail != m_rfAgcAvailable) || (en != m_rfAgcEnabled) || (chs != m_rfAgcChannels);
+        const bool changed =
+            (avail != m_rfAgcAvailable) ||
+            (en != m_rfAgcEnabled) ||
+            (chs != m_rfAgcChannels);
+
         m_rfAgcAvailable = avail;
         m_rfAgcEnabled   = en;
         m_rfAgcChannels  = chs;
@@ -495,10 +504,49 @@ void DoaClient::parseJsonLine(const QByteArray &line)
         m_spectrum = vmGetList(obj, "spectrum");
         emit spectrumChanged();
 
-        // --- RF FFT spectrum ---
-        m_fftFreqHz = vmGetList(obj, "fft_freq_hz");
-        m_fftMagDb  = vmGetList(obj, "fft_mag_db");
-        emit fftChanged();
+        // --- RF FFT spectrum + scale (computed in C++) ---
+        {
+            const QVariantList fList = vmGetList(obj, "fft_freq_hz");
+            const QVariantList mList = vmGetList(obj, "fft_mag_db");
+
+            m_fftFreqHz = fList;
+            m_fftMagDb  = mList;
+
+            const int n = qMin(fList.size(), mList.size());
+            if (n >= 2) {
+                double fmin = fList[0].toDouble();
+                double fmax = fmin;
+                double mmin = mList[0].toDouble();
+                double mmax = mmin;
+
+                for (int i = 1; i < n; ++i) {
+                    const double fi = fList[i].toDouble();
+                    const double mi = mList[i].toDouble();
+                    if (fi < fmin) fmin = fi;
+                    if (fi > fmax) fmax = fi;
+                    if (mi < mmin) mmin = mi;
+                    if (mi > mmax) mmax = mi;
+                }
+
+                if (fmax <= fmin) fmax = fmin + 1.0;
+                if (mmax <= mmin) mmax = mmin + 1.0;
+
+                const bool scaleChanged =
+                    !qFuzzyCompare(m_fftFminHz + 1.0, fmin + 1.0) ||
+                    !qFuzzyCompare(m_fftFmaxHz + 1.0, fmax + 1.0) ||
+                    !qFuzzyCompare(m_fftMminDb + 1.0, mmin + 1.0) ||
+                    !qFuzzyCompare(m_fftMmaxDb + 1.0, mmax + 1.0);
+
+                m_fftFminHz = fmin;
+                m_fftFmaxHz = fmax;
+                m_fftMminDb = mmin;
+                m_fftMmaxDb = mmax;
+
+                if (scaleChanged) emit fftScaleChanged();
+            }
+
+            emit fftChanged();
+        }
 
         // --- frequency tracking ---
         const double fc = vmGetDouble(obj, "frequency_hz", m_fcHz);
@@ -515,6 +563,25 @@ void DoaClient::parseJsonLine(const QByteArray &line)
                 emit doaAlgoChanged();
             }
         }
+
+        const QVariantMap ph = obj.value("phase_debug").toMap();
+        if (!ph.isEmpty()) {
+            const bool changed = (ph != m_phaseDebug);
+            m_phaseDebug = ph;
+            if (changed) emit phaseDebugChanged();
+        }
+
+        // DEBUG: เช็คว่ามี key phase จริงไหม
+        // if (obj.contains("phase_debug") || obj.contains("phase_deg") || obj.contains("coh") || obj.contains("rms_dbfs")) {
+        //     qDebug() << (QString("[RX] phase keys present: phase_deg=%1 coh=%2 rms_dbfs=%3 ref_ch=%4")
+        //                         .arg(obj.contains("phase_deg"))
+        //                         .arg(obj.contains("coh"))
+        //                         .arg(obj.contains("rms_dbfs"))
+        //                         .arg(obj.value("ref_ch").toInt()));
+        // } else {
+        //     qDebug() << ("[RX] phase keys NOT present in DoAResult");
+        // }
+
 
         return;
     }

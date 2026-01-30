@@ -121,6 +121,21 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     m_lastRecIsRecord = false;
     m_lastRecState = "UNKNOWN";
 
+//    LogWatcher *watcher = new LogWatcher(this);
+//    connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
+//         qDebug() << "State update: ID=" << id << "conn=" << conn << "state=" << state;
+//        this->recRunningCount = 0;
+//        emit onRecStatusChanged(state == "RECORD");
+//        if ((state == "RECORD") && (currentSQLValue == false))
+//        {
+//            onSQLChanged(currentSQLValue);
+//        }
+//        else if ((state == "PAUSE") && (currentSQLValue == true))
+//        {
+//            onSQLChanged(currentSQLValue);
+//        }
+//    });
+//    watcher->startWatching("/tmp/alsarecd_production.log");
     LogWatcher *watcher = new LogWatcher(this);
     connect(watcher, &LogWatcher::stateChanged, this,
             [this](const QString &id, const QString &conn, const QString &state)
@@ -139,6 +154,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     });
 
     watcher->startWatching("/tmp/alsarecd_id_1.log");
+
 
     startScanCard = new QTimer();
     QTimer *recRunningCountTimer = new QTimer(this);  // Set 'this' as parent to manage memory
@@ -548,6 +564,35 @@ void Mainwindows::onSQLChanged(bool sqlVal)
         }
     }
 }
+//void Mainwindows::sendSquelchStatus(bool sqlVal)
+//{
+//    QJsonObject message;
+//    message["object"] = "receiverStatus";
+//    message["squelch"] = sqlVal ? "on" : "off";
+//    message["device"] = "recin1";
+//    message["recorder"] = this->recEnable ? "enable" : "disable";
+//    message["frequency"] = this->currentCenterFreq + this->currentOffsetFreq;
+
+//    QJsonDocument doc(message);
+//    QString jsonString = doc.toJson(QJsonDocument::Compact);
+//    qDebug() << "broadcastMessage_sendSquelchStatus:" << jsonString << sqlVal;
+
+//    int softPhoneID = 1;
+
+//    bool pttOn = false;                 // ถ้ายังไม่มี PTT ก็ fix ไว้ก่อน
+//    bool sqlOn = sqlVal;                // ✅ ใช้ตัวจริง
+//    bool callState = this->recEnable;   // ✅ ใช้ตัวจริง
+//    qint64 freqHz = qRound64(this->currentCenterFreq + this->currentOffsetFreq);
+//    double freqMHz = (freqHz > 0) ? (double)freqHz / 1e6 : 0.0;
+////    qint64 freqHz = static_cast<qint64>(qRound64(this->currentCenterFreq + this->currentOffsetFreq));
+//    qDebug() << "onSendSquelchStatus_to_Alsarecd:" << softPhoneID
+//             << pttOn << sqlOn << callState << freqHz << freqMHz;
+//    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, freqMHz);
+//    emit frequencyChangedToQml(freqHz, freqMHz);
+
+////    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, (double)freqHz);
+//}
+
 
 void Mainwindows::sendSquelchStatus(bool sqlVal)
 {
@@ -571,7 +616,7 @@ void Mainwindows::sendSquelchStatus(bool sqlVal)
     double freqMHz = (freqHz > 0) ? (double)freqHz / 1e6 : 0.0;
 //    qint64 freqHz = static_cast<qint64>(qRound64(this->currentCenterFreq + this->currentOffsetFreq));
     qDebug() << "onSendSquelchStatus_to_Alsarecd:" << softPhoneID
-             << pttOn << sqlOn << callState << freqHz << sqlOn << freqMHz;
+             << pttOn << sqlOn << callState << freqHz << freqMHz;
     emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, freqMHz);
     emit frequencyChangedToQml(freqHz, freqMHz);
 
@@ -690,6 +735,12 @@ Q_INVOKABLE void Mainwindows::setSqlLevel(const unsigned char value)
 {
     scanSqlLevel = value;
 }
+
+Q_INVOKABLE void Mainwindows::setSqlOffManual()
+{
+    onSQLChanged(scanSqlLevel);
+}
+
 Q_INVOKABLE void Mainwindows::setSpeakerVolume(const unsigned char volume)
 {
     qDebug() << "setSpeakerVolume" << volume;

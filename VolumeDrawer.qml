@@ -168,6 +168,7 @@ Item {
                     mainWindows.setSqlLevel(0)
                     mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((0-255)/2).toFixed(1)+'}}')
                     currentSqlLevel = (0-255)/2
+                    mainWindows.setSqlOffManual();
                     console.log("currentSqlLevel = (0-255)/2")
                 }
                 else{
@@ -175,6 +176,7 @@ Item {
                     mainWindows.setSqlLevel(scanSqlLevel)
                     mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
                     currentSqlLevel = (scanSqlLevel-255)/2
+                    mainWindows.setSqlOffManual();
                     console.log("currentSqlLevel = (255-255)/2")
                 }
                 // mute = !mute

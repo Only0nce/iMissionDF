@@ -174,13 +174,6 @@ Item {
                 background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
             }
 
-//            TextField {
-//                id: nameField
-//                Layout.fillWidth: true
-//                placeholderText: defaultName || "auto: date_time"
-//                font.pixelSize: 16
-//                background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
-//            }
         }
 
         ColumnLayout {
@@ -214,7 +207,26 @@ Item {
             Button {
                 text: qsTr("Cancel")
                 enabled: !exporting
-                onClicked: exportFilesRecordroot.requestClose()
+                onClicked: {
+                    var p = exportFilesRecordroot.parent
+                    while (p) {
+                        if (p.close && typeof p.close === "function") {
+                            p.close()
+                            return
+                        }
+                        if (p.visible !== undefined && p.z !== undefined) {
+
+                        }
+                        p = p.parent
+                    }
+                    exportFilesRecordroot.requestClose()
+                    console.log("[exportFilesRecordroot] ->> requestClose:", p)
+
+                }
+//                onClicked:{
+
+//                    exportFilesRecordroot.requestClose()
+//                }
             }
 
             Button {
@@ -270,43 +282,6 @@ Item {
 
                 }
             }
-
-//            Button {
-//                text: exporting ? qsTr("Saving...") : qsTr("Save")
-//                // เดิมเช็ค label ซึ่งไม่มี เปลี่ยนเป็น mountPoint
-////                enabled: !exporting && fileCount > 0 && label !== ""
-//                onClicked: {
-
-//                    var name = nameField.text.trim()
-//                    console.log("[ExportFilesRecord] CLICK",
-//                                "fileCount=", fileCount,
-//                                "files.length=", files ? files.length : "null",
-//                                "label=", label,
-//                                "name=", name,
-//                                "qmlCommandFn isNull=", !qmlCommandFn)
-//                    if (!name.length) {
-//                        name = defaultName || Qt.formatDateTime(new Date(), "yyyyMMdd_hhmmss")
-//                    }
-//                    if (!qmlCommandFn) {
-//                        console.warn("[ExportFilesRecord] qmlCommandFn not set")
-//                        return
-//                    }
-//                    var payload = '{"menuID":"exportMergeFilesToUSB", "mountPoint":' + label + ', "fileName":' + name + ', "files":' + files + '}';
-
-////                    var payload = {
-////                        menuID: "exportMergeFilesToUSB",
-////                        mountPoint: label,
-////                        fileName: name,
-////                        files: files
-////                    }
-//                    exporting = true
-//                    progress = 0
-//                    statusText = "Export started..."
-//                    console.log("[ExportFilesRecord] send:", payload)
-//                    qmlCommandFn(payload)
-////                    qmlCommandFn(JSON.stringify(payload))
-//                }
-//            }
 
             Button {
                 text: qsTr("OK")

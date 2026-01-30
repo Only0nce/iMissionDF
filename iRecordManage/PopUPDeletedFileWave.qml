@@ -67,33 +67,6 @@ Item {
         return obj
     }
 
-//    function buildDeleteWaveJson() {
-//        var label = ""
-//        var fromStr = ""
-//        var toStr = ""
-//        console.log("<<<<<---- buildDeleteWaveJson --->>>>>" ,customMode,presetDays)
-//        if (!customMode) {
-//            if (presetDays === 1) label = "24 hr"
-//            else if (presetDays === 3) label = "3 days"
-//            else if (presetDays === 5) label = "5 days"
-//            else if (presetDays === 7) label = "7 days"
-//            else label = presetDays + " days"
-//        } else {
-//            label = "custom"
-//            if (tumblerDateTime && tumblerDateTime.fromText) fromStr = tumblerDateTime.fromText()
-//            if (tumblerDateTime && tumblerDateTime.toText)   toStr   = tumblerDateTime.toText()
-//        }
-
-//        return {
-//            menuID: "deletedFileWave",
-//            device: selectedDevice(),
-//            mode: customMode ? "custom" : "preset",
-//            days: customMode ? 0 : presetDays,
-//            label: label,
-//            from: fromStr,
-//            to: toStr
-//        }
-//    }
 
     // ===== Popup =====
     Popup {

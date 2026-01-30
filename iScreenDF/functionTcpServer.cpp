@@ -945,6 +945,7 @@ void iScreenDF::sendSetSpectrumEnable(bool enable)
     Parameter *p = m_parameter.first();
     p->m_spectrumEnabled = enable;
     db->UpdateParameterField("spectrumEnabled", p->m_spectrumEnabled ? 1 : 0);
+    emit rfsocDoaFftUpdated(p->m_setDoaEnable, p->m_spectrumEnabled);
     QJsonObject obj;
     obj["menuID"]   = "setSpectrumEnable";
     obj["enable"]   = enable;

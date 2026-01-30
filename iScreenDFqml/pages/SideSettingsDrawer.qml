@@ -235,8 +235,8 @@ Item {
                         { title: "RADIO",              icon: "qrc:/images/radioIcon.png",             source: "qrc:/HomeDisplay.qml" },
                         { title: "MAP\nVISUALIZATION", icon: "qrc:/iScreenDFqml/images/earth-asia.png", source: "qrc:/iScreenDFqml/pages/QMLMap.qml" },
                         { title: "DOA\nVIEWER",        icon: "qrc:/iScreenDFqml/images/dart-board.png", source: "qrc:/DoaViewer/ViewerPage.qml" },
-                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",  source: "qrc:/iRecordManage/TapBarRecordFiles.qml" },
-                        { title: "DATALOGGER",         icon: "qrc:/iScreenDFqml/images/log-file.png",  source: "qrc:/iScreenDFqml/pages/Datalogger.qml" }
+                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",  source: "qrc:/iRecordManage/TapBarRecordFiles.qml" }/*,*/
+                        // { title: "DATALOGGER",         icon: "qrc:/iScreenDFqml/images/log-file.png",  source: "qrc:/iScreenDFqml/pages/Datalogger.qml" }
                     ]
                     property int currentIndex: 0
 
@@ -329,29 +329,53 @@ Item {
 
                                 // ✅ ไปหน้า MAP / VISUALIZATION → ส่ง "GET ความถี่" ไป C++
                                 // แนะนำเช็คด้วย source เป็นหลัก (แม่นสุด)
-                                var isMapPage =
-                                        (newSource === "qrc:/MapViewer/MapViewerPage.qml") ||       // <-- ปรับให้ตรงของคุณ
-                                        (newSource === "qrc:/MapViewer/ViewerPage.qml")    ||       // เผื่อ path นี้
-                                        (newTitle.indexOf("MAP") >= 0 && newTitle.indexOf("VISUALIZATION") >= 0)
+                                // var isMapPage =
+                                //         (newSource === "qrc:/MapViewer/MapViewerPage.qml") ||       // <-- ปรับให้ตรงของคุณ
+                                //         (newSource === "qrc:/MapViewer/ViewerPage.qml")    ||       // เผื่อ path นี้
+                                //         (newTitle.indexOf("MAP") >= 0 && newTitle.indexOf("VISUALIZATION") >= 0)
 
-                                if (isMapPage) {
-                                    // วิธี A: เรียก method บน Krakenmapval (แนะนำ)
-                                    if (typeof Krakenmapval !== "undefined" && Krakenmapval) {
-                                        // 1) ถ้าคุณมี method ตรงๆ
-                                        if (typeof Krakenmapval.requestRfFrequency === "function") {
-                                            Krakenmapval.requestRfFrequency()
-                                        }
-                                        // // 2) หรือถ้าคุณใช้ sendmessage/menuID อยู่แล้ว
-                                        // else if (typeof Krakenmapval.sendmessage === "function") {
-                                        //     Krakenmapval.sendmessage('{"menuID":"getRfFrequency"}')
-                                        // }
-                                    }
-                                    // // วิธี B: ถ้าคุณผูกกับ wsClient/krakenmapval แทน
-                                    // else if (typeof wsClient !== "undefined" && wsClient) {
-                                    //     if (typeof wsClient.requestRfFrequency === "function") {
-                                    //         wsClient.requestRfFrequency()
-                                    //     }
+                                // if (isMapPage) {
+                                //     // วิธี A: เรียก method บน Krakenmapval (แนะนำ)
+                                //     if (typeof Krakenmapval !== "undefined" && Krakenmapval) {
+                                //         // 1) ถ้าคุณมี method ตรงๆ
+                                //         if (typeof Krakenmapval.requestRfFrequency === "function") {
+                                //             Krakenmapval.requestRfFrequency()
+                                //         }
+                                //         // // 2) หรือถ้าคุณใช้ sendmessage/menuID อยู่แล้ว
+                                //         else if (typeof Krakenmapval.sendSetSpectrumEnable === "function") {
+                                //            krakenmapval.sendSetSpectrumEnable(checked)
+                                //         }
+                                //     }
+                                //     // // วิธี B: ถ้าคุณผูกกับ wsClient/krakenmapval แทน
+                                //     // else if (typeof wsClient !== "undefined" && wsClient) {
+                                //     //     if (typeof wsClient.requestRfFrequency === "function") {
+                                //     //         wsClient.requestRfFrequency()
+                                //     //     }
+                                //     // }
+                                // }
+                                var MAP_SOURCE = "qrc:/iScreenDFqml/pages/QMLMap.qml"
+                                var leavingMap  = (oldSource === MAP_SOURCE && newSource !== MAP_SOURCE)
+                                var enteringMap = (newSource === MAP_SOURCE)
+
+                                // รองรับทั้ง krakenmapval และ Krakenmapval
+                                var km = (typeof krakenmapval !== "undefined" && krakenmapval) ? krakenmapval
+                                        : ((typeof Krakenmapval !== "undefined" && Krakenmapval) ? Krakenmapval : null)
+
+                                if (km) {
+                                    // ออกหน้า MAP → ส่ง false
+                                    // if (leavingMap) {
+                                    //     if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
+                                    //         Krakenmapval.sendSetSpectrumEnable(true)
                                     // }
+
+                                    // เข้าหน้า MAP → ส่ง true + ขอความถี่
+                                    if (enteringMap) {
+                                        if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
+                                            Krakenmapval.sendSetSpectrumEnable(false)
+
+                                        if (typeof Krakenmapval.requestRfFrequency === "function")
+                                            Krakenmapval.requestRfFrequency()
+                                    }
                                 }
                             }
                         }

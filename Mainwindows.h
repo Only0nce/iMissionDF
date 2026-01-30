@@ -132,6 +132,7 @@ public:
     Q_INVOKABLE void setSpeakerVolume(const unsigned char volume);
     // Q_INVOKABLE void setSpeakerVolumeMute(bool active);
     Q_INVOKABLE void setSqlLevel(const unsigned char value);
+    Q_INVOKABLE void setSqlOffManual();
     Q_INVOKABLE void updateCurrentOffsetFreq(const int value, const double centerFreq);
 
     Q_INVOKABLE void refreshProfiles(); // call from QML if needed
@@ -483,6 +484,8 @@ private:
     std::atomic_bool m_threadRunning{true};
     QString m_lastRecState;     // เช่น "RECORD", "PAUSE"
     bool m_lastRecIsRecord = false;
+    bool m_emittedRecStatusOnRecord = false;
+
 private slots:
     void onSetFreqDone(quint64 freqHz, bool ok);
     void startScanCardFn();

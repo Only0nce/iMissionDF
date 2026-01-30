@@ -66,6 +66,18 @@ class DoaClient : public QObject
     // frequency state from server ACK/packet
     Q_PROPERTY(double fcHz READ fcHz NOTIFY fcHzChanged)
     Q_PROPERTY(int ncoUpdateEn READ ncoUpdateEn NOTIFY ncoUpdateEnChanged)
+    // ===== FFT scale (computed in C++) =====
+    Q_PROPERTY(double fftFminHz READ fftFminHz NOTIFY fftScaleChanged)
+    Q_PROPERTY(double fftFmaxHz READ fftFmaxHz NOTIFY fftScaleChanged)
+    Q_PROPERTY(double fftMminDb READ fftMminDb NOTIFY fftScaleChanged)
+    Q_PROPERTY(double fftMmaxDb READ fftMmaxDb NOTIFY fftScaleChanged)
+
+    Q_PROPERTY(QVariantMap phaseDebug READ phaseDebug NOTIFY phaseDebugChanged)
+
+    double fftFminHz() const { return m_fftFminHz; }
+    double fftFmaxHz() const { return m_fftFmaxHz; }
+    double fftMminDb() const { return m_fftMminDb; }
+    double fftMmaxDb() const { return m_fftMmaxDb; }
 
 public:
     explicit DoaClient(QObject *parent = nullptr);
@@ -162,6 +174,7 @@ public:
 
     // algorithm command (explicit)
     Q_INVOKABLE void setDoaAlgorithm(const QString &algo, bool needAck = true);
+    QVariantMap phaseDebug() const { return m_phaseDebug; }
 
 signals:
 
@@ -190,6 +203,7 @@ signals:
     void numAntennasChanged();
 
     void doaAlgoChanged();
+    void phaseDebugChanged();
 
     void signalChanged();
     void doaChanged();
@@ -200,6 +214,9 @@ signals:
     void ncoUpdateEnChanged();
 
     void logMessage(const QString &msg);
+
+    void fftScaleChanged();
+
 
 private slots:
     void onConnected();
@@ -256,7 +273,7 @@ private:
 
     QVariantList m_fftFreqHz;
     QVariantList m_fftMagDb;
-
+    QVariantMap m_phaseDebug;
     double m_fcHz = 0.0;
     int m_ncoUpdateEn = 0;
 
@@ -265,4 +282,9 @@ private:
     bool m_rfAgcEnabled = false;
     QVariantList m_rfAgcChannels;
     double m_scannerAttDb = 0.0;
+
+    double m_fftFminHz = 0.0;
+    double m_fftFmaxHz = 0.0;
+    double m_fftMminDb = -150.0;
+    double m_fftMmaxDb = -50.0;
 };

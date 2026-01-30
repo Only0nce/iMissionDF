@@ -1291,8 +1291,9 @@ Item {
                         }
 
                         Connections {
+                            // updateDegreelocal
                             target: krakenmapval
-                            function onUpdateDegree(heading) {
+                            function onUpdateDegreelocal(heading) {
                                 degreeInput.text = heading.toFixed(1)
                             }
                         }
