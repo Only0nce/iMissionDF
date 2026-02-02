@@ -55,7 +55,7 @@ Item {
             waveColor:     "#12d27a",
             midLineColor:  "#3b3b3b",
             selectColor:   "#00b7ff55",
-            playheadColor: "#ffffff",
+            playheadColor: "#6c1bf7", //ffffff //6c1bf7 //E879F9
             frameBorder:   "#000000",
             segBorder:     "#f6ad55",
             segLabel:      "#e5e7eb",
@@ -69,7 +69,7 @@ Item {
             waveColor:     "#10b981",
             midLineColor:  "#cbd5e1",
             selectColor:   "#0099ff33",
-            playheadColor: "#111827",
+            playheadColor: "#e315eb", //111827 //e315eb //EF4444
             frameBorder:   "#e5e7eb",
             segBorder:     "#f59e0b",
             segLabel:      "#111827",
@@ -811,6 +811,7 @@ Item {
                 updatePlayhead()
             } else {
                 // single file (ของเดิมคุณ)
+                console.log("onPositionChanged 1")
                 var dur = activeDurationMs()
                 if (dur > 0 && position >= dur - 1) {
                     ended = true
@@ -818,11 +819,15 @@ Item {
                     player.seek(0)
                     playPosMs = 0
                     updatePlayhead()
+                    console.log("onPositionChanged 2")
+
                     return
                 }
                 ended = false
                 playPosMs = position
                 updatePlayhead()
+                console.log("onPositionChanged 3")
+
             }
         }
 
@@ -894,7 +899,7 @@ Item {
                     // กันบางเคสที่ status เปลี่ยนแล้วไม่ auto play
                     player.play()
                 } else {
-//                    console.log("[Audio] all segments finished")
+                    console.log("[Audio] all segments finished")
                     ended = true
                     enginePlaying = false
                     player.stop()
@@ -1167,21 +1172,21 @@ Item {
             }
 
             // Row 2 : Progress (scrub)
-            Slider {
-                id: progress
-                Layout.fillWidth: true
-                from: 0; to: 1; value: 0
-                background: Rectangle { anchors.fill: parent; color: rail; radius:6; border.color: railBorder }
-                handle: Rectangle { width: 12; height: 12; radius: 6; color: cardFg }
-                onPressedChanged: {
-                    if (pressed && durationMs>0) player.pause()
-                    if (!pressed && durationMs>0 && enginePlaying) player.play()
-                }
-                onMoved: {
-                    var dur = activeDurationMs();
-                    if (dur > 0) setPlayhead(value * dur);
-                }
-            }
+//            Slider {
+//                id: progress
+//                Layout.fillWidth: true
+//                from: 0; to: 1; value: 0
+//                background: Rectangle { anchors.fill: parent; color: rail; radius:6; border.color: railBorder }
+//                handle: Rectangle { width: 12; height: 12; radius: 6; color: cardFg }
+//                onPressedChanged: {
+//                    if (pressed && durationMs>0) player.pause()
+//                    if (!pressed && durationMs>0 && enginePlaying) player.play()
+//                }
+//                onMoved: {
+//                    var dur = activeDurationMs();
+//                    if (dur > 0) setPlayhead(value * dur);
+//                }
+//            }
 
             // Row 3 : Waveform
             Rectangle {
@@ -1266,12 +1271,30 @@ Item {
                         // ===== playhead =====
                         var dur = activeDurationMs()
                         var phx = dur > 0 ? contentPxToScreenX(sampleToPx(msToSample(playPosMs))) : 0
+
+                        // clamp ให้อยู่ในจอ
+                        phx = Math.max(0, Math.min(width, phx))
+
+                        // 1) วาดแถบพื้นหลัง (โปร่ง ๆ) ให้เห็นชัด
+                        var bandW = 28  // ปรับความกว้างได้ (เช่น 18..40)
+                        ctx.fillStyle = "#31ffffff" //isDarkTheme ? "#31ffffff" : "#00000022"  // alpha ใน hex ได้
+                        ctx.fillRect(Math.round(phx - bandW/2), 0, bandW, height)
+
+                        // 2) วาดเส้นกลางให้คม (เหมือนรูป 2)
                         ctx.strokeStyle = playheadColor
                         ctx.lineWidth = 1
                         ctx.beginPath()
-                        ctx.moveTo(phx, 0)
-                        ctx.lineTo(phx, height)
+                        ctx.moveTo(Math.round(phx) + 0.5, 0)
+                        ctx.lineTo(Math.round(phx) + 0.5, height)
                         ctx.stroke()
+//                        var dur = activeDurationMs()
+//                        var phx = dur > 0 ? contentPxToScreenX(sampleToPx(msToSample(playPosMs))) : 0
+//                        ctx.strokeStyle = playheadColor
+//                        ctx.lineWidth = 1
+//                        ctx.beginPath()
+//                        ctx.moveTo(phx, 0)
+//                        ctx.lineTo(phx, height)
+//                        ctx.stroke()
                     }
 
                     MouseArea {

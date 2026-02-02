@@ -262,7 +262,7 @@ void iScreenDF::scanDevices()
         qWarning() << "[functionMonitor] m_network2List is empty";
         return;
     }
-    QString ip = m_network2List.at(0)->ip_address;
+    QString ip = m_network2List.at(1)->ip_address;
     QStringList parts = ip.split('.');
 
     if (parts.size() != 4) {
@@ -498,7 +498,7 @@ void iScreenDF::setMode(const QString &mode)
         QJsonObject Param;
         QString raw_data;
         Param.insert("objectName", "StopConnecting");
-        Param.insert("ip", m_network2List.at(0)->ip_address);
+        Param.insert("ip", m_network2List.at(1)->ip_address);
         jsonDoc.setObject(Param);
         raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
         chatServerDF->broadcastMessage(raw_data);
@@ -555,7 +555,7 @@ void iScreenDF::handleConnectGroupSingle(const QJsonObject &obj)
     QString raw_data;
     Param.insert("objectName", "getstatus");
     Param.insert("Status", RemoteStatus);
-    Param.insert("ip", m_network2List.at(0)->ip_address);
+    Param.insert("ip", m_network2List.at(1)->ip_address);
     jsonDoc.setObject(Param);
     raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
     chatServerDF->broadcastMessage(raw_data);
@@ -589,8 +589,8 @@ void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
     qDebug() << "devices in same group =" << devices.size();
 
     QString localIp;
-    if (!m_network2List.isEmpty() && m_network2List.at(0)) {
-        localIp = m_network2List.at(0)->ip_address;
+    if (!m_network2List.isEmpty() && m_network2List.at(1)) {
+        localIp = m_network2List.at(1)->ip_address;
     }
     qDebug() << "[connectGroupSingle] localIp =" << localIp;
 

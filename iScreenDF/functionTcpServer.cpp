@@ -432,8 +432,8 @@ void iScreenDF::onTcpMessage(const QString &message,
             QJsonObject reply;
             reply["menuID"] = "statusReply";
             reply["msg"]    = "OK from iScreenDF";
-            if (!m_network2List.isEmpty() && m_network2List.at(0))
-                reply["ip"] = m_network2List.at(0)->ip_address;
+            if (!m_network2List.isEmpty() && m_network2List.at(1))
+                reply["ip"] = m_network2List.at(1)->ip_address;
 
             const QString jsonReply = QString::fromUtf8(
                 QJsonDocument(reply).toJson(QJsonDocument::Compact));
@@ -452,8 +452,8 @@ void iScreenDF::onTcpMessage(const QString &message,
             reply["menuID"] = "getName";
             reply["name"]   = controllerName;
             reply["serial"] = Serialnumber;
-            if (!m_network2List.isEmpty() && m_network2List.at(0))
-                reply["ip"] = m_network2List.at(0)->ip_address;
+            if (!m_network2List.isEmpty() && m_network2List.at(1))
+                reply["ip"] = m_network2List.at(1)->ip_address;
 
             const QString jsonReply = QString::fromUtf8(
                 QJsonDocument(reply).toJson(QJsonDocument::Compact));

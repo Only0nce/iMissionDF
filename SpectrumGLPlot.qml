@@ -696,17 +696,42 @@ Item {
     Zoom {
         id:zoom
         x: 1210
-        width: 60
-        height: 150
+        width: 80
+        height: 180
         anchors.right: parent.right
         anchors.top: parent.top
         anchors.rightMargin: 10
-        anchors.topMargin: 80
+        anchors.topMargin: 40
+        property int btnSize: 60   // <<< ขนาดปุ่มใหม่
+
+        buttonIn.width: btnSize
+        buttonIn.height: btnSize
+
+        buttonOut.width: btnSize
+        buttonOut.height: btnSize
+
+        buttonReset.width: btnSize
+        buttonReset.height: btnSize
+
+        buttonClear.width: btnSize
+        buttonClear.height: btnSize
         z:96
         opacity: zoomTimer.running ? 1 : 0.2
+
         Behavior on opacity {
             NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
         }
+
+        // ===== พื้นหลังโปร่งบาง =====
+        Rectangle {
+            id: bg
+            anchors.fill: parent
+            radius: 12
+            color: "#000000"
+            opacity: 0.18           // <<< ปรับตรงนี้ (0.12–0.25 กำลังสวย)
+            z: -1                   // อยู่หลังปุ่ม
+        }
+
         Timer {
             id: zoomTimer
             repeat: false
@@ -723,9 +748,9 @@ Item {
         buttonIn.visible: plotWidth/root.width <= 10
         buttonClear.visible: plotWidth/root.width <= 10
         buttonOut.opacity: plotWidth > root.width ? 1 : 0.2
-        buttonOut.enabled: plotWidth > root.width ? true : false
+        // buttonOut.enabled: plotWidth > root.width ? true : false
         buttonReset.opacity: plotWidth > root.width ? 1 : 0.2
-        buttonReset.enabled: plotWidth > root.width ? true : false
+        // buttonReset.enabled: plotWidth > root.width ? true : false
 
         buttonIn.onClicked: {
             zoomTimer.restart()

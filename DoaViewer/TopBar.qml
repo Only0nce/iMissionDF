@@ -425,7 +425,7 @@ Rectangle {
             }
         }
 
-        // ------- Frequency Control + Array Params -------
+        // ===================== Row 2: Frequency + Array =====================
         RowLayout {
             Layout.preferredHeight: 60
             Layout.fillWidth: true
@@ -453,7 +453,6 @@ Rectangle {
                 value: root.dc() ? root.dc().ncoUpdateEn : 31
                 editable: true
                 Layout.preferredWidth: 110
-
                 Connections {
                     target: root.dc()
                     function onNcoUpdateEnChanged() {
@@ -516,7 +515,7 @@ Rectangle {
                     return (c.numAntennas !== undefined) ? Number(c.numAntennas) : 5
                 }
                 editable: true
-                Layout.preferredWidth: 80
+                Layout.preferredWidth: 100
             }
 
             Button {
@@ -525,16 +524,10 @@ Rectangle {
                 onClicked: {
                     var c = root.dc()
                     if (!c) return
-
                     var r = Number(radiusField.text)
-                    if (!isNaN(r) && r > 0) {
-                        root.setIfExists("setUcaRadiusM", "ucaRadiusM", r, true)
-                    }
-
+                    if (!isNaN(r) && r > 0) root.setIfExists("setUcaRadiusM", "ucaRadiusM", r, true)
                     var n = parseInt(numAntSpin.value)
-                    if (!isNaN(n) && n >= 2) {
-                        root.setIfExists("setNumAntennas", "numAntennas", n, true)
-                    }
+                    if (!isNaN(n) && n >= 2) root.setIfExists("setNumAntennas", "numAntennas", n, true)
                 }
             }
 
@@ -549,7 +542,6 @@ Rectangle {
                 font.bold: true
             }
         }
-
         // ===================== Row 2 =====================
         RowLayout {
             Layout.preferredHeight: 60

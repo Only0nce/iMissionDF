@@ -83,22 +83,18 @@ Item {
                 onStatusChanged: if (status === Image.Error) console.warn("icon error:", source)
             }
             onClicked: {
-                if(scanSqlLevels === 0) scanSqlLevels = mainWindows.getSqlLevel()
                 var wantPlay = !playerControllerRoot.playing
-//                console.log("wantPlay::",wantPlay," and scanSqlLevels::", scanSqlLevels)
-                if(wantPlay === true){
-                    wsClient.setSpeakerVolumeMute(1)
-//                    console.log("set scanSqlLevels::", scanSqlLevels)
-                    mainWindows.setSqlLevel(scanSqlLevels)
-//                    console.log("set scanSqlLevels::", scanSqlLevels)
-                    mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevels-255)/2).toFixed(1)+'}}')
-                    scanSqlLevels = 0
-                }
-                else{
-                    wsClient.setSpeakerVolumeMute(0)
-                    mainWindows.setSqlLevel(0)
-                    mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((0-255)/2).toFixed(1)+'}}')
-                }
+                // if(wantPlay === true){
+                    // console.log("wantPlay:",wantPlay," wsClient.setSpeakerVolumeMute(1)")
+                    // wsClient.setSpeakerVolumeMute(1)
+                    // mainWindows.setSqlOffManual();
+                // }
+                // else{
+                    // wsClient.setSpeakerVolumeMute(0)
+                    // console.log("wantPlay:",wantPlay," wsClient.setSpeakerVolumeMute(0)")
+                // }
+                // wsClient.setSpeakerVolumeMute(1)
+                // mainWindows.setSqlOffManual();
                 playerControllerRoot.togglePlayRequested(wantPlay)
 
 

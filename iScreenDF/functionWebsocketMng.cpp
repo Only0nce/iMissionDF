@@ -137,8 +137,8 @@ void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,const QStrin
     node->socketPort     = socketPort;
 
     QString selfIP;
-    if (!m_network2List.isEmpty() && m_network2List.at(0)) {
-        selfIP = m_network2List.at(0)->ip_address;
+    if (!m_network2List.isEmpty() && m_network2List.at(1)) {
+        selfIP = m_network2List.at(1)->ip_address;
     }
 
     quint32 selfIPValue   = ipToHex(selfIP);
@@ -405,9 +405,9 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
     int controllerNetId = -1;
     QString controllerIp;
 
-    if (!m_network2List.isEmpty() && m_network2List.at(0)) {
-        controllerNetId = m_network2List.at(0)->id;
-        controllerIp    = m_network2List.at(0)->ip_address;
+    if (!m_network2List.isEmpty() && m_network2List.at(1)) {
+        controllerNetId = m_network2List.at(1)->id;
+        controllerIp    = m_network2List.at(1)->ip_address;
     }
 
     // ---------------------------------------------------------
@@ -523,7 +523,7 @@ void iScreenDF::setupServerClientForDevicesRemote(const QString &uniqueIdInGroup
     QJsonObject Param;
     QString raw_data;
     Param.insert("objectName", "StopConnecting");
-    Param.insert("ip", m_network2List.at(0)->ip_address);
+    Param.insert("ip", m_network2List.at(1)->ip_address);
     jsonDoc.setObject(Param);
     raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
     chatServerDF->broadcastMessage(raw_data);
