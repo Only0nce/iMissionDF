@@ -80,7 +80,14 @@ quint32 iScreenDF::ipToHex(const QString &ip) const
     return (a << 24) | (b << 16) | (c << 8) | d;
 }
 
-void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,const QString &uniqueIdInGroup,int deviceID,int groupID,const QString &groupName,const QString &deviceName,const QString &deviceIPAddress,uint16_t socketPort)
+void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,
+                                      const QString &uniqueIdInGroup,
+                                      int deviceID,
+                                      int groupID,
+                                      const QString &groupName,
+                                      const QString &deviceName,
+                                      const QString &deviceIPAddress,
+                                      uint16_t socketPort)
 {
     qDebug() << "[iScreenDF::appendNewActiveClient]"
              << "deviceUniqueId:" << deviceUniqueId
@@ -91,7 +98,13 @@ void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,const QStrin
              << "DeviceName:" << deviceName
              << "IP:" << deviceIPAddress
              << "Port:" << socketPort;
-    // closeAllGroupClients();
+
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[appendNewActiveClient] no parameter";
+        return;
+    }
+    Parameter *p = m_parameter.first();
+
     groupActive *currentGroup = nullptr;
     for (groupActive *g : group_active_list) {
         if (g && g->uniqueIdInGroup == uniqueIdInGroup) {
@@ -102,8 +115,8 @@ void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,const QStrin
 
     if (!currentGroup)  {
         currentGroup = new groupActive;
-        currentGroup->groupID        = groupID;
-        currentGroup->groupName      = groupName;
+        currentGroup->groupID         = groupID;
+        currentGroup->groupName       = groupName;
         currentGroup->uniqueIdInGroup = uniqueIdInGroup;
         group_active_list.append(currentGroup);
         qDebug() << "[appendNewActiveClient] New groupActive created for uniqueIdInGroup"
@@ -128,18 +141,16 @@ void iScreenDF::appendNewActiveClient(const QString &deviceUniqueId,const QStrin
                  << deviceUniqueId;
     }
 
-    node->deviceUniqueId = deviceUniqueId;
+    node->deviceUniqueId  = deviceUniqueId;
     node->uniqueIdInGroup = uniqueIdInGroup;
-    node->deviceID       = deviceID;
-    node->groupID        = groupID;
-    node->devicename     = deviceName;
-    node->ipAddress      = deviceIPAddress;
-    node->socketPort     = socketPort;
+    node->deviceID        = deviceID;
+    node->groupID         = groupID;
+    node->devicename      = deviceName;
+    node->ipAddress       = deviceIPAddress;
+    node->socketPort      = socketPort;
 
-    QString selfIP;
-    if (!m_network2List.isEmpty() && m_network2List.at(1)) {
-        selfIP = m_network2List.at(1)->ip_address;
-    }
+    // ✅ แก้ตรงนี้จุดเดียว
+    QString selfIP = p->m_ipLocalForRemoteGroup;
 
     quint32 selfIPValue   = ipToHex(selfIP);
     quint32 clientIPValue = ipToHex(node->ipAddress);
@@ -385,9 +396,9 @@ void iScreenDF::closeAllGroupClients()
 }
 
 void iScreenDF::DevicesInGroupJsonReady(int groupId,
-                                          const QString &groupName,
-                                          const QString &groupUniqueId,
-                                          const QJsonArray &devices)
+                                        const QString &groupName,
+                                        const QString &groupUniqueId,
+                                        const QJsonArray &devices)
 {
     setMode("REMOTE");
 
@@ -402,13 +413,22 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
         return;
     }
 
+    // ✅ เพิ่ม parameter ตรงนี้
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[DevicesInGroupJsonReady] no parameter";
+        return;
+    }
+    Parameter *p = m_parameter.first();
+
     int controllerNetId = -1;
     QString controllerIp;
 
     if (!m_network2List.isEmpty() && m_network2List.at(1)) {
         controllerNetId = m_network2List.at(1)->id;
-        controllerIp    = m_network2List.at(1)->ip_address;
     }
+
+    // 🔥 เปลี่ยนบรรทัดนี้แทนของเดิม
+    controllerIp = p->m_ipLocalForRemoteGroup;
 
     // ---------------------------------------------------------
     //  Loop ทุก Device และ Connect ใหม่ทันที โดยไม่เช็คของเก่า
@@ -435,7 +455,6 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
             continue;
         }
 
-        // -------------------- อัด devices ใหม่ --------------------
         QJsonArray filteredDevices;
         for (const QJsonValue &dv : devices) {
             QJsonObject other = dv.toObject();
@@ -446,13 +465,12 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
             filteredDevices.append(other);
         }
 
-        // -------------------- เพิ่ม controller --------------------
         if (controllerNetId != -1 && !controllerIp.isEmpty()) {
             QJsonObject controllerObj;
             controllerObj["deviceGroupId"]   = 0;
             controllerObj["groupId"]         = groupId;
             controllerObj["groupsName"]      = groupName;
-            controllerObj["ip"]              = controllerIp;
+            controllerObj["ip"]              = controllerIp;   // ใช้ค่าใหม่
             controllerObj["name"]            = controllerName;
             controllerObj["port"]            = 8000;
             controllerObj["isController"]    = true;
@@ -461,7 +479,6 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
             filteredDevices.append(controllerObj);
         }
 
-        // -------------------- JSON Payload --------------------
         QJsonObject single;
         single["menuID"]          = "connectGroupSingle";
         single["groupId"]         = groupId;
@@ -475,9 +492,6 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
 
         qDebug() << "[iScreenDF] FORCE CONNECT ->" << ip << "send:" << sendJson;
 
-        // ============================================================
-        //  ไม่เช็ค Node เดิมแล้ว! สร้าง ChatClient ใหม่ทุกรอบ
-        // ============================================================
         ChatClientDF *client = new ChatClientDF(this);
         client->setUniqueIdInGroup(uniqueIdInGroup);
 
@@ -494,12 +508,12 @@ void iScreenDF::DevicesInGroupJsonReady(int groupId,
 
         client->createConnection(ip, static_cast<quint16>(port));
     }
-    // db->getActiveClientInDatabase(groupUniqueId);
+
     setupServerClientForDevicesRemote(groupUniqueId);
 }
 
 void iScreenDF::setupServerClientForDevices(const QString &groupUniqueId){
-    qDebug() << "[iScreenDF] setupServerClientForDevices :" << groupUniqueId  ;
+    qDebug() << "[iScreenDF] setupServerClientForDevices :" << groupUniqueId;
     // QJsonDocument jsonDoc;
     // QJsonObject Param;
     // QString raw_data;
@@ -513,32 +527,47 @@ void iScreenDF::setupServerClientForDevices(const QString &groupUniqueId){
     closeAllGroupClients();
 
     QTimer::singleShot(0, db, [db = db, groupUniqueId]() {
-            db->getActiveClientInDatabase(groupUniqueId);
+        db->getActiveClientInDatabase(groupUniqueId);
     });
 }
 void iScreenDF::setupServerClientForDevicesRemote(const QString &uniqueIdInGroup){
-    qDebug() << "[iScreenDF] setupServerClientForDevices :" << uniqueIdInGroup  ;
+    qDebug() << "[iScreenDF] setupServerClientForDevices :" << uniqueIdInGroup;
+
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[setupServerClientForDevicesRemote] no parameter";
+        return;
+    }
+    Parameter *p = m_parameter.first();
 
     QJsonDocument jsonDoc;
     QJsonObject Param;
     QString raw_data;
+
     Param.insert("objectName", "StopConnecting");
-    Param.insert("ip", m_network2List.at(1)->ip_address);
+    Param.insert("ip", p->m_ipLocalForRemoteGroup);   // 🔥 แก้ตรงนี้
+
     jsonDoc.setObject(Param);
-    raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
+    raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact);
+
     chatServerDF->broadcastMessage(raw_data);
-    qDebug() << "[iScreenDF] broadcastMessage :" << raw_data  ;
+    qDebug() << "[iScreenDF] broadcastMessage :" << raw_data;
 
     closeAllGroupClients();
+
     QTimer::singleShot(0, db, [db = db, uniqueIdInGroup]() {
         db->getActiveClientInDatabase(uniqueIdInGroup);
     });
-    // db->getActiveClientInDatabase(uniqueIdInGroup);
 }
+
 
 void iScreenDF::handleBroadcastMessage(const QJsonObject &obj)
 {
-    Parameter *p = new Parameter();
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[setupServerClientForDevicesRemote] no parameter";
+        return;
+    }
+    Parameter *p = m_parameter.first();
+
     const QString broadcastID = obj.value("broadcastID").toString();
 
     if (broadcastID == "UpdateGPSMarker") {
@@ -602,13 +631,13 @@ void iScreenDF::handleBroadcastMessage(const QJsonObject &obj)
 
     if (broadcastID == "updateReceiverFreqandbw")
     {
-        int  Freq = obj.value("Freq").toDouble();
-        int BW   = obj.value("BW").toDouble();
+        int  Freq = obj.value("Freq").toInt();
+        int BW   = obj.value("BW").toInt();
         bool link = obj.value("linkstatus").toBool();
         p->m_Frequency = Freq;
         p->m_doaBwHz = BW;
         p->m_linkStatus = link;
-        updateReceiverFreqandbw(Freq,BW,link);
+        updateReceiverFreqandbw(p->m_Frequency,p->m_doaBwHz,p->m_linkStatus);
 
         qDebug() << "[functionWebsocketMng] updateReceiverFreqandbw:" << Freq << BW << link;
         return;
@@ -619,7 +648,7 @@ void iScreenDF::updateReceiverFreqandbw(int Freq, int BW,bool link)
 {
     emit rfsocParameterUpdated(Freq, BW);
     emit updatelinkStatus(link);
-    const double offsetHz = BW * 0.51;
+    const double offsetHz = BW * 1.0; //0.51
 
     updateReceiverParametersFreqOffsetBw((qint64)Freq, offsetHz, (double)BW);
     // emit updateReceiverFreqandbw

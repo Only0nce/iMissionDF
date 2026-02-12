@@ -87,7 +87,35 @@ Window {
     property bool deviceFound: false
     property string targetFrequencyHz: ""
     property real   targetFrequencyMHz: 0
+    // main.qml (ส่วนบน ๆ ของไฟล์ หรือใน root item)
+    property real monitorCpuPct:   0
+    property real monitorCpuMHz:   0
 
+    property real monitorMemUsed:  0
+    property real monitorMemTotal: 0
+    property real monitorMemAvail: 0
+    property var monitorPercentRAM: 0
+
+    property real monitorSwapUsed: 0
+    property real monitorSwapTotal: 0
+    property real monitorSwapFree: 0
+
+    property var  monitorTemps: ({})
+    property string monitorTs: ""
+
+    property real monitorStorageUsed: 0
+    property real monitorStorageTotal: 0
+    property real monitorPercentStorage: 0
+
+    property string monitorUptimeText: ""
+    property real   monitorLoad1: 0
+    property real   monitorLoad5: 0
+    property real   monitorLoad15: 0
+    property int    monitorTasksTotal: 0
+    property int    monitorThreadsTotal: 0
+    property int    monitorTasksRunning: 0
+
+    //=========================================================
     //---------------------------------------------------------------------
     // signal getScreenshot()
     //---------------------Recoder function-------------------------------
@@ -1050,8 +1078,42 @@ Window {
             targetFrequencyHz = JsonObject.frequencyHz
             targetFrequencyMHz = JsonObject.frequencyMHz
             console.log("targetFrequencyHz:", targetFrequencyHz, "targetFrequencyMHz:",targetFrequencyMHz)
+        }else if (menuID === "monitor") {
+            var m = obj
+            monitorTs = m.ts || ""
+
+            monitorCpuPct = m.cpu_usage_percent || 0
+
+            // RAM
+            monitorMemUsed  = m.mem_used_mb || 0
+            monitorMemTotal = m.mem_total_mb || 0
+            monitorPercentRAM = (monitorMemTotal > 0) ? (monitorMemUsed * 100.0 / monitorMemTotal) : 0
+
+            // SWAP
+            monitorSwapUsed  = m.swap_used_mb || 0
+            monitorSwapTotal = m.swap_total_mb || 0
+
+            // STORAGE
+            monitorStorageUsed  = m.storage_used_gb || 0
+            monitorStorageTotal = m.storage_total_gb || 0
+
+            // ✅ UPTIME / LOAD / TASKS
+            monitorUptimeText    = m.uptime_text || ""
+            monitorLoad1         = m.loadavg_1m || 0
+            monitorLoad5         = m.loadavg_5m || 0
+            monitorLoad15        = m.loadavg_15m || 0
+            monitorTasksTotal    = m.tasks_total || 0
+            monitorThreadsTotal  = m.threads_total || 0
+            monitorTasksRunning  = m.tasks_running || 0
+
+            console.log("[monitor top] uptime:", monitorUptimeText,
+                        "load:", monitorLoad1, monitorLoad5, monitorLoad15,
+                        "tasks:", monitorTasksTotal,
+                        "thr:", monitorThreadsTotal,
+                        "running:", monitorTasksRunning)
         }
     }
+
 //========================================== load flie ================================================
         function loadWaveSelectionFromTxt() {
             var path = "/home/orinnx/saveFileName/filesNameWave.txt"

@@ -5,9 +5,7 @@ import QtQuick.Controls 2.15
 // FftPlot.qml (solid colors, NO gradients / NO rgba alpha)
 // + Click in FFT => move "offset" (doaOffsetHz) ONLY (NOT change fcHz)
 // + Auto adjust offsetMin/offsetMax "window" on click
-// + If computed offset puts center == baseFcHz (i.e. offset overlaps center frequency) =>
-//      warn + revert to last non-center offset, THEN SEND
-// + Otherwise => SEND (requested style):
+// + SEND style:
 //      doaClient.doaOffsetHz = off
 //      doaClient.doaBwHz     = bw
 //      doaClient.applyDoaTone()
@@ -27,7 +25,7 @@ Rectangle {
     property bool enabled: true
     property var  freqHz: []
     property var  magDb: []
-    property real bandCenterHz: 0      // (optional) display highlight center (fc+offset)
+    property real bandCenterHz: 0
     property real bandBwHz: 0
 
     // IMPORTANT: base fc (no offset)
@@ -37,7 +35,7 @@ Rectangle {
     property int  fftFps: 12
     property bool showGrid: true
 
-    // Y-axis control
+    // Y-axis control (Popup จะมาแก้ 3 ตัวนี้)
     property bool yAuto: false
     property real yMinDb: -150.0
     property real yMaxDb: -50.0
@@ -45,9 +43,7 @@ Rectangle {
     // Click-to-offset control
     property bool clickOffsetEnabled: true
 
-    // (optional) keep if you still want to block clicking near bandCenterHz
-    // BUT requested change is "if overlaps center frequency" => revert+send.
-    property real centerGuardHz: 0.0   // set 0 to disable "near bandCenterHz" block
+    property real centerGuardHz: 0.0
 
     // ===== Offset allowed range =====
     property real offsetMinHz: NaN
@@ -62,7 +58,6 @@ Rectangle {
     property bool showOffsetMarker: true
     property real offsetMarkerHz: NaN
 
-    // clickedHz emitted is the actual center after clamp/auto
     signal offsetRequested(real newOffsetHz, real clickedHz)
     signal offsetRangeChanged(real newMinHz, real newMaxHz)
 
@@ -99,7 +94,6 @@ Rectangle {
     property color cWarnBd: "#7F1D1D"
     property color cWarnTx: "#FCA5A5"
 
-    // Axis labels style
     property int axisFontPx: 11
     property color cAxisText: cText
     property color cAxisTick: cGrid
@@ -129,7 +123,6 @@ Rectangle {
     }
     function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
 
-    // doaClient safe
     function dc() {
         return (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
     }
@@ -139,16 +132,10 @@ Rectangle {
     // =========================
     property real _offMinAuto: -500000.0
     property real _offMaxAuto:  500000.0
-
-    // remember last offset that DOES NOT overlap center freq (baseFcHz)
     property real lastNonCenterOffsetHz: NaN
 
-    function _getOffMin() {
-        return isFinite(root.offsetMinHz) ? Number(root.offsetMinHz) : Number(root._offMinAuto)
-    }
-    function _getOffMax() {
-        return isFinite(root.offsetMaxHz) ? Number(root.offsetMaxHz) : Number(root._offMaxAuto)
-    }
+    function _getOffMin() { return isFinite(root.offsetMinHz) ? Number(root.offsetMinHz) : Number(root._offMinAuto) }
+    function _getOffMax() { return isFinite(root.offsetMaxHz) ? Number(root.offsetMaxHz) : Number(root._offMaxAuto) }
 
     function _rangeSpanHz(curMin, curMax) {
         var span = Number(root.offsetRangeSpanHz)
@@ -193,7 +180,6 @@ Rectangle {
         if (!isFinite(off)) off = 0
         if (!isFinite(bw) || bw <= 0) bw = 2000
 
-        // exactly your style
         try { c.doaOffsetHz = off } catch(e1) {}
         try { c.doaBwHz     = bw  } catch(e2) {}
 
@@ -202,7 +188,6 @@ Rectangle {
             return
         }
 
-        // fallback optional
         if (c.sendJson !== undefined && typeof c.sendJson === "function") {
             c.sendJson({ menuID: "applyDoaTone", offset_hz: off, bw_hz: bw })
         }
@@ -217,7 +202,7 @@ Rectangle {
     }
 
     // =========================
-    // Scale calc
+    // Scale calc (✅ Manual ใช้ yMinDb/yMaxDb จาก Popup)
     // =========================
     function _calcScale() {
         var f = root.freqHz
@@ -251,7 +236,8 @@ Rectangle {
 
         var mmin, mmax
         if (!root.yAuto) {
-            mmin = Number(root.yMinDb); mmax = Number(root.yMaxDb)
+            mmin = Number(root.yMinDb)
+            mmax = Number(root.yMaxDb)
             if (!isFinite(mmin)) mmin = -150.0
             if (!isFinite(mmax)) mmax = -50.0
             if (mmax <= mmin) mmax = mmin + 1.0
@@ -357,7 +343,6 @@ Rectangle {
                 }
             }
 
-            // band highlight (visual only)
             if (root.bandBwHz > 0) {
                 var b0 = root.bandCenterHz - root.bandBwHz * 0.5
                 var b1 = root.bandCenterHz + root.bandBwHz * 0.5
@@ -381,7 +366,6 @@ Rectangle {
                     }
                 }
             }
-
         }
     }
 
@@ -458,30 +442,21 @@ Rectangle {
                 if (root.yAuto) root._markGridDirty()
             }
 
-            // sync marker + remember last NON-center offset
             function onDoaOffsetHzChanged() {
                 root._markGridDirty()
                 var c = root.dc()
                 if (!c) return
-
                 var base = Number(root.baseFcHz)
                 var off  = Number(c.doaOffsetHz)
-
-                // "overlap center frequency" means offset == 0 (center == baseFcHz)
-                if (isFinite(off) && Math.abs(off) > 1e-9) {
-                    root.lastNonCenterOffsetHz = off
-                }
-
+                if (isFinite(off) && Math.abs(off) > 1e-9) root.lastNonCenterOffsetHz = off
                 if (isFinite(base) && isFinite(off) && base > 0) {
                     root.offsetMarkerHz = base + off
                     markerCanvas.requestPaint()
                 }
             }
 
-            // auto window reset around current offset when BW changes
             function onDoaBwHzChanged() {
                 root._markGridDirty()
-
                 if (!root.offsetRangeAuto) return
                 if (isFinite(root.offsetMinHz) || isFinite(root.offsetMaxHz)) return
 
@@ -499,233 +474,142 @@ Rectangle {
         }
     }
 
-    // =====================
-    // Click area => compute offset + auto range + center-overlap rule
-    // =====================
-    // MouseArea {
-    //     anchors.fill: parent
-    //     enabled: root.enabled && root.clickOffsetEnabled
-    //     hoverEnabled: true
-    //     cursorShape: Qt.PointingHandCursor
-
-    //     function _inPlot(mx, my) {
-    //         var left = root.padLeft
-    //         var top = root.padTop
-    //         var W = root._plotW()
-    //         var H = root._plotH()
-    //         return (mx >= left && mx <= left + W && my >= top && my <= top + H)
-    //     }
-
-    //     onClicked: {
-    //         if (!_inPlot(mouse.x, mouse.y)) return
-    //         if (root._n < 8) return
-
-    //         if (root._dirtyScale) {
-    //             root._calcScale()
-    //             root._dirtyScale = false
-    //         }
-
-    //         // clicked frequency
-    //         var clickedHz = root._freqFromX(mouse.x)
-
-    //         // base fc
-    //         var base = Number(root.baseFcHz)
-    //         if (!isFinite(base) || base <= 0) {
-    //             root._warn("baseFcHz is not ready", mouse.x, mouse.y)
-    //             return
-    //         }
-
-    //         // raw offset from click
-    //         var newOff = clickedHz - base
-
-    //         // OPTIONAL: still block "near bandCenterHz"
-    //         if (root.centerGuardHz > 0 && isFinite(root.bandCenterHz)) {
-    //             var d = Math.abs(clickedHz - root.bandCenterHz)
-    //             if (d <= root.centerGuardHz) {
-    //                 root._warn("Clicking near the band center is not allowed\nPlease click further left/right", mouse.x, mouse.y)
-    //                 return
-    //             }
-    //         }
-
-    //         // current allowed window
-    //         var curMin = root._getOffMin()
-    //         var curMax = root._getOffMax()
-
-    //         // AUTO: if click outside window -> shift window to include newOff
-    //         if (root.offsetRangeAuto) {
-    //             if (newOff < curMin || newOff > curMax) {
-    //                 var span = root._rangeSpanHz(curMin, curMax)
-    //                 var half = span * 0.5
-    //                 root._setAutoRange(newOff - half, newOff + half)
-    //                 curMin = root._getOffMin()
-    //                 curMax = root._getOffMax()
-    //             }
-    //         }
-
-    //         // clamp
-    //         newOff = root._clamp(newOff, curMin, curMax)
-
-    //         // BW that will be sent/applied
-    //         var bwToSend = root._resolveBwToSend()
-
-    //         // =========================
-    //         // RULE: If offset overlaps center frequency (center == baseFcHz) => offset == 0
-    //         // warn + revert to lastNonCenterOffsetHz, THEN SEND
-    //         // =========================
-    //         if (Math.abs(newOff) <= 1e-9) {
-    //             root._warn("Offset overlaps the center frequency\nReverting to the last offset", mouse.x, mouse.y)
-
-    //             var revertOff = root.lastNonCenterOffsetHz
-
-    //             // fallback: use current offset from doaClient if non-zero
-    //             if (!isFinite(revertOff)) {
-    //                 var c2 = root.dc()
-    //                 if (c2) {
-    //                     var curOff = Number(c2.doaOffsetHz)
-    //                     if (isFinite(curOff) && Math.abs(curOff) > 1e-9)
-    //                         revertOff = curOff
-    //                 }
-    //             }
-
-    //             // still none -> do nothing
-    //             if (!isFinite(revertOff)) return
-
-    //             // ensure revertOff inside window (or shift window)
-    //             if (root.offsetRangeAuto) {
-    //                 if (revertOff < curMin || revertOff > curMax) {
-    //                     var spanR = root._rangeSpanHz(curMin, curMax)
-    //                     var halfR = spanR * 0.5
-    //                     root._setAutoRange(revertOff - halfR, revertOff + halfR)
-    //                     curMin = root._getOffMin()
-    //                     curMax = root._getOffMax()
-    //                 }
-    //             }
-    //             revertOff = root._clamp(revertOff, curMin, curMax)
-
-    //             var actualHzR = base + revertOff
-    //             root.offsetMarkerHz = actualHzR
-    //             root.offsetRequested(revertOff, actualHzR)
-
-    //             // SEND
-    //             root._sendOffsetBwApply(revertOff, bwToSend)
-    //             markerCanvas.requestPaint()
-    //             return
-    //         }
-
-    //         // =========================
-    //         // offset != center frequency => SEND
-    //         // =========================
-    //         var actualCenterHz = base + newOff
-
-    //         // remember last offset that doesn't overlap center
-    //         root.lastNonCenterOffsetHz = newOff
-
-    //         root.offsetMarkerHz = actualCenterHz
-    //         root.offsetRequested(newOff, actualCenterHz)
-
-    //         // SEND
-    //         root._sendOffsetBwApply(newOff, bwToSend)
-
-    //         markerCanvas.requestPaint()
-    //     }
-    // }
     function _fmtMHz(x) { return (x / 1e6).toFixed(3) + " MHz" }
 
-        Rectangle {
-            id: yMaxPill
-            visible: root.enabled && root._n >= 8
-            x: 10
-            y: root.padTop - 2
-            radius: 10
-            color: "#0F172A"
-            border.color: "#2B3856"
-            border.width: 1
-            opacity: 0.85
-            height: 22
-            width: yMaxText.paintedWidth + 16
-            Text {
-                id: yMaxText
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 8
-                text: root._mmax.toFixed(1) + " dB"
-                color: root.cText
-                font.pixelSize: 12
-                font.bold: true
-            }
+    // =====================
+    // ✅ Pills: ใช้ค่าจาก Popup (manual) หรือ auto-scale ตาม yAuto
+    // =====================
+    Rectangle {
+        id: yMaxPill
+        visible: root.enabled && root._n >= 8
+        x: 10
+        y: root.padTop - 2
+        radius: 10
+        color: "#0F172A"
+        border.color: "#2B3856"
+        border.width: 1
+        opacity: 0.85
+        height: 22
+        width: yMaxText.paintedWidth + 16
+        Text {
+            id: yMaxText
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            text: (root.yAuto ? root._mmax : root.yMaxDb).toFixed(1) + " dB"
+            color: root.cText
+            font.pixelSize: 12
+            font.bold: true
+        }
+    }
+
+    Rectangle {
+        id: yMinPill
+        visible: root.enabled && root._n >= 8
+        x: 10
+        y: root.padTop + root._plotH() - 18
+        radius: 10
+        color: "#0F172A"
+        border.color: "#2B3856"
+        border.width: 1
+        opacity: 0.85
+        height: 22
+        width: yMinText.paintedWidth + 16
+        Text {
+            id: yMinText
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            text: (root.yAuto ? root._mmin : root.yMinDb).toFixed(1) + " dB"
+            color: root.cText
+            font.pixelSize: 12
+            font.bold: true
+        }
+    }
+
+    Rectangle {
+        id: xMinPill
+        visible: root.enabled && root._n >= 8
+        x: root.padLeft
+        y: root.height - 30
+        radius: 10
+        color: "#0F172A"
+        border.color: "#2B3856"
+        border.width: 1
+        opacity: 0.85
+        height: 22
+        width: xMinText.paintedWidth + 16
+        Text {
+            id: xMinText
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            text: _isValidArray(root.freqHz) ? _fmtMHz(root._fmin) : "bin 0"
+            color: root.cText
+            font.pixelSize: 12
+            font.bold: true
+        }
+    }
+
+    Rectangle {
+        id: xMaxPill
+        visible: root.enabled && root._n >= 8
+        y: root.height - 30
+        radius: 10
+        color: "#0F172A"
+        border.color: "#2B3856"
+        border.width: 1
+        opacity: 0.85
+        height: 22
+        width: xMaxText.paintedWidth + 16
+        x: root.padLeft + root._plotW() - width
+        Text {
+            id: xMaxText
+            anchors.verticalCenter: parent.verticalCenter
+            anchors.left: parent.left
+            anchors.leftMargin: 8
+            text: _isValidArray(root.freqHz) ? _fmtMHz(root._fmax) : ("bin " + (root._n - 1))
+            color: root.cText
+            font.pixelSize: 12
+            font.bold: true
+        }
+    }
+
+    // =====================
+    // ✅ ปุ่มเปิด Popup (Y) มุมขวาบน
+    // =====================
+    Rectangle {
+        id: yBtn
+        width: 28
+        height: 28
+        radius: 8
+        color: "#0F172A"
+        border.color: "#2B3856"
+        border.width: 1
+        anchors.right: parent.right
+        anchors.rightMargin: 10
+        anchors.top: parent.top
+        anchors.topMargin: 10
+        z: 200
+
+        Text {
+            anchors.centerIn: parent
+            text: "Y"
+            color: "#E5E7EB"
+            font.pixelSize: 13
+            font.bold: true
         }
 
-        Rectangle {
-            id: yMinPill
-            visible: root.enabled && root._n >= 8
-            x: 10
-            y: root.padTop + root._plotH() - 18
-            radius: 10
-            color: "#0F172A"
-            border.color: "#2B3856"
-            border.width: 1
-            opacity: 0.85
-            height: 22
-            width: yMinText.paintedWidth + 16
-            Text {
-                id: yMinText
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 8
-                text: root._mmin.toFixed(1) + " dB"
-                color: root.cText
-                font.pixelSize: 12
-                font.bold: true
-            }
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            onClicked: fftYPopup.open()
         }
+    }
 
-        Rectangle {
-            id: xMinPill
-            visible: root.enabled && root._n >= 8
-            x: root.padLeft
-            y: root.height - 30
-            radius: 10
-            color: "#0F172A"
-            border.color: "#2B3856"
-            border.width: 1
-            opacity: 0.85
-            height: 22
-            width: xMinText.paintedWidth + 16
-            Text {
-                id: xMinText
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 8
-                text: _isValidArray(root.freqHz) ? _fmtMHz(root._fmin) : "bin 0"
-                color: root.cText
-                font.pixelSize: 12
-                font.bold: true
-            }
-        }
-
-        Rectangle {
-            id: xMaxPill
-            visible: root.enabled && root._n >= 8
-            y: root.height - 30
-            radius: 10
-            color: "#0F172A"
-            border.color: "#2B3856"
-            border.width: 1
-            opacity: 0.85
-            height: 22
-            width: xMaxText.paintedWidth + 16
-            x: root.padLeft + root._plotW() - width
-            Text {
-                id: xMaxText
-                anchors.verticalCenter: parent.verticalCenter
-                anchors.left: parent.left
-                anchors.leftMargin: 8
-                text: _isValidArray(root.freqHz) ? _fmtMHz(root._fmax) : ("bin " + (root._n - 1))
-                color: root.cText
-                font.pixelSize: 12
-                font.bold: true
-            }
-        }
+    // =====================
+    // Click area => compute offset + auto range
+    // =====================
     MouseArea {
         anchors.fill: parent
         enabled: root.enabled && root.clickOffsetEnabled
@@ -749,24 +633,19 @@ Rectangle {
                 root._dirtyScale = false
             }
 
-            // clicked frequency
             var clickedHz = root._freqFromX(mouse.x)
 
-            // base fc
             var base = Number(root.baseFcHz)
             if (!isFinite(base) || base <= 0) {
                 root._warn("baseFcHz is not ready", mouse.x, mouse.y)
                 return
             }
 
-            // raw offset from click
             var newOff = clickedHz - base
 
-            // current allowed window
             var curMin = root._getOffMin()
             var curMax = root._getOffMax()
 
-            // AUTO: if click outside window -> shift window to include newOff
             if (root.offsetRangeAuto) {
                 if (newOff < curMin || newOff > curMax) {
                     var span = root._rangeSpanHz(curMin, curMax)
@@ -777,26 +656,19 @@ Rectangle {
                 }
             }
 
-            // clamp
             newOff = root._clamp(newOff, curMin, curMax)
 
-            // BW to send
             var bwToSend = root._resolveBwToSend()
-
-            // actual center after clamp
             var actualCenterHz = base + newOff
 
-            // marker + signal
             root.offsetMarkerHz = actualCenterHz
             root.offsetRequested(newOff, actualCenterHz)
 
-            // SEND (always)
             root._sendOffsetBwApply(newOff, bwToSend)
 
             markerCanvas.requestPaint()
         }
     }
-
 
     // =====================
     // Marker overlay
@@ -884,17 +756,116 @@ Rectangle {
         }
     }
 
+    // =====================
+    // ✅ Popup: FFT Y-Axis (อยู่ใน FftPlot.qml เลย)
+    // =====================
+    Popup {
+        id: fftYPopup
+        modal: false
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: Math.max(10, root.width - width - 10)
+        y: root.padTop
+        width: 320
+        height: 200
+        z: 500
+
+        background: Rectangle {
+            radius: 12
+            color: "#0B1220"
+            border.color: "#223049"
+            border.width: 1
+        }
+
+        onOpened: {
+            autoSwitch.checked = !!root.yAuto
+            minField.text = Number(root.yMinDb).toFixed(1)
+            maxField.text = Number(root.yMaxDb).toFixed(1)
+        }
+
+        Column {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 10
+
+            Text {
+                text: "FFT Y-Axis"
+                color: "#E5E7EB"
+                font.pixelSize: 14
+                font.bold: true
+            }
+
+            Row {
+                spacing: 8
+                Text { text: "Auto"; color: "#94A3B8"; width: 60 }
+                Switch {
+                    id: autoSwitch
+                    checked: true
+                    onToggled: root.yAuto = checked
+                }
+            }
+
+            Row {
+                spacing: 8
+                Text { text: "Min dB"; color: "#94A3B8"; width: 60 }
+                TextField {
+                    id: minField
+                    width: 220
+                    enabled: !autoSwitch.checked
+                    placeholderText: "e.g. -95"
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                }
+            }
+
+            Row {
+                spacing: 8
+                Text { text: "Max dB"; color: "#94A3B8"; width: 60 }
+                TextField {
+                    id: maxField
+                    width: 220
+                    enabled: !autoSwitch.checked
+                    placeholderText: "e.g. -10"
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
+                }
+            }
+
+            Row {
+                spacing: 8
+
+                Button {
+                    text: "Apply"
+                    enabled: !autoSwitch.checked
+                    onClicked: {
+                        var lo = Number(minField.text)
+                        var hi = Number(maxField.text)
+                        if (!isFinite(lo) || !isFinite(hi)) return
+                        if (hi <= lo) hi = lo + 1.0
+
+                        root.yMinDb = lo
+                        root.yMaxDb = hi
+                        root.yAuto  = false
+
+                        fftYPopup.close()
+                    }
+                }
+
+                Button {
+                    text: "Close"
+                    onClicked: fftYPopup.close()
+                }
+            }
+        }
+    }
+
     Component.onCompleted: {
         _dirtyScale = true
         _markGridDirty()
         _markPlotDirty()
 
-        // init auto window if user didn't set min/max
         if (root.offsetRangeAuto && !isFinite(root.offsetMinHz) && !isFinite(root.offsetMaxHz)) {
             var c = root.dc()
             var off0 = (c && isFinite(Number(c.doaOffsetHz))) ? Number(c.doaOffsetHz) : 0
 
-            // last "non-center" offset
             if (isFinite(off0) && Math.abs(off0) > 1e-9) {
                 root.lastNonCenterOffsetHz = off0
             }

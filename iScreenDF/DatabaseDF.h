@@ -26,10 +26,10 @@ class DatabaseDF : public QObject
     Q_OBJECT
 public:
     explicit DatabaseDF(const QString &dbName,
-                      const QString &user,
-                      const QString &password,
-                      const QString &host,
-                      QObject *parent = nullptr);
+                        const QString &user,
+                        const QString &password,
+                        const QString &host,
+                        QObject *parent = nullptr);
     ~DatabaseDF();
 
     // DB connection
@@ -137,6 +137,7 @@ public:
     void GetIPDFServerFromDB();
     void UpdateParameterField(const QString &field, const QVariant &value);
     void ensureParameterHasMaxDoaLineMeters();
+    void ensureParameterIPLocalForRemoteGroup();
 
 
 signals:
@@ -172,7 +173,7 @@ signals:
 
     void Getrfsocparameter(bool  setDoaEnable, bool spectrumEnabled, int setAdcChannel, int Frequency, int update_en, double TxHz,
                            int TargetOffsetHz, int DoaBwHz, double DoaPowerThresholdDb,const QString &DoaAlgorithm, double ucaRadiusM,double TargetDb,bool rfAgcEnabled,bool linkStatus,double offsetvalue,double compassoffset
-                           , int maxDoaLineMeters);
+                           , int maxDoaLineMeters,const QString &ipLocalForRemoteGroup, int setDelayMs, int setDistance);
     void GetIPDFServer(const QString &ip);
     void updateNetworkDfDevice(const QString &iface,const QString &mode,const QString &ip,const QString &subnet,const QString &gateway,const QString &primaryDns,const QString &secondaryDns);
 

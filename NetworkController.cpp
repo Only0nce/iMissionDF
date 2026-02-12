@@ -1,4 +1,5 @@
 #include "NetworkController.h"
+#include <QPointer>
 #include <QProcess>
 #include <QFile>
 #include <QJsonDocument>
@@ -6,9 +7,10 @@
 #include <QDebug>
 #include <QJsonArray>
 #include <QJsonValue>
-#include <QJsonObject>
-#include <QJsonDocument>
-#include <QThread>        // ✅ ADD THIS
+#include <QThread>
+#include <QRegularExpression>
+#include <QTextStream>
+#include <QRegExp>
 
 NetworkController::NetworkController(QObject *parent) : QObject(parent) {}
 
@@ -22,6 +24,57 @@ static inline QString pick(const QString &newVal, const QString &oldVal)
     return isBlank(newVal) ? oldVal : newVal.trimmed();
 }
 
+// =========================================================
+// ✅ Save-syntax normalizers
+//   - DNS:     blank -> "0.0.0.0,0.0.0.0" (ตาม requirement)
+//   - Gateway: blank -> "0.0.0.0"         (ตาม requirement)
+// =========================================================
+static inline QString normalizeDnsForSave(const QString &in)
+{
+    const QString kDefaultDns = QStringLiteral("0.0.0.0,0.0.0.0");
+
+    QString s = in.trimmed();
+    if (s.isEmpty())
+        return kDefaultDns;
+
+    // allow spaces and commas
+    s.replace(',', ' ');
+    const QStringList parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+
+    // normalize common "zero" inputs to 0.0.0.0
+    QStringList out;
+    out.reserve(parts.size());
+
+    for (const QString &p : parts) {
+        QString d = p.trimmed();
+        if (d.isEmpty())
+            continue;
+
+        // accept "0" / "0,0" style
+        if (d == "0" || d == "0.0.0.0")
+            d = "0.0.0.0";
+
+        if (!out.contains(d))
+            out << d;
+    }
+
+    if (out.isEmpty())
+        return kDefaultDns;
+
+    // if only one DNS and it's 0.0.0.0 -> expand to two entries
+    if (out.size() == 1 && out[0] == "0.0.0.0")
+        return kDefaultDns;
+
+    // if user provided one real DNS, keep it as-is; if two+, join with comma
+    return out.join(",");
+}
+
+
+static inline QString normalizeGatewayForSave(const QString &in)
+{
+    const QString s = in.trimmed();
+    return s.isEmpty() ? QStringLiteral("0.0.0.0") : s;
+}
 
 void NetworkController::applyNetworkConfig(const QString &iface,
                                            const QString &mode,
@@ -29,182 +82,201 @@ void NetworkController::applyNetworkConfig(const QString &iface,
                                            const QString &gateway,
                                            const QString &dnsList)
 {
-    // =========================================================
-    // ✅ Normalize IP: if "a.b.c.d" -> "a.b.c.d/24"
-    // =========================================================
-    auto normalizeIpWithCidr = [](const QString &in, int defaultPrefix) -> QString {
-        QString s = in.trimmed();
-        if (s.isEmpty())
-            return s;
-        if (s.contains('/'))
-            return s; // already has prefix
-        return s + "/" + QString::number(defaultPrefix);
-    };
+    emit applyNetworkConfigStarted(iface);
 
-    // =========================================================
-    // ✅ Normalize DNS: allow "," or spaces -> output "a,b,c"
-    // =========================================================
-    auto normalizeDnsCsv = [](const QString &in) -> QString {
-        QString s = in.trimmed();
-        if (s.isEmpty())
-            return QString();
+    QPointer<NetworkController> self(this);
 
-        // unify separators: comma -> space, then split by whitespace
-        s.replace(',', ' ');
-        const QStringList parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    QThread *t = QThread::create([self, iface, mode, ipWithCidr, gateway, dnsList]() {
 
-        // trim + dedup (optional but useful)
-        QStringList out;
-        out.reserve(parts.size());
-        for (const QString &p : parts) {
-            const QString d = p.trimmed();
-            if (!d.isEmpty() && !out.contains(d))
-                out << d;
+        auto normalizeIpWithCidr = [](const QString &in, int defaultPrefix) -> QString {
+            QString s = in.trimmed();
+            if (s.isEmpty()) return s;
+            if (s.contains('/')) return s;
+            return s + "/" + QString::number(defaultPrefix);
+        };
+
+        auto runNmcliBlocking = [](const QStringList &args, QString *outMsg) -> bool {
+            QProcess p;
+            p.start("nmcli", args);
+            if (!p.waitForFinished(-1)) {
+                if (outMsg) *outMsg = QStringLiteral("nmcli waitForFinished failed");
+                return false;
+            }
+            const int ec = p.exitCode();
+            const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+            const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed();
+
+            if (ec != 0) {
+                if (outMsg) {
+                    QString m = QStringLiteral("nmcli failed: ");
+                    if (!err.isEmpty()) m += err;
+                    else if (!out.isEmpty()) m += out;
+                    else m += QStringLiteral("exitCode=%1").arg(ec);
+                    *outMsg = m;
+                }
+                return false;
+            }
+            return true;
+        };
+
+        auto saveJsonIndented = [](const QJsonObject &obj, QString *outMsg) -> bool {
+            QFile wf("/etc/network_config.json");
+            if (!wf.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                if (outMsg) *outMsg = QStringLiteral("Failed to write /etc/network_config.json");
+                return false;
+            }
+            wf.write(QJsonDocument(obj).toJson(QJsonDocument::Indented));
+            wf.close();
+            return true;
+        };
+
+        // ---------- normalize inputs ----------
+        const QString ipNorm  = normalizeIpWithCidr(ipWithCidr, 24);
+        const QString gwNorm  = normalizeGatewayForSave(gateway); // blank -> 0.0.0.0
+        const QString dnsNorm = normalizeDnsForSave(dnsList);      // blank -> 0.0.0.0,0.0.0.0
+
+        const QString modeLower = mode.trimmed().toLower();
+        const bool isDhcp = (modeLower == "dhcp" ||
+                             modeLower == "auto" ||
+                             modeLower == "automatic");
+
+        // =========================================================
+        // ✅ 1) SAVE JSON FIRST (NO WAIT NMCLI)
+        // =========================================================
+        bool jsonOk = true;
+        QString jsonMsg;
+
+        QJsonObject rootObj;
+        QFile rf("/etc/network_config.json");
+        if (rf.exists() && rf.open(QIODevice::ReadOnly)) {
+            QJsonParseError perr;
+            const QJsonDocument oldDoc = QJsonDocument::fromJson(rf.readAll(), &perr);
+            rf.close();
+            if (perr.error == QJsonParseError::NoError && oldDoc.isObject())
+                rootObj = oldDoc.object();
         }
 
-        return out.join(",");
-    };
+        QJsonObject lanObj = rootObj.value("lan").toObject();
 
-    const QString ipNorm  = normalizeIpWithCidr(ipWithCidr, 24);
-    const QString dnsNorm = normalizeDnsCsv(dnsList);
+        QString lanKey = "lan1";
+        if (iface == "enP1p1s0") lanKey = "lan2";
+        else if (iface == "enP8p1s0") lanKey = "lan1";
+        else if (iface == "end0") lanKey = "rfsoc1";
+        else if (iface == "end1") lanKey = "rfsoc2";
 
-    qDebug() << "Applying network config:"
-             << "iface=" << iface
-             << "mode=" << mode
-             << "ip=" << ipNorm
-             << "gateway=" << gateway
-             << "dns=" << dnsNorm;
+        QJsonObject oldLan = lanObj.value(lanKey).toObject();
+        const QString oldMode = oldLan.value("mode").toString();
+        const QString oldIp   = oldLan.value("ip").toString();
+        const QString oldGw   = oldLan.value("gateway").toString();
+        const QString oldDns  = oldLan.value("dns").toString();
 
-    const QString modeLower = mode.trimmed().toLower();
-    const bool isDhcp = (modeLower == "dhcp" ||
-                         modeLower == "auto" ||
-                         modeLower == "automatic");
+        const QString newMode = isBlank(mode) ? oldMode : (isDhcp ? "dhcp" : "static");
+        const QString newIp   = pick(ipNorm, oldIp);
 
-    // ---------- Check if connection exists ----------
-    QProcess check;
-    check.start("nmcli", { "connection", "show", iface });
-    check.waitForFinished();
-    const bool connectionExists = (check.exitCode() == 0);
+        // ✅ requirement: ถ้าว่าง -> ต้อง save default ไม่ใช่ keep old
+        const QString newGw   = isBlank(gateway) ? normalizeGatewayForSave(oldGw) : gwNorm;
+        const QString newDns  = isBlank(dnsList) ? normalizeDnsForSave(oldDns)    : dnsNorm;
 
-    if (iface.contains("end")) {
-        qDebug() << "if has end word";
-    } else {
-        qDebug() << "else doesn't has end word";
+        QJsonObject oneLan;
+        oneLan["interface"] = iface;
+        oneLan["mode"]      = newMode;
+        oneLan["ip"]        = newIp;
+        oneLan["gateway"]   = newGw;
+        oneLan["dns"]       = newDns; // keep schema string
 
-        // ---------- Apply nmcli ----------
-        if (connectionExists) {
-            if (isDhcp) {
-                // IMPORTANT: clear old static values to avoid leftovers
-                runNmcliCommand({ "connection", "modify", iface,
-                                 "connection.interface-name", iface,
-                                 "ipv4.method", "auto",
-                                 "ipv4.addresses", "",
-                                 "ipv4.gateway", "",
-                                 "ipv4.dns", "" });
-            } else {
-                runNmcliCommand({ "connection", "modify", iface,
-                                 "connection.interface-name", iface,
-                                 "ipv4.method", "manual",
-                                 "ipv4.addresses", ipNorm,
-                                 "ipv4.gateway", gateway,
-                                 "ipv4.dns", dnsNorm }); // ✅ use normalized dns
-            }
+        lanObj[lanKey] = oneLan;
+        rootObj["lan"] = lanObj;
+
+        jsonOk = saveJsonIndented(rootObj, &jsonMsg);
+
+        // ✅ emit "finished" NOW (save done) -> UI ไปต่อได้ทันที
+        if (self) {
+            QMetaObject::invokeMethod(self, [self, iface, jsonOk, jsonMsg, newGw, newDns]() {
+                if (!self) return;
+                const QString msg = jsonOk
+                                        ? QStringLiteral("Saved /etc/network_config.json (nmcli running in background)")
+                                        : (jsonMsg.isEmpty() ? QStringLiteral("Failed to save JSON") : jsonMsg);
+                emit self->applyNetworkConfigFinished(iface, jsonOk, msg, newGw, newDns);
+            }, Qt::QueuedConnection);
+        }
+
+        // =========================================================
+        // ✅ 2) THEN APPLY NMCLI (BACKGROUND)
+        // =========================================================
+        bool nmOk = true;
+        QString nmMsg;
+
+        // skip nmcli when iface contains "end" (ตาม behavior เดิมคุณ)
+        if (iface.contains("end")) {
+            nmOk = true;
+            nmMsg = QStringLiteral("nmcli skipped for end* iface");
         } else {
-            // New connection
-            if (isDhcp) {
-                runNmcliCommand({ "connection", "add", "type", "ethernet",
-                                 "ifname", iface,
-                                 "con-name", iface,
-                                 "connection.interface-name", iface,
-                                 "ipv4.method", "auto" });
-            } else {
-                runNmcliCommand({ "connection", "add", "type", "ethernet",
-                                 "ifname", iface,
-                                 "con-name", iface,
-                                 "connection.interface-name", iface,
-                                 "ipv4.method", "manual",
-                                 "ipv4.addresses", ipNorm,
-                                 "ipv4.gateway", gateway,
-                                 "ipv4.dns", dnsNorm }); // ✅ use normalized dns
+            bool connectionExists = false;
+            {
+                QProcess check;
+                check.start("nmcli", { "connection", "show", iface });
+                if (!check.waitForFinished(-1)) {
+                    nmOk = false;
+                    nmMsg = QStringLiteral("nmcli connection show timed out");
+                } else {
+                    connectionExists = (check.exitCode() == 0);
+                }
+            }
+
+            if (nmOk) {
+                if (connectionExists) {
+                    if (isDhcp) {
+                        nmOk = nmOk && runNmcliBlocking({ "connection", "modify", iface,
+                                                         "connection.interface-name", iface,
+                                                         "ipv4.method", "auto",
+                                                         "ipv4.addresses", "",
+                                                         "ipv4.gateway", "",
+                                                         "ipv4.dns", "" }, &nmMsg);
+                    } else {
+                        nmOk = nmOk && runNmcliBlocking({ "connection", "modify", iface,
+                                                         "connection.interface-name", iface,
+                                                         "ipv4.method", "manual",
+                                                         "ipv4.addresses", ipNorm,
+                                                         "ipv4.gateway", gwNorm,
+                                                         "ipv4.dns", dnsNorm }, &nmMsg);
+                    }
+                } else {
+                    if (isDhcp) {
+                        nmOk = nmOk && runNmcliBlocking({ "connection", "add", "type", "ethernet",
+                                                         "ifname", iface,
+                                                         "con-name", iface,
+                                                         "connection.interface-name", iface,
+                                                         "ipv4.method", "auto" }, &nmMsg);
+                    } else {
+                        nmOk = nmOk && runNmcliBlocking({ "connection", "add", "type", "ethernet",
+                                                         "ifname", iface,
+                                                         "con-name", iface,
+                                                         "connection.interface-name", iface,
+                                                         "ipv4.method", "manual",
+                                                         "ipv4.addresses", ipNorm,
+                                                         "ipv4.gateway", gwNorm,
+                                                         "ipv4.dns", dnsNorm }, &nmMsg);
+                    }
+                }
+
+                nmOk = nmOk && runNmcliBlocking({ "connection", "up", iface }, &nmMsg);
+                if (nmMsg.isEmpty())
+                    nmMsg = nmOk ? QStringLiteral("nmcli applied OK") : QStringLiteral("nmcli apply failed");
             }
         }
 
-        runNmcliCommand({ "connection", "up", iface });
-    }
+        // ✅ emit nmcli result later
+        if (self) {
+            QMetaObject::invokeMethod(self, [self, iface, nmOk, nmMsg]() {
+                if (!self) return;
+                emit self->applyNetworkConfigNmcliFinished(iface, nmOk, nmMsg);
+            }, Qt::QueuedConnection);
+        }
+    });
 
-    // ---------- Load existing JSON (to keep lan1/lan2) ----------
-    QJsonObject rootObj;
-    QFile rf("/etc/network_config.json");
-    if (rf.exists() && rf.open(QIODevice::ReadOnly)) {
-        QJsonParseError perr;
-        const QJsonDocument oldDoc = QJsonDocument::fromJson(rf.readAll(), &perr);
-        rf.close();
-        if (perr.error == QJsonParseError::NoError && oldDoc.isObject())
-            rootObj = oldDoc.object();
-    }
-
-    QJsonObject lanObj = rootObj.value("lan").toObject();
-
-    // ---------- Choose lanKey ----------
-    QString lanKey = "lan1";
-    if (iface == "enP1p1s0") lanKey = "lan2";
-    else if (iface == "enP8p1s0") lanKey = "lan1";
-    else if (iface == "end0") lanKey = "rfsoc1";
-    else if (iface == "end1") lanKey = "rfsoc2";
-
-    // ---------- Get old object ----------
-    QJsonObject oldLan = lanObj.value(lanKey).toObject();
-
-    // old values (string)
-    const QString oldMode = oldLan.value("mode").toString();
-    const QString oldIp   = oldLan.value("ip").toString();
-    const QString oldGw   = oldLan.value("gateway").toString();
-
-    // old dns (array -> "a,b")
-    QString oldDnsCsv;
-    if (oldLan.value("dns").isArray()) {
-        const QJsonArray a = oldLan.value("dns").toArray();
-        QStringList tmp;
-        for (const auto &v : a)
-            tmp << v.toString().trimmed();
-        oldDnsCsv = tmp.join(",");
-    } else {
-        oldDnsCsv = oldLan.value("dns").toString();
-    }
-
-    // ---------- Merge incoming with old ----------
-    const bool reqDhcp = (modeLower == "dhcp" ||
-                          modeLower == "auto" ||
-                          modeLower == "automatic");
-
-    const QString newMode = isBlank(mode) ? oldMode : (reqDhcp ? "dhcp" : "static");
-    const QString newIp   = pick(ipNorm, oldIp);
-    const QString newGw   = pick(gateway, oldGw);
-
-    // ✅ ใช้ dnsNorm (ผ่าน normalize แล้ว)
-    const QString newDns  = pick(dnsNorm, oldDnsCsv);
-
-    // ---------- Build oneLan (merged) ----------
-    QJsonObject oneLan;
-    oneLan["interface"] = iface;
-    oneLan["mode"]      = newMode;
-    oneLan["ip"]        = newIp;
-    oneLan["gateway"]   = newGw;
-
-    // dns csv -> array
-    QJsonArray dnsArray;
-    for (const QString &d : newDns.split(",", Qt::SkipEmptyParts))
-        dnsArray.append(d.trimmed());
-    oneLan["dns"] = dnsArray;
-
-    // write back
-    lanObj[lanKey] = oneLan;
-    rootObj["lan"] = lanObj;
-
-    saveConfigToJson(rootObj);
+    QObject::connect(t, &QThread::finished, t, &QObject::deleteLater);
+    t->start();
 }
-
-
 
 void NetworkController::runNmcliCommand(const QStringList &args)
 {
@@ -254,12 +326,22 @@ QVariantMap NetworkController::loadAllLanConfig()
         oneLan["ip"]        = lan.value("ip").toString();
         oneLan["gateway"]   = lan.value("gateway").toString();
 
-        // dns array → QStringList
-        QStringList dnsList;
-        for (const QJsonValue &v : lan.value("dns").toArray())
-            dnsList << v.toString();
+        // dns: รองรับทั้ง string ("a,b") และ array (["a","b"])
+        QString dnsCsv;
+        const QJsonValue dnsVal = lan.value("dns");
+        if (dnsVal.isString()) {
+            dnsCsv = dnsVal.toString();
+        } else if (dnsVal.isArray()) {
+            QStringList tmp;
+            for (const QJsonValue &v : dnsVal.toArray())
+                tmp << v.toString().trimmed();
+            dnsCsv = tmp.join(",");
+        } else {
+            dnsCsv = "0,0";
+        }
 
-        oneLan["dns"] = dnsList;
+        oneLan["dns"] = dnsCsv;   // ส่งกลับให้ QML/JS เป็น string
+
 
         lanMap[lanKey] = oneLan;
     }
@@ -277,6 +359,7 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
     else if (iface == "end0") lanKey = "rfsoc1";
     else if (iface == "end1") lanKey = "rfsoc2";
     else lanKey = iface;
+
     QVariantMap result;
     QFile file("/etc/network_config.json");
     if (!file.open(QIODevice::ReadOnly))
@@ -288,9 +371,12 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
     if (!doc.isObject())
         return result;
 
+    // NOTE: ฟังก์ชันนี้เดิมในไฟล์ของคุณเป็นแบบ legacy (ไม่ใช้งานโครงสร้าง "lan")
+    //       คงไว้ตามเดิมเพื่อไม่ให้กระทบส่วนอื่น
     QJsonObject obj = doc.object();
     if (obj["interface"].toString() != iface)
         return result;
+
     result["menuID"] = "network";
     result["mode"] = obj["mode"].toString();
     result["ip"] = obj["ip"].toString();
@@ -299,82 +385,6 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
     result["dns2"] = obj["dns2"].toString();
     return result;
 }
-
-// QVariantMap NetworkController::loadConfig(const QString &iface)
-// {
-//     // map iface -> lanKey ในไฟล์
-//     QString lanKey;
-//     if (iface == "enP1p1s0") lanKey = "lan2";
-//     else if (iface == "enP8p1s0") lanKey = "lan1";
-//     else if (iface == "end0")     lanKey = "rfsoc1";
-//     else if (iface == "end1")     lanKey = "rfsoc2";
-//     else                          lanKey = iface;
-
-//     QVariantMap result;
-
-//     QFile file("/etc/network_config.json");
-//     if (!file.open(QIODevice::ReadOnly)) {
-//         return result;
-//     }
-
-//     QJsonParseError perr;
-//     QJsonDocument doc = QJsonDocument::fromJson(file.readAll(), &perr);
-//     file.close();
-
-//     if (perr.error != QJsonParseError::NoError || !doc.isObject()) {
-//         return result;
-//     }
-
-//     QJsonObject root = doc.object();
-//     QJsonObject lanObj = root.value("lan").toObject();
-//     if (lanObj.isEmpty()) {
-//         return result;
-//     }
-
-//     QJsonObject lan = lanObj.value(lanKey).toObject();
-//     if (lan.isEmpty()) {
-//         return result;
-//     }
-
-//     // ---- basic fields ----
-//     result["menuID"]     = "network";
-//     result["lan"]     = lanKey;
-//     result["interface"]  = lan.value("interface").toString();
-//     result["mode"]       = lan.value("mode").toString();
-//     result["ip"]         = lan.value("ip").toString();
-//     result["gateway"]    = lan.value("gateway").toString();
-
-//     // ---- dns: array OR legacy string ----
-//     QStringList dnsList;
-
-//     QJsonValue dnsVal = lan.value("dns");
-//     if (dnsVal.isArray()) {
-//         for (const QJsonValue &v : dnsVal.toArray()) {
-//             const QString d = v.toString().trimmed();
-//             if (!d.isEmpty()) dnsList << d;
-//         }
-//     } else {
-//         // เผื่อไฟล์เก่าเก็บเป็น string "8.8.8.8,8.8.4.4" หรือ "8.8.8.8 8.8.4.4"
-//         QString s = dnsVal.toString().trimmed();
-//         if (!s.isEmpty()) {
-//             s.replace(',', ' ');
-//             const QStringList parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
-//             for (const QString &p : parts) {
-//                 const QString d = p.trimmed();
-//                 if (!d.isEmpty()) dnsList << d;
-//             }
-//         }
-//     }
-
-//     result["dns"] = dnsList;
-
-//     // convenience for UI
-//     result["dns1"] = (dnsList.size() > 0) ? dnsList.at(0) : "";
-//     result["dns2"] = (dnsList.size() > 1) ? dnsList.at(1) : "";
-
-//     return result;
-// }
-
 
 QVariantMap NetworkController::queryDhcpInfo(const QString &iface)
 {
@@ -401,7 +411,6 @@ QVariantMap NetworkController::queryDhcpInfo(const QString &iface)
     if (!dnsList.isEmpty()) result["dns"] = dnsList.value(0);
     if (dnsList.size() > 1) result["dns2"] = dnsList.value(1);
 
-    // Optional: infer netmask from CIDR (always /24 here for demo)
     result["netmask"] = "255.255.255.0";
     return result;
 }
@@ -430,7 +439,6 @@ void NetworkController::resetNtp()
     runCommand("systemctl daemon-reload");
     runCommand("systemctl restart systemd-timesyncd");
 
-    // รอให้ service stabilize (แทน busy loop)
     QThread::msleep(500);
 
     runCommand("systemctl restart systemd-timesyncd");
@@ -518,7 +526,7 @@ QJsonObject NetworkController::getNtpConfig() const
             obj["FallbackNTP"] = line.mid(QString("FallbackNTP=").length()).trimmed();
         }
     }
-    file.close();
 
+    file.close();
     return obj;
 }

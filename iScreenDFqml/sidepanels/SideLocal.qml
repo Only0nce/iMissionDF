@@ -13,7 +13,6 @@ Item {
 
     Connections {
         target: krakenmapval
-
         function onUpdateParameter(deviceName, serial) {
             nameDecimationField.text   = deviceName
             serialDecimationField.text = serial
@@ -53,7 +52,7 @@ Item {
         Item { Layout.fillWidth: true }
     }
 
-    // ===== Main content: split left (groups) / right (settings) =====
+    // ===== Main content =====
     SplitView {
         id: split
         anchors.left: parent.left
@@ -71,10 +70,8 @@ Item {
 
             ColumnLayout {
                 id: settingsColumn
-                // width: settingsPane.width
                 Layout.fillWidth: true
                 spacing: 18
-
 
                 /* ===== VFO Configuration ===== */
                 Label {
@@ -117,14 +114,12 @@ Item {
                             border.color: "#1B8F77"
                             border.width: 1
                         }
+
                         property string previousValue2: ""
                         Keys.onReturnPressed: commit()
                         Keys.onEnterPressed:  commit()
 
-
-                        function commit() {
-                            nameDecimationField.focus = false
-                        }
+                        function commit() { nameDecimationField.focus = false }
 
                         onFocusChanged: if (focus) selectAll()
 
@@ -165,12 +160,10 @@ Item {
                         Keys.onReturnPressed: commit()
                         Keys.onEnterPressed:  commit()
 
-
-                        function commit() {
-                            serialDecimationField.focus = false
-                        }
+                        function commit() { serialDecimationField.focus = false }
 
                         onFocusChanged: if (focus) selectAll()
+
                         onEditingFinished: {
                             if (text !== previousValue) {
                                 previousValue = text
@@ -179,6 +172,68 @@ Item {
                             }
                         }
                     }
+
+                    // --- IP Local For Remote Group ---
+                    Label { text: "IP for Remote:"; font.pixelSize: 16; color: "#ffffff" }
+                    TextField {
+                        id: ipRemoteField
+                        Layout.preferredWidth: 200
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 16
+                        color: "#7AE2CF"
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignLeft
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 4
+                        bottomPadding: 4
+                        placeholderTextColor: "#666"
+                        placeholderText: "e.g. 10.10.0.20"
+                        inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhPreferLowercase
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: "#1B8F77"
+                            border.width: 1
+                        }
+
+                        property string previousValue: ""
+
+                        function commit() {
+                            var v = text.trim()
+                            if (v === previousValue) { focus = false; return }
+                            previousValue = v
+                            focus = false
+
+                            if (krakenmapval && !krakenmapval.blockUiSync) {
+                                krakenmapval.setIPLocalForRemoteGroup(v)
+                            }
+                        }
+
+                        Keys.onReturnPressed: commit()
+                        Keys.onEnterPressed:  commit()
+
+                        onFocusChanged: if (focus) { previousValue = text; selectAll() }
+
+                        onEditingFinished: {
+                            if (text !== previousValue) commit()
+                            else focus = false
+                        }
+
+                        Connections {
+                            target: krakenmapval
+                            function onUpdateIPLocalForRemoteGroupFromServer(ip) {
+                                if (ipRemoteField.activeFocus) return
+                                var s = (ip === undefined || ip === null) ? "" : String(ip).trim()
+                                if (ipRemoteField.text !== s) {
+                                    ipRemoteField.text = s
+                                    ipRemoteField.previousValue = s
+                                }
+                            }
+                        }
+                    }
+
                     // --- DOA Line Length (meters) ---
                     Label { text: "DOA Line (Km):"; font.pixelSize: 16; color: "#ffffff" }
 
@@ -233,7 +288,6 @@ Item {
                             highlighted: false
                         }
 
-                        // ===== helper: find index by meters =====
                         function indexByMeters(v) {
                             v = Number(v)
                             if (!isFinite(v)) return -1
@@ -244,7 +298,6 @@ Item {
                             return -1
                         }
 
-                        // ===== send -> C++ when user changes =====
                         onActivated: (index) => {
                             if (blockLocal) return
                             if (!krakenmapval) return
@@ -252,19 +305,15 @@ Item {
 
                             const m = Number(model.get(index).meters)
                             if (!isFinite(m)) return
-
                             krakenmapval.sendMaxDoaLineMeters(m)
                         }
 
-                        // ===== initial value (optional) =====
                         Component.onCompleted: {
                             if (currentIndex < 0 && model.count > 0) currentIndex = 0
                         }
 
-                        // ===== receive from C++ =====
                         Connections {
                             target: krakenmapval
-
                             function onUpdateDoaLineMeters(meters) {
                                 const m = Number(meters)
                                 const idx = doaLineMetersCombo.indexByMeters(m)
@@ -279,7 +328,238 @@ Item {
                             }
                         }
                     }
+                    // ===================== Delay (s) -> sendDelayMs(ms) =====================
+                    Label { text: "Delay (s):"; font.pixelSize: 16; color: "#ffffff" }
 
+                    ComboBox {
+                        id: maxDoaDelayCombo
+                        Layout.preferredWidth: 200
+                        Layout.preferredHeight: 44
+                        font.pixelSize: 16
+                        textRole: "text"
+
+                        property bool blockLocal: false
+                        property int  currentMs: 0
+                        property bool gotServerValue: false
+                        model: ListModel {
+                            ListElement { text: "None";    ms: 0 }
+                            ListElement { text: "0.5 s";  ms: 500 }
+                            ListElement { text: "1 s";    ms: 1000 }
+                            ListElement { text: "1.5 s";  ms: 1500 }
+                            ListElement { text: "2 s";    ms: 2000 }
+                            ListElement { text: "3 s";    ms: 3000 }
+                            ListElement { text: "5 s";    ms: 5000 }
+                            ListElement { text: "8 s";    ms: 8000 }
+                            ListElement { text: "10 s";   ms: 10000 }
+                            ListElement { text: "15 s";   ms: 15000 }
+                            ListElement { text: "20 s";   ms: 20000 }
+                            ListElement { text: "30 s";   ms: 30000 }
+                            ListElement { text: "45 s";   ms: 45000 }
+                            ListElement { text: "60 s";   ms: 60000 }
+                        }
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: "#1B8F77"
+                            border.width: 1
+                        }
+
+                        contentItem: Text {
+                            text: {
+                                // ใช้ currentIndex เพื่อให้โชว์ "None" ตาม text ใน model เสมอ
+                                if (maxDoaDelayCombo.currentIndex >= 0 && maxDoaDelayCombo.currentIndex < maxDoaDelayCombo.model.count)
+                                    return maxDoaDelayCombo.model.get(maxDoaDelayCombo.currentIndex).text
+                                return ""
+                            }
+                            color: "#7AE2CF"
+                            font.pixelSize: 16
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 10
+                            elide: Text.ElideRight
+                        }
+
+
+                        delegate: ItemDelegate {
+                            width: maxDoaDelayCombo.width
+                            contentItem: Text {
+                                text: model.text
+                                color: "#7AE2CF"
+                                font.pixelSize: 16
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 10
+                                elide: Text.ElideRight
+                            }
+                            highlighted: false
+                        }
+
+                        function clampMs(ms) {
+                            ms = Number(ms)
+                            if (!isFinite(ms) || isNaN(ms)) return 0
+                            ms = Math.round(ms)
+                            if (ms < 0) ms = 0
+                            if (ms > 60000) ms = 60000
+                            return ms
+                        }
+
+                        function indexByMs(ms) {
+                            ms = clampMs(ms)
+                            for (var i = 0; i < model.count; i++) {
+                                if (Number(model.get(i).ms) === ms)
+                                    return i
+                            }
+                            return -1
+                        }
+
+                        function applyFromMs(ms) {
+                            ms = clampMs(ms)
+                            currentMs = ms
+                            var idx = indexByMs(ms)
+                            if (idx >= 0 && currentIndex !== idx) {
+                                blockLocal = true
+                                currentIndex = idx
+                                blockLocal = false
+                            }
+                        }
+
+                        onActivated: (index) => {
+                            if (blockLocal) return
+                            if (!krakenmapval) return
+                            if (krakenmapval.blockUiSync) return
+
+                            var ms = clampMs(model.get(index).ms)
+
+                            // ✅ ให้ UI เปลี่ยนแน่นอน
+                            if (currentIndex !== index) {
+                                blockLocal = true
+                                currentIndex = index
+                                blockLocal = false
+                            }
+
+                            if (ms === currentMs) return
+                            currentMs = ms
+
+                            // ✅ send: setDelayMs(ms)
+                            if (typeof krakenmapval.setDelayMs === "function")
+                                krakenmapval.setDelayMs(ms)
+                            else
+                                console.log("[QML] no setDelayMs(ms) in backend")
+                        }
+
+                        Component.onCompleted: {
+                            if (model.count > 0 && currentIndex < 0) {
+                                var defIdx = indexByMs(2000)
+                                currentIndex = (defIdx >= 0) ? defIdx : 0
+                            }
+                        }
+
+                        Connections {
+                            target: krakenmapval
+                            function onUpdateMaxDoaDelayMsFromServer(ms) {
+                                maxDoaDelayCombo.applyFromMs(ms)
+                            }
+                        }
+                    }
+
+
+                    // ===================== DistanceM (m) -> sendDistance(meters) =====================
+                    Label { text: "DistanceM (m):"; font.pixelSize: 16; color: "#ffffff" }
+
+                    ComboBox {
+                        id: doaDistanceMCombo
+                        Layout.preferredWidth: 200
+                        Layout.preferredHeight: 44
+                        font.pixelSize: 16
+                        textRole: "text"
+
+                        property bool blockLocal: false
+
+                        model: ListModel {
+                            ListElement { text: "10 m";      meters: 10 }
+                            ListElement { text: "30 m";      meters: 30 }
+                            ListElement { text: "60 m";      meters: 60 }
+                            ListElement { text: "100 m";     meters: 100 }
+                            ListElement { text: "150 m";     meters: 150 }
+                            ListElement { text: "200 m";     meters: 200 }
+                            ListElement { text: "250 m";     meters: 250 }
+                            ListElement { text: "500 m";     meters: 500 }
+                            ListElement { text: "1,000 m";   meters: 1000 }
+                        }
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: "#1B8F77"
+                            border.width: 1
+                        }
+
+                        contentItem: Text {
+                            text: doaDistanceMCombo.displayText
+                            color: "#7AE2CF"
+                            font.pixelSize: 16
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 10
+                            elide: Text.ElideRight
+                        }
+
+                        delegate: ItemDelegate {
+                            width: doaDistanceMCombo.width
+                            contentItem: Text {
+                                text: model.text
+                                color: "#7AE2CF"
+                                font.pixelSize: 16
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 10
+                                elide: Text.ElideRight
+                            }
+                            highlighted: false
+                        }
+
+                        function indexByMeters(v) {
+                            v = Number(v)
+                            if (!isFinite(v)) return -1
+                            for (var i = 0; i < model.count; i++) {
+                                if (Number(model.get(i).meters) === v)
+                                    return i
+                            }
+                            return -1
+                        }
+
+                        onActivated: (index) => {
+                            if (blockLocal) return
+                            if (!krakenmapval) return
+                            if (krakenmapval.blockUiSync) return
+
+                            const m = Number(model.get(index).meters)
+                            if (!isFinite(m)) return
+
+                            // ✅ CHANGED: sendDistance(meters)
+                            if (typeof krakenmapval.setDistance === "function")
+                                krakenmapval.setDistance(m)
+                            else
+                                console.log("[QML] no sendDistance(meters) in backend")
+                        }
+
+                        Component.onCompleted: {
+                            if (currentIndex < 0 && model.count > 0) currentIndex = 0
+                        }
+
+                        Connections {
+                            target: krakenmapval
+                            function onUpdateDoaLineDistanceMFromServer(meters) {
+                                const m = Number(meters)
+                                if (!isFinite(m)) return
+                                const idx = doaDistanceMCombo.indexByMeters(m)
+                                if (idx >= 0 && doaDistanceMCombo.currentIndex !== idx) {
+                                    doaDistanceMCombo.blockLocal = true
+                                    doaDistanceMCombo.currentIndex = idx
+                                    doaDistanceMCombo.blockLocal = false
+                                }
+                            }
+                        }
+                    }
+
+                    // --- DOA / FFT enable ---
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
 
@@ -288,10 +568,9 @@ Item {
                         CheckBox {
                             id: doaCheck
                             checked: false
-
                             onToggled: {
                                 if (!krakenmapval) return
-                                if (krakenmapval.blockUiSync) return   // กัน loop ตอน server อัปเดตมา
+                                if (krakenmapval.blockUiSync) return
                                 krakenmapval.sendSetDoaEnable(checked)
                             }
                         }
@@ -301,7 +580,6 @@ Item {
                         CheckBox {
                             id: fftCheck
                             checked: false
-
                             onToggled: {
                                 if (!krakenmapval) return
                                 if (krakenmapval.blockUiSync) return
@@ -310,8 +588,9 @@ Item {
                         }
                     }
 
-                    Item { Layout.fillWidth: true}
-                    // --- Default Squelch ---
+                    Item { Layout.fillWidth: true }
+
+                    // --- DOA Algorithm ---
                     Label { text: "DOA Algorithm:"; font.pixelSize: 16; color: "#ffffff" }
                     ComboBox {
                         id: doaAlgoCombo
@@ -348,7 +627,6 @@ Item {
                             highlighted: false
                         }
 
-                        // ===== helper: find index by value =====
                         function indexByValue(v) {
                             v = (v === undefined || v === null) ? "" : String(v)
                             for (var i = 0; i < model.count; i++) {
@@ -358,37 +636,29 @@ Item {
                             return -1
                         }
 
-                        // ===== send -> C++ when user changes =====
                         onActivated: (index) => {
                             if (!krakenmapval) return
                             if (krakenmapval.blockUiSync) return
-
                             const value = model.get(index).value
                             krakenmapval.sendDoaAlgorithm(value)
                         }
 
-                        // ===== initial value (optional) =====
                         Component.onCompleted: {
-                            // ถ้ามีค่า default ใน DB แล้ว C++ จะ emit มาเอง
-                            // ตรงนี้ไม่จำเป็น แต่ใส่ไว้กันว่าง:
                             if (currentIndex < 0 && model.count > 0) currentIndex = 0
                         }
                     }
 
+                    // ====== SQL Threshold + Tx Interval + Radius + RF AGC + Target (ของเดิมคุณ) ======
+                    // *** โค้ดช่วงนี้ 그대로 (ผมไม่ตัด) ***
+
                     // --- SQL (Squelch / Gate threshold) dB ---
-                    // ✅ รับค่าจาก C++ (emit updateGateThDbFromServer(double))
-                    // ✅ ช่อง TextField จะ "ตามค่า" ตอนไม่โฟกัส
-                    // ✅ ตอนโฟกัส = พิมพ์เอง ไม่โดนทับ
                     Item {
                         id: sqlItem
                         Layout.columnSpan: 2
                         Layout.fillWidth: true
                         Layout.preferredHeight: 44
 
-                        // ===== value หลัก =====
                         property real sqlGateDb: -130.0
-
-                        // init / pending
                         property bool hasInit: false
                         property bool hasPending: false
                         property real pendingGateDb: -130.0
@@ -402,11 +672,7 @@ Item {
                         }
                         function fmt1(v) { return (Math.round(Number(v) * 10) / 10).toString() }
 
-                        // ✅ จุดเดียวที่ “เปลี่ยนค่า” แล้ว UI จะตามเอง
-                        function applyValue(v) {
-                            sqlGateDb = v
-                            // slider ใช้ binding กับ sqlGateDb อยู่แล้ว ไม่ต้อง set value ซ้ำ
-                        }
+                        function applyValue(v) { sqlGateDb = v }
 
                         Component.onCompleted: {
                             hasInit = true
@@ -445,26 +711,18 @@ Item {
                                     stepSize: 1.0
                                     enabled: true
                                     Layout.alignment: Qt.AlignVCenter
-
-                                    // ✅ bind ค่า slider กับค่าเดียวกัน
                                     value: sqlItem.sqlGateDb
 
-                                    // ระหว่างลาก: อัปเดตค่าหลักทันที (TextField จะตามเองถ้าไม่โฟกัส)
                                     onValueChanged: {
-                                        // ถ้าถูก set จาก server ก็ให้ผ่านได้ปกติ
-                                        // ถ้ากำลังลาก ก็จะเปลี่ยน sqlGateDb และ UI ตาม
                                         if (pressed) {
                                             sqlItem.sqlGateDb = sqlItem.clamp(value, -140.0, 0.0)
                                         }
                                     }
 
-                                    // ปล่อยเมาส์: ค่อย commit + (ถ้าจะส่งกลับ C++)
                                     onPressedChanged: {
                                         if (!pressed) {
                                             var v = sqlItem.clamp(value, -140.0, 0.0)
                                             sqlItem.applyValue(v)
-
-                                            // ✅ ส่งกลับ C++ ถ้าต้องการ
                                             if (krakenmapval) krakenmapval.sendGateThDb(v)
                                         }
                                     }
@@ -495,7 +753,6 @@ Item {
 
                                     property string previousValue: ""
 
-                                    // ✅ KEY: ตอน "ไม่โฟกัส" ให้ text bind ตาม sqlGateDb
                                     Binding {
                                         target: sqlDbField
                                         property: "text"
@@ -512,10 +769,7 @@ Item {
 
                                         v = sqlItem.clamp(v, -140.0, 0.0)
                                         sqlItem.applyValue(v)
-
-                                        // ✅ ส่งกลับ C++ ถ้าต้องการ
                                         if (krakenmapval) krakenmapval.sendGateThDb(v)
-
                                         focus = false
                                     }
 
@@ -544,45 +798,34 @@ Item {
                             }
                         }
 
-                        // ✅ รับค่าจาก C++ (server push)
                         Connections {
                             target: krakenmapval
 
                             function onUpdateGateThDbFromServer(v) {
                                 var vv = sqlItem.clamp(v, -140.0, 0.0)
-                                console.log("sqlItem got updateGateThDbFromServer:", vv,
-                                            "focus=", sqlDbField.activeFocus,
-                                            "oldText=", sqlDbField.text,
-                                            "oldGate=", sqlItem.sqlGateDb)
-
                                 if (!sqlItem.hasInit) {
                                     sqlItem.pendingGateDb = vv
                                     sqlItem.hasPending = true
                                     return
                                 }
-
-                                // ถ้ากำลังพิมพ์: อัปเดตค่า/slider ได้ แต่ไม่ไปยุ่ง text (Binding ถูกปิดเพราะ focus)
                                 sqlItem.applyValue(vv)
                             }
+
                             function onUpdateDoaAlgorithmFromServer(algo) {
                                 console.log("sqlItem got onUpdateDoaAlgorithmFromServer:", algo)
-                                doaAlgoCombo.currentIndex = doaAlgoCombo.indexFromValue(algo)
+                                var idx = doaAlgoCombo.indexByValue(algo)
+                                if (idx >= 0) doaAlgoCombo.currentIndex = idx
                             }
                         }
                     }
 
                     // --- Tx Rate (Hz) : slider + manual input ---
-                    // รับจาก C++: emit updateTxHzFromServer(double v)
-                    // ส่งกลับ C++: krakenmapval.sendTxHz(v)
-                    // กัน loop: krakenmapval.blockUiSync
-
                     Item {
                         id: txItem
                         Layout.columnSpan: 2
                         Layout.fillWidth: true
                         Layout.preferredHeight: 44
 
-                        // ===== value cache =====
                         property real txHzVal: 10.8
                         property bool hasInit: false
                         property bool hasPending: false
@@ -600,8 +843,6 @@ Item {
                         function applyUi(v) {
                             txHzVal = v
                             hzSlider.value = v
-
-                            // อัปเดตช่องเฉพาะตอน "ไม่ได้พิมพ์"
                             if (!hzField.activeFocus) {
                                 const s = fmt1(v)
                                 if (hzField.text !== s) {
@@ -612,8 +853,6 @@ Item {
 
                         Component.onCompleted: {
                             hasInit = true
-
-                            // ค่าเริ่มต้น: ดึงจาก C++ ถ้ามี
                             var initV = txHzVal
                             if (krakenmapval && typeof krakenmapval.txHz !== "undefined") {
                                 initV = clamp(krakenmapval.txHz, 0.2, 60.0)
@@ -659,7 +898,6 @@ Item {
                                     enabled: true
                                     Layout.alignment: Qt.AlignVCenter
 
-                                    // ระหว่างลาก -> อัปเดตช่องถ้าไม่ได้พิมพ์
                                     onValueChanged: {
                                         if (!hzField.activeFocus) {
                                             const s = txItem.fmt1(value)
@@ -668,12 +906,10 @@ Item {
                                         }
                                     }
 
-                                    // ปล่อยเมาส์แล้วค่อย commit + ส่งกลับ C++
                                     onPressedChanged: {
                                         if (!pressed) {
                                             var v = txItem.clamp(value, 0.2, 60.0)
                                             txItem.applyUi(v)
-
                                             if (krakenmapval && !krakenmapval.blockUiSync) {
                                                 krakenmapval.sendTxHz(v)
                                             }
@@ -721,16 +957,12 @@ Item {
                                         }
 
                                         v = txItem.clamp(v, 0.2, 60.0)
-
-                                        // sync UI
                                         txItem.applyUi(v)
                                         text = txItem.fmt1(v)
 
-                                        // ส่งกลับ C++
                                         if (krakenmapval && !krakenmapval.blockUiSync) {
                                             krakenmapval.sendTxHz(v)
                                         }
-
                                         focus = false
                                     }
 
@@ -742,7 +974,6 @@ Item {
                                             previousValue = text
                                             selectAll()
                                         } else {
-                                            // หลุด focus -> โชว์ค่าล่าสุด
                                             text = txItem.fmt1(txItem.txHzVal)
                                         }
                                     }
@@ -762,13 +993,9 @@ Item {
                             }
                         }
 
-                        // ===== Receive from C++ =====
                         Connections {
                             target: krakenmapval
-
-                            // C++: emit updateTxHzFromServer(double v);
                             function onUpdateTxHzFromServer(v) {
-                                // กัน loop/กันสัญญาณมาก่อน init
                                 var vv = txItem.clamp(v, 0.2, 60.0)
 
                                 if (!txItem.hasInit) {
@@ -777,7 +1004,6 @@ Item {
                                     return
                                 }
 
-                                // ถ้ากำลังพิมพ์ -> ไม่ทับ text แต่ slider+ค่าภายในอัปเดตได้
                                 if (hzField.activeFocus) {
                                     txItem.txHzVal = vv
                                     hzSlider.value = vv
@@ -788,6 +1014,7 @@ Item {
                             }
                         }
                     }
+
                     Label {
                         text: "Radius (m):"
                         font.pixelSize: 16
@@ -800,15 +1027,12 @@ Item {
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
                         color: "#7AE2CF"
-
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
-
                         leftPadding: 10
                         rightPadding: 10
                         topPadding: 4
                         bottomPadding: 4
-
                         placeholderText: "e.g. 0.80"
                         placeholderTextColor: "#666"
                         inputMethodHints: Qt.ImhFormattedNumbersOnly
@@ -820,7 +1044,6 @@ Item {
                             border.width: 1
                         }
 
-                        // ✅ เก็บค่าที่ "ถูกต้องล่าสุด" ไว้สำหรับ rollback
                         property string lastGoodText: "0.81"
 
                         function clampRadius(v) {
@@ -830,9 +1053,7 @@ Item {
                             return v
                         }
 
-                        function fmt2(v) {
-                            return Number(v).toFixed(2)
-                        }
+                        function fmt2(v) { return Number(v).toFixed(2) }
 
                         function commit() {
                             var r = clampRadius(text)
@@ -847,9 +1068,7 @@ Item {
                             text = s
                             lastGoodText = s
 
-                            // ✅ ส่งกลับ C++
                             if (krakenmapval && !krakenmapval.blockUiSync) {
-                                // แนะนำให้เป็น sendUcaRadiusM / sendArrayRadius ให้ชื่อชัดเจน
                                 krakenmapval.sendUcaRadiusM(r)
                             }
 
@@ -879,150 +1098,21 @@ Item {
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
 
-                        Label {
-                            text: "RF AGC:"
-                            font.pixelSize: 16
-                            color: "#ffffff"
-                        }
+                        Label { text: "RF AGC:"; font.pixelSize: 16; color: "#ffffff" }
 
                         CheckBox {
                             id: agcCheck
                             checked: true
-
                             onToggled: {
                                 if (!krakenmapval) return
                                 if (krakenmapval.blockUiSync) return
-
-                                // ✅ ส่ง -1 = all channels
                                 krakenmapval.sendRfAgcEnable(-1, checked)
                             }
                         }
                     }
-                    Item { Layout.fillWidth: true}
 
-                    // ColumnLayout {
-                    //     Layout.columnSpan: 2
-                    //     Layout.fillWidth: true
-                    //     spacing: 10
+                    Item { Layout.fillWidth: true }
 
-                        // =========================================================
-                        // 1) ScannerATT #7 : slider + manual input
-                        // =========================================================
-                        // Item {
-                        //     Layout.fillWidth: true
-                        //     Layout.preferredHeight: 44
-
-                        //     Rectangle {
-                        //         anchors.fill: parent
-                        //         radius: 10
-                        //         color: "#111A1E"
-                        //         border.color: "#1B8F77"
-                        //         border.width: 1
-
-                        //         RowLayout {
-                        //             anchors.fill: parent
-                        //             anchors.leftMargin: 8
-                        //             anchors.rightMargin: 8
-                        //             spacing: 10
-
-                        //             Text {
-                        //                 text: "ScannerATT #7"
-                        //                 color: "#ffffff"
-                        //                 font.pixelSize: 16
-                        //                 Layout.preferredWidth: 140
-                        //                 Layout.alignment: Qt.AlignVCenter
-                        //             }
-
-                        //             Slider {
-                        //                 id: scannerAttSlider
-                        //                 Layout.fillWidth: true
-                        //                 from: -90
-                        //                 to: -30
-                        //                 stepSize: 0.5
-                        //                 value: root.scannerAttDb
-                        //                 enabled: true
-                        //                 Layout.alignment: Qt.AlignVCenter
-
-                        //                 onPressedChanged: {
-                        //                     if (!pressed) {
-                        //                         var v = value
-                        //                         scannerAttField.text = v.toFixed(1)
-                        //                         root.scannerAttDb = v
-                        //                         if (root.sendScannerAttDb) root.sendScannerAttDb(v)
-                        //                     }
-                        //                 }
-
-                        //                 onValueChanged: {
-                        //                     if (!scannerAttField.activeFocus)
-                        //                         scannerAttField.text = value.toFixed(1)
-                        //                 }
-                        //             }
-
-                        //             TextField {
-                        //                 id: scannerAttField
-                        //                 Layout.preferredWidth: 90
-                        //                 Layout.preferredHeight: 32
-                        //                 font.pixelSize: 16
-                        //                 color: "#7AE2CF"
-                        //                 inputMethodHints: Qt.ImhFormattedNumbersOnly
-                        //                 validator: DoubleValidator { bottom: -90; top: -30; decimals: 1 }
-                        //                 text: Number(root.scannerAttDb).toFixed(1)
-                        //                 enabled: true
-                        //                 verticalAlignment: Text.AlignVCenter
-                        //                 horizontalAlignment: Text.AlignRight
-                        //                 leftPadding: 10
-                        //                 rightPadding: 10
-                        //                 topPadding: 4
-                        //                 bottomPadding: 4
-
-                        //                 background: Rectangle {
-                        //                     color: "#111A1E"
-                        //                     radius: 10
-                        //                     border.color: scannerAttField.activeFocus ? "#7AE2CF" : "#1B8F77"
-                        //                     border.width: 1
-                        //                 }
-
-                        //                 property string previousValue: ""
-
-                        //                 function commit() {
-                        //                     var v = Number(text)
-                        //                     if (isNaN(v)) v = Number(scannerAttSlider.value)
-                        //                     if (v < -90) v = -90
-                        //                     if (v > -30) v = -30
-
-                        //                     scannerAttSlider.value = v
-                        //                     text = v.toFixed(1)
-
-                        //                     root.scannerAttDb = v
-                        //                     if (root.sendScannerAttDb) root.sendScannerAttDb(v)
-
-                        //                     scannerAttField.focus = false
-                        //                 }
-
-                        //                 Keys.onReturnPressed: commit()
-                        //                 Keys.onEnterPressed:  commit()
-
-                        //                 onFocusChanged: if (focus) { previousValue = text; selectAll() }
-
-                        //                 onEditingFinished: {
-                        //                     if (text !== previousValue) commit()
-                        //                     else scannerAttField.focus = false
-                        //                 }
-                        //             }
-
-                        //             Text {
-                        //                 text: "dB"
-                        //                 color: "#7AE2CF"
-                        //                 font.pixelSize: 16
-                        //                 Layout.alignment: Qt.AlignVCenter
-                        //             }
-                        //         }
-                        //     }
-                        // }
-
-                        // =========================================================
-                        // 2) Target (DF CH0..CH4) : channel select + slider + input
-                        // =========================================================
                     Item {
                         id: rfAgcTargetAllItem
                         Layout.columnSpan: 2
@@ -1032,8 +1122,6 @@ Item {
                         property var  targetDbArr: [-60, -60, -60, -60, -60]
                         property real targetAllDb: -60
                         property bool blockLocal: false
-
-                        // ✅ กันส่งซ้ำ
                         property real lastSentDb: 9999
 
                         function clampDb(v) {
@@ -1058,25 +1146,17 @@ Item {
                             recomputeAll()
                         }
 
-                        // ✅ ส่งไป C++ แบบกันซ้ำ
                         function sendAllOnce(v, reason) {
                             v = clampDb(v)
-
-                            // กัน loop ตอน server push
                             if (blockLocal) return
                             if (!krakenmapval) return
                             if (krakenmapval.blockUiSync) return
 
-                            // กันส่งซ้ำ (เท่ากันแบบ 0.1dB)
                             var vv = Math.round(v * 10) / 10
                             var ll = Math.round(lastSentDb * 10) / 10
-                            if (vv === ll) {
-                                // console.log("[QML][RFAGC] skip duplicate", reason, vv)
-                                return
-                            }
+                            if (vv === ll) return
 
                             lastSentDb = vv
-                            // console.log("[QML][RFAGC] SEND", reason, vv)
                             krakenmapval.sendRfAgcTargetAllDb(vv)
                         }
 
@@ -1112,22 +1192,18 @@ Item {
                                     enabled: true
                                     value: rfAgcTargetAllItem.targetAllDb
 
-                                    // ระหว่างลาก: โชว์เลขอย่างเดียว ห้ามส่ง
                                     onValueChanged: {
                                         if (rfAgcTargetAllItem.blockLocal) return
                                         if (!targetAllField.activeFocus)
                                             targetAllField.text = rfAgcTargetAllItem.clampDb(value).toFixed(1)
                                     }
 
-                                    // ✅ ส่ง “ครั้งเดียว” ตอนปล่อยเมาส์
                                     onPressedChanged: {
                                         if (!pressed) {
                                             var v = rfAgcTargetAllItem.clampDb(value)
-
                                             rfAgcTargetAllItem.blockLocal = true
                                             targetAllField.text = v.toFixed(1)
                                             rfAgcTargetAllItem.blockLocal = false
-
                                             rfAgcTargetAllItem.sendAllOnce(v, "slider_release")
                                         }
                                     }
@@ -1167,7 +1243,6 @@ Item {
                                         targetAllSlider.value = v
                                         rfAgcTargetAllItem.blockLocal = false
 
-                                        // ✅ ส่ง “ครั้งเดียว” จาก field commit
                                         rfAgcTargetAllItem.sendAllOnce(v, "field_commit")
                                         focus = false
                                     }
@@ -1191,10 +1266,8 @@ Item {
                             }
                         }
 
-                        // ✅ รับค่าจาก C++ ทีละ ch=0..4 แล้วรวมเป็น slider เดียว
                         Connections {
                             target: krakenmapval
-
                             function onUpdateRfAgcTargetFromServer(ch, targetDb) {
                                 if (ch < 0 || ch >= 5) return
 
@@ -1209,7 +1282,7 @@ Item {
                             }
                         }
                     }
-                    // }
+
                     // --- Restore values (ครั้งแรก) ---
                     Connections {
                         target: krakenmapval
@@ -1220,36 +1293,37 @@ Item {
                         function onUpdateDoaAlgorithmFromServer(algo) {
                             const idx = doaAlgoCombo.indexByValue(algo)
                             console.log("QML got DoaAlgorithm:", algo, "idx=", idx)
-
                             if (idx >= 0 && doaAlgoCombo.currentIndex !== idx) {
-                                // แค่ตั้ง currentIndex จะไม่เรียก onActivated เอง
                                 doaAlgoCombo.currentIndex = idx
                             }
                         }
                         function onUpdateUcaRadiusFromServer(radiusM) {
                             console.log("QML got UCA radius:", radiusM, "focus=", radiusField.activeFocus)
-
                             if (radiusField.activeFocus) return
-
                             var r = radiusField.clampRadius(radiusM)
                             if (isNaN(r)) return
-
                             var s = radiusField.fmt2(r)
                             radiusField.text = s
                             radiusField.lastGoodText = s
                         }
                         function onUpdateRfAgcEnableFromServer(ch, enable) {
-                            // server ส่ง -1 มา = all
                             if (ch < 0) {
                                 if (agcCheck.checked !== !!enable)
                                     agcCheck.checked = !!enable
                                 return
                             }
-
-                            // ถ้าอนาคตอยากให้ per-channel ก็ handle ตรงนี้ได้
-                            // เช่น rfAgcChEnabled[ch] = enable;
                         }
-                        // onVfoConfigUpdated(...) ถ้าจะใช้ ใส่ตรงนี้
+                        // ✅ NEW: ถ้า server ยิงค่า DOA line meters -> ให้ combo DistanceM ตามด้วย (ถ้าคุณต้องการ sync)
+                        function onUpdateDoaLineMeters(meters) {
+                            const m = Number(meters)
+                            if (!isFinite(m)) return
+                            const idx = doaDistanceMCombo.indexByMeters(m)
+                            if (idx >= 0 && doaDistanceMCombo.currentIndex !== idx) {
+                                doaDistanceMCombo.blockLocal = true
+                                doaDistanceMCombo.currentIndex = idx
+                                doaDistanceMCombo.blockLocal = false
+                            }
+                        }
                     }
                 }
 
@@ -1291,7 +1365,6 @@ Item {
                         }
 
                         Connections {
-                            // updateDegreelocal
                             target: krakenmapval
                             function onUpdateDegreelocal(heading) {
                                 degreeInput.text = heading.toFixed(1)

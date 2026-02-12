@@ -43,6 +43,8 @@
 #include "ChatClientiGate.h"
 #include "ChatiGateServer.h"
 #include "ChatServer.h"
+#include <sys/statvfs.h>
+#include <QFileInfoList>
 
 #define SERVER 1
 #define SWVERSION "9.2.2-REC 24102025"
@@ -68,6 +70,7 @@ signals:
     void recordFileMayBeReady();
     void recordFilesPageActiveChanged(bool);
     void onSendSquelchStatus(int softPhoneID, bool pttOn, bool sqlOn, bool callState, double freq);
+    void monitorJsonReady(const QString &json);
 
 public:
     explicit mainwindowsiRec(QString platform, QObject *parent = nullptr);
@@ -108,6 +111,10 @@ public slots:
     void enableI2SLoopback();
     void ensureVoicexSymlinkAndFix();
     void onFrequencyChangedFromMain(qint64 freqHz, double freqMHz);
+    void RecevieCommandMainCpp(QString);
+    int getFsUsedPercent(const QString &path);
+    void getMonitorParemeter();
+
 private:
     ChatServeriRec *SocketServer = nullptr;
     ChatServerWebRec *m_webServer = nullptr;   // << เพิ่มตัวนี้
@@ -162,6 +169,8 @@ private:
     typedef void * (*THREADFUNCPTR3)(void *);
     static void* ThreadFunc4(void* pTr);
     typedef void * (*THREADFUNCPTR4)(void *);
+    static void* ThreadMonitor(void* pTr);
+    typedef void * (*THREADMONITOR)(void *);
 
     pthread_t idThreaddatetime;
     pthread_t idThreadFan;
@@ -169,7 +178,7 @@ private:
     pthread_t idThread2;
     pthread_t idThread3;
     pthread_t idThread4;
-
+    pthread_t idThreadMonitor{};
 
     std::atomic_bool m_qmlConnected{false};
     std::atomic_bool m_threadRunning{true};
@@ -191,6 +200,70 @@ private:
     bool m_recordFilesPageActive = false;
     bool serverInit = false;
     void RestartSystemServicesAfter30s();
+
+//========================================================================
+    struct CpuStatSnap {
+        quint64 idleAll = 0;
+        quint64 nonIdle = 0;
+        bool valid = false;
+    };
+    struct NetSnap {
+        quint64 rx = 0;
+        quint64 tx = 0;
+        bool valid = false;
+    };
+    static bool readProcStatCpuOverall(CpuStatSnap &snap)
+    {
+        QFile f("/proc/stat");
+        if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+            return false;
+
+        const QByteArray line = f.readLine(); // "cpu  user nice system idle iowait irq softirq steal ..."
+        QList<QByteArray> parts = line.simplified().split(' ');
+        if (parts.size() < 8)
+            return false;
+
+        // parts[0] = "cpu"
+        quint64 user   = parts[1].toULongLong();
+        quint64 nice   = parts[2].toULongLong();
+        quint64 system = parts[3].toULongLong();
+        quint64 idle   = parts[4].toULongLong();
+        quint64 iowait = (parts.size() > 5) ? parts[5].toULongLong() : 0;
+        quint64 irq    = (parts.size() > 6) ? parts[6].toULongLong() : 0;
+        quint64 soft   = (parts.size() > 7) ? parts[7].toULongLong() : 0;
+        quint64 steal  = (parts.size() > 8) ? parts[8].toULongLong() : 0;
+
+        snap.idleAll = idle + iowait;
+        snap.nonIdle = user + nice + system + irq + soft + steal;
+        snap.valid = true;
+        return true;
+    }
+
+    // คำนวณ CPU% จาก snapshot ก่อนหน้า -> ตอนนี้
+    static double cpuUsagePercent(CpuStatSnap &prev, const CpuStatSnap &now)
+    {
+        if (!prev.valid || !now.valid) {
+            prev = now;      // set baseline
+            return -1.0;     // รอบแรกยังคำนวณไม่ได้
+        }
+
+        const quint64 prevTotal = prev.idleAll + prev.nonIdle;
+        const quint64 nowTotal  = now.idleAll  + now.nonIdle;
+
+        const quint64 totald = (nowTotal > prevTotal) ? (nowTotal - prevTotal) : 0;
+        const quint64 idled  = (now.idleAll > prev.idleAll) ? (now.idleAll - prev.idleAll) : 0;
+
+        prev = now;
+
+        if (totald == 0) return -1.0;
+        return (double)(totald - idled) * 100.0 / (double)totald;
+    }
+
+    CpuStatSnap m_prevCpu;
+    NetSnap m_prevNet;
+    // helpers
+
+//========================================================================
 private slots:
     void InitializingRTCtoSystem();
     void recLogging(int softPhoneID, int recorderID,QString recState, QString message);

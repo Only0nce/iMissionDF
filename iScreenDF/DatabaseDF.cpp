@@ -4,10 +4,10 @@
 // ===== Constructor / Destructor =====
 
 DatabaseDF::DatabaseDF(const QString &dbName,
-                   const QString &user,
-                   const QString &password,
-                   const QString &host,
-                   QObject *parent)
+                       const QString &user,
+                       const QString &password,
+                       const QString &host,
+                       QObject *parent)
     : QObject(parent),
     m_dbName(dbName),
     m_dbUser(user),
@@ -87,6 +87,7 @@ void DatabaseDF::init()
     GetrfsocParameter();
     GetIPDFServerFromDB();
     ensureParameterHasMaxDoaLineMeters();
+    ensureParameterIPLocalForRemoteGroup();
 
 
     qDebug() << "[Database::init] initial queries done";
@@ -280,11 +281,11 @@ void DatabaseDF::getIScreenParameter()
 }
 
 void DatabaseDF::updateIScreenParameterById(int id,
-                                          const QString &krakenserver,
-                                          const QString &iScreenclient,
-                                          const QString &subnet,
-                                          const QString &gateway,
-                                          const QString &phyName)
+                                            const QString &krakenserver,
+                                            const QString &iScreenclient,
+                                            const QString &subnet,
+                                            const QString &gateway,
+                                            const QString &phyName)
 {
     if (!ensureDb()) {
         qWarning() << "[updateIScreenParameterById] DB open failed";
@@ -358,12 +359,12 @@ void DatabaseDF::getServerKrakenNetwork()
 }
 
 void DatabaseDF::updateServerKrakenNetwork(const QString &dhcp,
-                                         const QString &ip,
-                                         const QString &subnet,
-                                         const QString &gateway,
-                                         const QString &primaryDns,
-                                         const QString &secondaryDns,
-                                         const QString &phyName)
+                                           const QString &ip,
+                                           const QString &subnet,
+                                           const QString &gateway,
+                                           const QString &primaryDns,
+                                           const QString &secondaryDns,
+                                           const QString &phyName)
 {
     if (!ensureDb()) {
         qWarning() << "[updateServerKrakenNetwork] DB open failed";
@@ -466,12 +467,12 @@ void DatabaseDF::updateKrakenServer(const QString &ip)
 }
 
 void DatabaseDF::setNetworkSlot(const QString &dhcp,
-                              const QString &ip,
-                              const QString &subnet,
-                              const QString &gateway,
-                              const QString &primaryDns,
-                              const QString &secondaryDns,
-                              const QString &krakenserver)
+                                const QString &ip,
+                                const QString &subnet,
+                                const QString &gateway,
+                                const QString &primaryDns,
+                                const QString &secondaryDns,
+                                const QString &krakenserver)
 {
     qDebug() << "[setNetworkSlot] update Network";
 
@@ -643,12 +644,12 @@ void DatabaseDF::getNetworkfromDb()
 }
 
 void DatabaseDF::updateNetworkfromDisplay(int displayIndex,
-                                        const QString &dhcp,
-                                        const QString &ip,
-                                        const QString &mask,
-                                        const QString &gw,
-                                        const QString &dns1,
-                                        const QString &dns2)
+                                          const QString &dhcp,
+                                          const QString &ip,
+                                          const QString &mask,
+                                          const QString &gw,
+                                          const QString &dns1,
+                                          const QString &dns2)
 {
     if (!ensureDb()) {
         qWarning() << "[updateNetworkfromDisplay] DB open failed";
@@ -690,7 +691,7 @@ void DatabaseDF::updateNetworkfromDisplay(int displayIndex,
     if (id == 3) {
         emit updateNetworkDfDevice("end0",dhcp,ip,mask,gw,dns1,dns2);
     }else if (id == 4) {
-       emit updateNetworkDfDevice("end1",dhcp,ip,mask,gw,dns1,dns2);
+        emit updateNetworkDfDevice("end1",dhcp,ip,mask,gw,dns1,dns2);
     }
     getNetworkfromDb();
 }
@@ -698,7 +699,7 @@ void DatabaseDF::updateNetworkfromDisplay(int displayIndex,
 // ===== Groups / Remote devices (QML JSON) =====
 
 void DatabaseDF::editGroupName(const QString &uniqueIdInGroup,
-                             const QString &title)
+                               const QString &title)
 {
     if (!ensureDb()) {
         qWarning() << "[editGroupName] DB open failed";
@@ -1138,9 +1139,9 @@ QString DatabaseDF::getLocalMacLastOctet()
 }
 ////////////////////////////////////New Group add remove /adddevice /removedevice/////////////////////////////////////////////
 void DatabaseDF::savegroupSettingNewGroup(const QString &groupName,
-                                        const QList<QString> &deviceUniqueIds,
-                                        int &outGroupID,
-                                        QString &outUniqueIdInGroup)
+                                          const QList<QString> &deviceUniqueIds,
+                                          int &outGroupID,
+                                          QString &outUniqueIdInGroup)
 {
     qDebug() << "[Database] savegroupSettingNewGroup:"
              << "groupName =" << groupName
@@ -1229,9 +1230,9 @@ void DatabaseDF::savegroupSettingNewGroup(const QString &groupName,
 }
 
 void DatabaseDF::insertDevicesinGroup(int groupID,
-                                    const QString &groupName,
-                                    const QString &deviceUniqueId,
-                                    const QString &uniqueIdInGroup)
+                                      const QString &groupName,
+                                      const QString &deviceUniqueId,
+                                      const QString &uniqueIdInGroup)
 {
     if (!ensureDb()) {
         qWarning() << "[insertDevicesinGroup] DB open failed";
@@ -1267,8 +1268,8 @@ void DatabaseDF::insertDevicesinGroup(int groupID,
 }
 
 void DatabaseDF::removeDeviceFromGroup(int groupID,
-                                     const QString &deviceUniqueId,
-                                     const QString &uniqueIdInGroup)
+                                       const QString &deviceUniqueId,
+                                       const QString &uniqueIdInGroup)
 {
     if (!ensureDb()) {
         qWarning() << "[removeDeviceFromGroup] DB open failed";
@@ -1610,8 +1611,8 @@ QString DatabaseDF::generateShortUuid()
 }
 // เดิม: void Database::addNewDevice(const QString &name, const QString &ip)
 void DatabaseDF::addNewDevice(const QString &name,
-                            const QString &ip,
-                            const QString &deviceUidFromUi)
+                              const QString &ip,
+                              const QString &deviceUidFromUi)
 {
     if (!ensureDb()) {
         qWarning() << "[addNewDevice] DB open failed";
@@ -1762,9 +1763,9 @@ void DatabaseDF::deletDeviceInGroups(int id,const QString &name, const QString &
 }
 
 void DatabaseDF::updateDeviceByUniqueId(const QString &oldUid,
-                                      const QString &newUid,
-                                      const QString &name,
-                                      const QString &ip)
+                                        const QString &newUid,
+                                        const QString &name,
+                                        const QString &ip)
 {
     if (!ensureDb()) {
         qWarning() << "[updateDeviceByUniqueId] DB open failed";
@@ -1802,7 +1803,7 @@ void DatabaseDF::updateDeviceByUniqueId(const QString &oldUid,
 
 }
 void DatabaseDF::updateUniqueIdDeviceOngroup(const QString &oldUid,
-                                           const QString &newUid)
+                                             const QString &newUid)
 {
     if (!ensureDb()) {
         qWarning() << "[updateUniqueIdDeviceOngroup] DB open failed";
@@ -2116,11 +2117,11 @@ void DatabaseDF::getRecorderSettings()
     // qDebug() << "[Recorder] Settings emitted to QML";
 }
 void DatabaseDF::setRecorderSettingsDB(const QString &alsaDevice,
-                                     const QString &clientIp,
-                                     int freq,
-                                     const QString &rtspServer,
-                                     const QString &rtspUrl,
-                                     int rtspPort)
+                                       const QString &clientIp,
+                                       int freq,
+                                       const QString &rtspServer,
+                                       const QString &rtspUrl,
+                                       int rtspPort)
 {
     if (!ensureDb()) {
         qWarning() << "[Database] setRecorderSettingsDB: DB not open";
@@ -2304,7 +2305,10 @@ void DatabaseDF::GetrfsocParameter()
         " linkstatus, "
         " offset_value, "
         " compass_offset, "
-        " maxDoaLineMeters "
+        " maxDoaLineMeters, "
+        " IPLocalForRemoteGroup, "
+        " setDelayMs, "          // ✅ NEW
+        " setDistance "          // ✅ NEW
         "FROM Parameter "
         "WHERE id = 1"
         );
@@ -2333,11 +2337,23 @@ void DatabaseDF::GetrfsocParameter()
     double  TargetDb            = qry.value("rf_agc_target_db").toDouble();
     bool    rfAgcEnabled        = qry.value("rf_agc_enabled").toBool();
     bool    linkStatus          = qry.value("linkstatus").toInt() == 1;
-    // double  TxHz                = qry.value("TxHz").toDouble();
-    double offsetvalue          = qry.value("offset_value").toDouble();
-    double compassoffset        = qry.value("compass_offset").toDouble();
-    int maxDoaLineMeters        = qry.value("maxDoaLineMeters").toDouble();
-    // QString ipdfserver          = qry.value("ipdfserver").toString();
+    double  offsetvalue         = qry.value("offset_value").toDouble();
+    double  compassoffset       = qry.value("compass_offset").toDouble();
+
+    int     maxDoaLineMeters      = qry.value("maxDoaLineMeters").toInt();
+    QString ipLocalForRemoteGroup = qry.value("IPLocalForRemoteGroup").toString().trimmed();
+
+    // ✅ NEW fields
+    int setDelayMs   = qry.value("setDelayMs").toInt();     // ms
+    int setDistance  = qry.value("setDistance").toInt();    // meters
+
+    // ✅ clamp กัน DB เก่า/ค่าเพี้ยน
+    // if (setDelayMs < 0) setDelayMs = 0;
+    // if (setDelayMs > 60000) setDelayMs = 60000;
+
+    // if (setDistance < 0) setDistance = 0;
+    // if (setDistance > 200000) setDistance = 200000;
+
     qDebug() << "[GetParameter]"
              << "DoA=" << setDoaEnable
              << "Spec=" << spectrumEnabled
@@ -2345,9 +2361,17 @@ void DatabaseDF::GetrfsocParameter()
              << "Freq=" << Frequency
              << "TxHz=" << TxHz
              << "BW=" << DoaBwHz
-             << "TH=" << DoaPowerThresholdDb;
-    emit Getrfsocparameter(setDoaEnable,spectrumEnabled,setAdcChannel,Frequency,update_en,TxHz,TargetOffsetHz,DoaBwHz,DoaPowerThresholdDb,DoaAlgorithm,ucaRadiusM ,TargetDb,rfAgcEnabled,linkStatus,offsetvalue,compassoffset
-                           ,maxDoaLineMeters);
+             << "TH=" << DoaPowerThresholdDb
+             << "maxDoaLineMeters=" << maxDoaLineMeters
+             << "setDelayMs=" << setDelayMs
+             << "setDistance=" << setDistance
+             << "IPLocalForRemoteGroup=" << ipLocalForRemoteGroup;
+
+    // ✅ ส่งค่าเดิม (ของคุณ)
+    emit Getrfsocparameter(setDoaEnable, spectrumEnabled, setAdcChannel, Frequency, update_en,
+                           TxHz, TargetOffsetHz, DoaBwHz, DoaPowerThresholdDb, DoaAlgorithm,
+                           ucaRadiusM, TargetDb, rfAgcEnabled, linkStatus,
+                           offsetvalue, compassoffset, maxDoaLineMeters, ipLocalForRemoteGroup,setDelayMs,setDistance);
 }
 
 void DatabaseDF::GetIPDFServerFromDB()
@@ -2397,7 +2421,10 @@ void DatabaseDF::UpdateParameterField(const QString &field, const QVariant &valu
         "linkstatus" ,
         "ipdfserver" ,
         "compass_offset" ,        // ✅ เพิ่ม
-        "maxDoaLineMeters"
+        "maxDoaLineMeters" ,
+        "IPLocalForRemoteGroup" ,
+        "setDelayMs" ,
+        "setDistance"
     };
 
     if (!allowed.contains(field)) {
@@ -2657,30 +2684,162 @@ void DatabaseDF::ensureParameterHasMaxDoaLineMeters()
         return;
     }
 
-    // 1) table Parameter must exist (คุณมีอยู่แล้ว)
-    if (columnExists(db, "Parameter", "maxDoaLineMeters")) {
-        qDebug() << "[ensureParameterHasMaxDoaLineMeters] Column already exists";
+    // defaults (ปรับได้ตามที่คุณใช้จริง)
+    const int DEFAULT_MAX_DOA_LINE_METERS = 15000; // 15 km
+    const int DEFAULT_SET_DELAY_MS        = 2000;  // 2 s
+    const int DEFAULT_SET_DISTANCE_M      = 1000;  // 1000 m
+
+    bool needAlter = false;
+
+    const bool hasMaxDoaLineMeters = columnExists(db, "Parameter", "maxDoaLineMeters");
+    const bool hasSetDelayMs       = columnExists(db, "Parameter", "setDelayMs");
+    const bool hasSetDistance      = columnExists(db, "Parameter", "setDistance");
+
+    if (!hasMaxDoaLineMeters) needAlter = true;
+    if (!hasSetDelayMs)       needAlter = true;
+    if (!hasSetDistance)      needAlter = true;
+
+    if (!needAlter) {
+        qDebug() << "[ensureParameterHasMaxDoaLineMeters] Columns already exist:"
+                 << "maxDoaLineMeters=" << hasMaxDoaLineMeters
+                 << "setDelayMs=" << hasSetDelayMs
+                 << "setDistance=" << hasSetDistance;
         return;
     }
 
-    // 2) Add column
+    // ทำให้ปลอดภัย: ทำเป็น transaction
+    if (!db.transaction()) {
+        qWarning() << "[ensureParameterHasMaxDoaLineMeters] transaction() failed:"
+                   << db.lastError().text();
+        // ไม่ return ก็ได้ แต่โดยทั่วไปควรหยุด
+        return;
+    }
+
+    auto alterAddColumn = [&](const QString &sql, const char *tag) -> bool {
+        QSqlQuery q(db);
+        if (!q.exec(sql)) {
+            qWarning() << tag << "ALTER failed:" << q.lastError().text()
+            << "SQL=" << sql;
+            return false;
+        }
+        qDebug() << tag << "OK";
+        return true;
+    };
+
+    bool ok = true;
+
+    // 1) Add columns if missing
+    if (!hasMaxDoaLineMeters) {
+        ok = ok && alterAddColumn(
+                 QString("ALTER TABLE Parameter ADD COLUMN maxDoaLineMeters INT NOT NULL DEFAULT %1")
+                     .arg(DEFAULT_MAX_DOA_LINE_METERS),
+                 "[ensureParameter] add maxDoaLineMeters");
+    }
+
+    if (!hasSetDelayMs) {
+        ok = ok && alterAddColumn(
+                 QString("ALTER TABLE Parameter ADD COLUMN setDelayMs INT NOT NULL DEFAULT %1")
+                     .arg(DEFAULT_SET_DELAY_MS),
+                 "[ensureParameter] add setDelayMs");
+    }
+
+    if (!hasSetDistance) {
+        ok = ok && alterAddColumn(
+                 QString("ALTER TABLE Parameter ADD COLUMN setDistance INT NOT NULL DEFAULT %1")
+                     .arg(DEFAULT_SET_DISTANCE_M),
+                 "[ensureParameter] add setDistance");
+    }
+
+    // ถ้า ALTER fail -> rollback
+    if (!ok) {
+        db.rollback();
+        qWarning() << "[ensureParameterHasMaxDoaLineMeters] rollback due to ALTER failure";
+        return;
+    }
+
+    // 2) Optional: normalize existing rows
+    // maxDoaLineMeters
+    if (columnExists(db, "Parameter", "maxDoaLineMeters")) {
+        QSqlQuery upd(db);
+        const QString sql =
+            QString("UPDATE Parameter SET maxDoaLineMeters=%1 WHERE maxDoaLineMeters IS NULL OR maxDoaLineMeters<=0")
+                .arg(DEFAULT_MAX_DOA_LINE_METERS);
+        if (!upd.exec(sql)) {
+            qWarning() << "[ensureParameter] UPDATE maxDoaLineMeters failed:" << upd.lastError().text();
+        }
+    }
+
+    // setDelayMs
+    if (columnExists(db, "Parameter", "setDelayMs")) {
+        QSqlQuery upd(db);
+        const QString sql =
+            QString("UPDATE Parameter SET setDelayMs=%1 WHERE setDelayMs IS NULL OR setDelayMs<0")
+                .arg(DEFAULT_SET_DELAY_MS);
+        if (!upd.exec(sql)) {
+            qWarning() << "[ensureParameter] UPDATE setDelayMs failed:" << upd.lastError().text();
+        }
+    }
+
+    // setDistance
+    if (columnExists(db, "Parameter", "setDistance")) {
+        QSqlQuery upd(db);
+        const QString sql =
+            QString("UPDATE Parameter SET setDistance=%1 WHERE setDistance IS NULL OR setDistance<=0")
+                .arg(DEFAULT_SET_DISTANCE_M);
+        if (!upd.exec(sql)) {
+            qWarning() << "[ensureParameter] UPDATE setDistance failed:" << upd.lastError().text();
+        }
+    }
+
+    if (!db.commit()) {
+        qWarning() << "[ensureParameterHasMaxDoaLineMeters] commit() failed:" << db.lastError().text();
+        db.rollback();
+        return;
+    }
+
+    qDebug() << "[ensureParameterHasMaxDoaLineMeters] ensure OK:"
+             << "maxDoaLineMeters" << (hasMaxDoaLineMeters ? "exists" : "added")
+             << "setDelayMs"       << (hasSetDelayMs ? "exists" : "added")
+             << "setDistance"      << (hasSetDistance ? "exists" : "added");
+}
+
+
+void DatabaseDF::ensureParameterIPLocalForRemoteGroup()
+{
+    if (!ensureDb()) {
+        qWarning() << "[ensureParameterIPLocalForRemoteGroup] DB open failed";
+        return;
+    }
+
+    // ตรวจว่าคอลัมน์มีแล้วหรือยัง
+    if (columnExists(db, "Parameter", "IPLocalForRemoteGroup")) {
+        qDebug() << "[ensureParameterIPLocalForRemoteGroup] Column already exists";
+        return;
+    }
+
+    // เพิ่มคอลัมน์เป็น VARCHAR เก็บ IP
     QSqlQuery alter(db);
     const QString alterSql =
         "ALTER TABLE Parameter "
-        "ADD COLUMN maxDoaLineMeters INT NOT NULL DEFAULT 15000";
+        "ADD COLUMN IPLocalForRemoteGroup VARCHAR(64) NOT NULL DEFAULT '10.10.0.20'";
 
     if (!alter.exec(alterSql)) {
-        qWarning() << "[ensureParameterHasMaxDoaLineMeters] ALTER failed:"
+        qWarning() << "[ensureParameterIPLocalForRemoteGroup] ALTER failed:"
                    << alter.lastError().text();
         return;
     }
 
-    qDebug() << "[ensureParameterHasMaxDoaLineMeters] Added column maxDoaLineMeters";
+    qDebug() << "[ensureParameterIPLocalForRemoteGroup] Added column IPLocalForRemoteGroup";
 
-    // 3) Optional: set existing rows that might need a value
+    // ตั้งค่า default ให้ row เก่าที่เป็น NULL หรือว่าง
     QSqlQuery upd(db);
-    if (!upd.exec("UPDATE Parameter SET maxDoaLineMeters = 15000 WHERE maxDoaLineMeters <= 0")) {
-        qWarning() << "[ensureParameterHasMaxDoaLineMeters] UPDATE default failed:"
+    const QString updSql =
+        "UPDATE Parameter "
+        "SET IPLocalForRemoteGroup = '10.10.0.20' "
+        "WHERE IPLocalForRemoteGroup IS NULL OR IPLocalForRemoteGroup = ''";
+
+    if (!upd.exec(updSql)) {
+        qWarning() << "[ensureParameterIPLocalForRemoteGroup] UPDATE default failed:"
                    << upd.lastError().text();
     }
 }

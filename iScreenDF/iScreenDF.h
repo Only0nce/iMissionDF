@@ -68,7 +68,7 @@ class iScreenDF : public QObject
 
 public:
     explicit iScreenDF(ImageProviderDF *imageProvider, QObject *parent = nullptr);
-     ~iScreenDF();
+    ~iScreenDF();
 
     //////////////////////////connectCompassServer ////////////////////
     void connectCompassServer(const QString &ip, quint16 port = 2948);
@@ -212,6 +212,11 @@ signals:
     void updateReceiverParametersFreqandbw(int frequencyHz, int doaBwHz , bool linkStatus);
     void updateGlobalOffsets( double offsetvalue, double compassoffset);
     void updateDoaLineMeters(int paramId);
+    void updateIPLocalForRemoteGroupFromServer(const QString &ip);
+    void mapOfflineChanged(bool enabled);
+    void useOfflineMapStyleChanged(bool mapStatus);
+    void updateDoaLineDistanceMFromServer(int m);
+    void updateMaxDoaDelayMsFromServer(int ms);
 
 public slots:
     // void cppSubmitTextFiled(QString qmlCommand);
@@ -241,9 +246,11 @@ public slots:
     void getdatabaseToSideSettingDrawer(const QString &msg);
     void groupSetting(const QString &title, int id , const QString &Title);
     void groupSettingconfig(const QString &title, int id , const QString &name, const QString &Title);
-    void scanDevices(/*const QString &baseIp = "192.168.10.",
-                     int start = 1, int end = 254,
-                     int port = 8000, int timeoutMs = 200*/);
+    // void scanDevices(/*const QString &baseIp = "192.168.10.",
+    //                  int start = 1, int end = 254,
+    //                  int port = 8000, int timeoutMs = 200*/);
+    // // void scanDevices(int startHost, int endHost);
+    void scanDevicesRange(const QString &startIp, const QString &endIp);
     void cancelScan();
     void getNetworkfromDb(int id);
 
@@ -296,7 +303,7 @@ public slots:
 
     void GetrfsocParameter( bool  setDoaEnable, bool spectrumEnabled, int setAdcChannel, int Frequency, int update_en, double TxHz,
                            int TargetOffsetHz, int DoaBwHz, double DoaPowerThresholdDb,const QString &DoaAlgorithm, double ucaRadiusM,double TargetDb,bool rfAgcEnabled,bool linkStatus , double offsetvalue, double compassoffset
-                           ,int maxDoaLineMeters);
+                           ,int maxDoaLineMeters,const QString &ipLocalForRemoteGroup, int setDelayMs, int setDistance);
     void GetIPDFServer(const QString &ip);
 
     void sendParameterToServer();
@@ -324,6 +331,10 @@ public slots:
     void requestRfFrequency();
     void sendMaxDoaLineMeters(int meters);
     void onTxSnapshotUpdated(double lat,double lon,double rms_m,double freqHz,const QString &dateStr,const QString &timeStr,double updatedMs,const QString &mgrs);
+    void setIPLocalForRemoteGroup(const QString &ip);
+    void setUseOfflineMapStyle(bool mapStatus);
+    void setDelayMs(const int ms);
+    void setDistance(const int m);
 
 private slots:
     void remoteGroupsJson(const QString &json);
@@ -458,6 +469,7 @@ private:
         double m_offset_value = 0.0;
         double m_compass_offset = 0.0;
         int m_maxDoaLine_meters = 0.0;
+        QString m_ipLocalForRemoteGroup = "10.10.0.20";
     };
 
     Network *networks;

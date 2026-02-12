@@ -619,7 +619,6 @@ void Mainwindows::sendSquelchStatus(bool sqlVal)
              << pttOn << sqlOn << callState << freqHz << freqMHz;
     emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, freqMHz);
     emit frequencyChangedToQml(freqHz, freqMHz);
-
 //    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, (double)freqHz);
 }
 
@@ -874,25 +873,80 @@ void Mainwindows::setNetworkFormDisplay(const int index,
                                         const QString &mode,
                                         const QString &ipWithCidr,
                                         const QString &gateway,
-                                        const QString &dnsList){
-    qDebug() << "setNetworkFormDisplay All::" << index << mode << ipWithCidr << gateway << dnsList;
+                                        const QString &dnsList)
+{
+    // =========================================================
+    // ✅ Only DNS: blank -> "0"
+    // =========================================================
+    const bool dnsWasBlank = dnsList.trimmed().isEmpty();
+    const QString dnsNorm  = dnsWasBlank ? QStringLiteral("0")
+                                        : dnsList.trimmed();
+
+    qDebug() << "setNetworkFormDisplay All::"
+             << "index=" << index
+             << "mode=" << mode
+             << "ip=" << ipWithCidr
+             << "gateway=" << gateway
+             << "dns(in)=" << dnsList
+             << "dns(norm)=" << dnsNorm;
+
+    // =========================================================
+    // ✅ Resolve interface
+    // =========================================================
     QString iface;
-    if(index==0)
-        iface = "enP8p1s0";
-    else if(index==1)
-        iface = "enP1p1s0";
-    else if(index==2)
-        iface = "end0";
-    else if(index==3)
-        iface = "end1";
-    netWorkController->applyNetworkConfig(iface, mode, ipWithCidr, gateway, dnsList);
+    if      (index == 0) iface = "enP8p1s0";
+    else if (index == 1) iface = "enP1p1s0";
+    else if (index == 2) iface = "end0";
+    else if (index == 3) iface = "end1";
+    else {
+        qWarning() << "Invalid network index:" << index;
+        return;
+    }
+
+    // =========================================================
+    // ✅ Apply network config
+    //    (applyNetworkConfig รองรับ dns = "0" แล้ว)
+    // =========================================================
+    netWorkController->applyNetworkConfig(
+        iface,
+        mode,
+        ipWithCidr,
+        gateway,
+        dnsNorm          // ✅ ส่ง "0" เฉพาะกรณี dns ว่าง
+        );
+
+    // =========================================================
+    // ✅ Load + broadcast full LAN config
+    // =========================================================
     QVariantMap result = netWorkController->loadAllLanConfig();
     QJsonObject jsonObj = QJsonObject::fromVariantMap(result);
     QJsonDocument jsonDoc(jsonObj);
-    QString jsonString = QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
+    QString jsonString =
+        QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
 
+    // =========================================================
+    // ✅ Command payload (ไม่ยุ่ง dns)
+    // =========================================================
+    QJsonObject params;
+    params.insert("objectName", "Networks");
+    params.insert("ipaddress", ipWithCidr);
+
+    const QString raw_data =
+        QJsonDocument(params).toJson(QJsonDocument::Compact);
+
+    // =========================================================
+    // ✅ Send to REC only for index == 1
+    // =========================================================
+    if (index == 1) {
+        emit commandMainCppToRecCpp(raw_data);
+    }
+
+    // =========================================================
+    // ✅ Broadcast to WebSocket clients
+    // =========================================================
     wsServer->broadcastMessage(jsonString);
 }
+
 
 void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSender, const QString &message)
 {
@@ -991,6 +1045,17 @@ void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSend
         // else
         netWorkController->applyNetworkConfig(iface, mode, ipWithCidr, gateway, dnsList);
         emit updateNetworkToDisplay(QString::fromUtf8(QJsonDocument(command).toJson(QJsonDocument::Compact)));
+
+        QJsonDocument jsonDocs;
+        QJsonObject Params;
+        Params.insert("objectName", "Networks");
+        Params.insert("ipaddress", ipWithCidr);
+        jsonDocs.setObject(Params);
+        QString raw_data = QJsonDocument(Params).toJson(QJsonDocument::Compact).toStdString().c_str();
+
+        if(iface == "enP1p1s0"){
+            emit commandMainCppToRecCpp(raw_data);
+        }
 
         QVariantMap result = netWorkController->loadAllLanConfig();
         QJsonObject jsonObj = QJsonObject::fromVariantMap(result);

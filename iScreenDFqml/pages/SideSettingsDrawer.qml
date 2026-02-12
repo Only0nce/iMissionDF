@@ -1,6 +1,10 @@
 // /pages/SideSettingsDrawer.qml  (FULL FILE)
 // 1920x1080 overlay + drawer width เดิม 500
 // click นอก drawer => close (ชัวร์สุด)
+//
+// ✅ ADD: ONLINE/OFFLINE button next to LOCAL/REMOTES
+// - toggles map style mode (online/offline)
+// - broadcasts via Krakenmapval (recommended, works across pages)
 
 import QtQuick 2.12
 import QtQuick.Controls 2.12
@@ -10,18 +14,16 @@ import QtLocation 5.6
 import QtQuick.Controls.Material 2.12
 import QtGraphicalEffects 1.0
 import QtQuick.VirtualKeyboard 2.4
+import Qt.labs.settings 1.1
 
 import "../i18n" as I18n
 import "./"
 
 Item {
-    // id: settingsPanel
-    // width: 1920
-    // height: 1080
     z: 100
 
     id: settingsPanel
-    anchors.fill: parent            // ✅ ครอบเต็มหน้าจอจริง
+    anchors.fill: parent
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
 
@@ -33,7 +35,7 @@ Item {
                                  ? krakenmapval.language : "en"
 
     // ===== Internal for side content =====
-    property string sidePanelKey: "localdevice" // default
+    property string sidePanelKey: "localdevice"
     function _sourceForKey(k) {
         switch (k) {
         case "group":       return "qrc:/iScreenDFqml/sidepanels/SideGroup.qml"
@@ -42,10 +44,14 @@ Item {
         default:            return "qrc:/iScreenDFqml/sidepanels/SideLocal.qml"
         }
     }
-    function _syncSidePanel() {
-        sideLoader.source = _sourceForKey(sidePanelKey)
-    }
+    function _syncSidePanel() { sideLoader.source = _sourceForKey(sidePanelKey) }
 
+    Settings {
+        id: uiSettings
+        category: "SideSettingsDrawer"
+        property bool savedUseOfflineMap: false   // false=ONLINE, true=OFFLINE
+    }
+    property bool useOffline: uiSettings.savedUseOfflineMap
     // ===== States (ควบคุมเฉพาะ drawer) =====
     state: "closed"
     states: [
@@ -56,7 +62,7 @@ Item {
         NumberAnimation { target: drawer; properties: "x"; duration: 300; easing.type: Easing.InOutQuad }
     }
 
-    // ===== Dim overlay =====         opacity: (settingsPanel.state === "open") ? 0.35 : 0.0
+    // ===== Dim overlay =====
     Rectangle {
         id: overlay
         anchors.fill: parent
@@ -66,7 +72,7 @@ Item {
         visible: settingsPanel.state === "open"
     }
 
-    // ===== Drawer panel (กว้างเดิม 500) =====
+    // ===== Drawer panel =====
     Rectangle {
         id: drawer
         width: 500
@@ -75,7 +81,6 @@ Item {
         z: 10
         x: -width
 
-        // ===== Content =====
         Item {
             id: _item
             anchors.fill: parent
@@ -171,6 +176,7 @@ Item {
                         }
                     }
 
+                    // ===================== LOCAL/REMOTES switch =====================
                     Rectangle {
                         id: connSwitch
                         Layout.preferredHeight: 40
@@ -216,6 +222,141 @@ Item {
                             }
                         }
                     }
+
+                    // ===================== MAP ONLINE / OFFLINE button (CLEAR UX) =====================
+                    Rectangle {
+                        id: netStyleSwitch
+                        Layout.preferredHeight: 40
+                        Layout.preferredWidth: 160
+                        Layout.alignment: Qt.AlignVCenter
+                        radius: height / 2
+                        border.width: 2
+
+                        // false = MAP ONLINE, true = MAP OFFLINE
+                        property bool useOffline: true
+                        property bool hovered: true
+
+                        // ✅ Colors
+                        readonly property color cOnline:  "#163A35"   // dark green
+                        readonly property color cOnline2: "#7AE2CF"   // accent
+                        readonly property color cOffline: "#3A2A16"   // dark amber
+                        readonly property color cOffline2:"#F3B25E"   // accent amber
+
+                        // ✅ Label
+                        readonly property string labelText: useOffline ? "MAP OFFLINE" : "MAP ONLINE"
+                        readonly property string subText:   useOffline ? "tiles/cache mode" : "internet mode"
+
+                        // ✅ Visual state
+                        border.color: useOffline ? cOffline2 : cOnline2
+                        color: hovered
+                               ? (useOffline ? Qt.darker(cOffline, 1.15) : Qt.darker(cOnline, 1.15))
+                               : (useOffline ? cOffline : cOnline)
+
+                        Behavior on color { ColorAnimation { duration: 150 } }
+                        Behavior on border.color { ColorAnimation { duration: 150 } }
+
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 10
+
+                            // ✅ Map icon
+                            Image {
+                                Layout.preferredWidth: 22
+                                Layout.preferredHeight: 22
+                                source: "qrc:/iScreenDFqml/images/earth-asia.png"   // ใช้อันที่มีอยู่แล้ว
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                mipmap: true
+                                opacity: 0.95
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 0
+
+                                Text {
+                                    text: netStyleSwitch.labelText
+                                    color: "#FFFFFF"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    text: netStyleSwitch.subText
+                                    color: useOffline ? "#E9D8B5" : "#CFEFEA"
+                                    font.pixelSize: 10
+                                    opacity: 0.95
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            // ✅ Status icon (online/offline)
+                            // Item {
+                            //     Layout.preferredWidth: 22
+                            //     Layout.preferredHeight: 22
+
+                            //     // dot background
+                            //     Rectangle {
+                            //         anchors.centerIn: parent
+                            //         width: 18; height: 18
+                            //         radius: 9
+                            //         color: "transparent"
+                            //         border.width: 2
+                            //         border.color: useOffline ? netStyleSwitch.cOffline2 : netStyleSwitch.cOnline2
+                            //     }
+
+                            //     // dot fill
+                            //     Rectangle {
+                            //         anchors.centerIn: parent
+                            //         width: 10; height: 10
+                            //         radius: 5
+                            //         color: useOffline ? netStyleSwitch.cOffline2 : netStyleSwitch.cOnline2
+                            //     }
+                            // }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            onEntered: netStyleSwitch.hovered = true
+                            onExited:  netStyleSwitch.hovered = false
+
+                            onClicked: {
+                                netStyleSwitch.useOffline = !netStyleSwitch.useOffline
+
+                                // ✅ จำค่า
+                                uiSettings.savedUseOfflineMap = netStyleSwitch.useOffline
+
+                                // ✅ broadcast to MapViewer page
+                                if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
+                                    Krakenmapval.setUseOfflineMapStyle(netStyleSwitch.useOffline)
+                                } else {
+                                    console.warn("Krakenmapval.setUseOfflineMapStyle(bool) not available")
+                                }
+                            }
+                        }
+
+                        ToolTip.visible: hovered
+                        ToolTip.text: useOffline
+                                      ? "Map OFFLINE: use cached/offline tiles (no internet)"
+                                      : "Map ONLINE: use internet map tiles"
+
+                        // ✅ Optional: sync from backend when app starts
+                        Connections {
+                            target: Krakenmapval
+                            function onUseOfflineMapStyleChanged(useOffline) {
+                                var v = !!useOffline
+                                if (netStyleSwitch.useOffline === v) return
+
+                                netStyleSwitch.useOffline = v
+
+                                // ✅ จำค่า (กันเปิดใหม่แล้วเพี้ยน)
+                                uiSettings.savedUseOfflineMap = v
+                            }
+                        }
+                    }
                 }
 
                 Label {
@@ -235,8 +376,8 @@ Item {
                         { title: "RADIO",              icon: "qrc:/images/radioIcon.png",             source: "qrc:/HomeDisplay.qml" },
                         { title: "MAP\nVISUALIZATION", icon: "qrc:/iScreenDFqml/images/earth-asia.png", source: "qrc:/iScreenDFqml/pages/QMLMap.qml" },
                         { title: "DOA\nVIEWER",        icon: "qrc:/iScreenDFqml/images/dart-board.png", source: "qrc:/DoaViewer/ViewerPage.qml" },
-                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",  source: "qrc:/iRecordManage/TapBarRecordFiles.qml" }/*,*/
-                        // { title: "DATALOGGER",         icon: "qrc:/iScreenDFqml/images/log-file.png",  source: "qrc:/iScreenDFqml/pages/Datalogger.qml" }
+                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",  source: "qrc:/iRecordManage/TapBarRecordFiles.qml" },
+                        { title: "DIAG\nNOSTIC",       icon: "qrc:/images/Diagnostic.png",            source: "qrc:/iRecordManage/MonitorDisplay.qml" }
                     ]
                     property int currentIndex: 0
 
@@ -274,17 +415,14 @@ Item {
                                 color: btn.checked
                                        ? "#6c9386"
                                        : (index === toolbar.hoveredIndex ? "#6c9386" : "transparent")
-
                                 border.color: (index === toolbar.hoveredIndex) ? "#6c9386" : "transparent"
                                 border.width: 1
                             }
 
-                            // ===== mouse hover =====
                             onHoveredChanged: {
                                 if (hovered) {
                                     toolbar.hoveredIndex = index
                                 } else {
-                                    // ❗ออกจาก hover จะล้างเฉพาะถ้าไม่ใช่ปุ่มที่เลือก
                                     if (toolbar.hoveredIndex === index
                                         && toolbar.currentIndex !== index) {
                                         toolbar.hoveredIndex = -1
@@ -297,9 +435,7 @@ Item {
 
                                 var oldSource = toolbar.pages[toolbar.currentIndex].source
                                 var newSource = modelData.source
-                                var newTitle  = String(modelData.title || "")
 
-                                // ออกจาก DoA → disconnect
                                 if (oldSource === "qrc:/DoaViewer/ViewerPage.qml"
                                     && newSource !== oldSource) {
 
@@ -311,13 +447,11 @@ Item {
                                     }
                                 }
 
-                                // เปลี่ยนหน้า
                                 toolbar.currentIndex = index
                                 toolbar.hoveredIndex = index
 
                                 settingsPanel.navigate(modelData.title, modelData.source, index)
 
-                                // กลับเข้า DoA → connect
                                 if (newSource === "qrc:/DoaViewer/ViewerPage.qml") {
                                     if (typeof doaClient !== "undefined"
                                         && doaClient
@@ -327,48 +461,13 @@ Item {
                                     }
                                 }
 
-                                // ✅ ไปหน้า MAP / VISUALIZATION → ส่ง "GET ความถี่" ไป C++
-                                // แนะนำเช็คด้วย source เป็นหลัก (แม่นสุด)
-                                // var isMapPage =
-                                //         (newSource === "qrc:/MapViewer/MapViewerPage.qml") ||       // <-- ปรับให้ตรงของคุณ
-                                //         (newSource === "qrc:/MapViewer/ViewerPage.qml")    ||       // เผื่อ path นี้
-                                //         (newTitle.indexOf("MAP") >= 0 && newTitle.indexOf("VISUALIZATION") >= 0)
-
-                                // if (isMapPage) {
-                                //     // วิธี A: เรียก method บน Krakenmapval (แนะนำ)
-                                //     if (typeof Krakenmapval !== "undefined" && Krakenmapval) {
-                                //         // 1) ถ้าคุณมี method ตรงๆ
-                                //         if (typeof Krakenmapval.requestRfFrequency === "function") {
-                                //             Krakenmapval.requestRfFrequency()
-                                //         }
-                                //         // // 2) หรือถ้าคุณใช้ sendmessage/menuID อยู่แล้ว
-                                //         else if (typeof Krakenmapval.sendSetSpectrumEnable === "function") {
-                                //            krakenmapval.sendSetSpectrumEnable(checked)
-                                //         }
-                                //     }
-                                //     // // วิธี B: ถ้าคุณผูกกับ wsClient/krakenmapval แทน
-                                //     // else if (typeof wsClient !== "undefined" && wsClient) {
-                                //     //     if (typeof wsClient.requestRfFrequency === "function") {
-                                //     //         wsClient.requestRfFrequency()
-                                //     //     }
-                                //     // }
-                                // }
                                 var MAP_SOURCE = "qrc:/iScreenDFqml/pages/QMLMap.qml"
-                                var leavingMap  = (oldSource === MAP_SOURCE && newSource !== MAP_SOURCE)
                                 var enteringMap = (newSource === MAP_SOURCE)
 
-                                // รองรับทั้ง krakenmapval และ Krakenmapval
                                 var km = (typeof krakenmapval !== "undefined" && krakenmapval) ? krakenmapval
                                         : ((typeof Krakenmapval !== "undefined" && Krakenmapval) ? Krakenmapval : null)
 
                                 if (km) {
-                                    // ออกหน้า MAP → ส่ง false
-                                    // if (leavingMap) {
-                                    //     if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
-                                    //         Krakenmapval.sendSetSpectrumEnable(true)
-                                    // }
-
-                                    // เข้าหน้า MAP → ส่ง true + ขอความถี่
                                     if (enteringMap) {
                                         if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
                                             Krakenmapval.sendSetSpectrumEnable(false)
@@ -425,11 +524,16 @@ Item {
                         target: settingsPanel.krakenmapval
                         function onRfsocParameterUpdated(frequencyHz, doaBwHz) {
                             offcentersetInput.text = (frequencyHz / 1e6).toFixed(4)
-                            bwInput.text = String(doaBwHz)
+
+                            var bwHz = Number(doaBwHz)
+                            if (isFinite(bwHz) && bwHz > 0) {
+                                bwInput.text = (bwHz / 1000.0).toFixed(3)
+                            } else {
+                                bwInput.text = ""
+                            }
                         }
                     }
 
-                    // -------- Center Frequency --------
                     Label { text: "Frequency:"; font.pixelSize: 16; color: "#ffffff" }
 
                     RowLayout {
@@ -526,7 +630,6 @@ Item {
                         }
                     }
 
-                    // -------- Bandwidth --------
                     Label { text: "Bandwidth:"; font.pixelSize: 16; color: "#ffffff" }
 
                     RowLayout {
@@ -546,9 +649,9 @@ Item {
                             topPadding: 4
                             bottomPadding: 4
                             placeholderTextColor: "#666"
-                            placeholderText: "-500 .. 500"
+                            placeholderText: "0.05 .. 10000"
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            validator: DoubleValidator { bottom: 50.0; top: 10000000.0 }
+                            validator: DoubleValidator { bottom: 0.05; top: 10000.0; decimals: 3 }
 
                             background: Rectangle {
                                 color: "#111A1E"
@@ -562,10 +665,9 @@ Item {
                             onFocusChanged: if (focus) selectAll()
                         }
 
-                        Text { text: "Hz"; color: "#9CA3AF"; font.pixelSize: 14; Layout.preferredWidth: 40 }
+                        Text { text: "kHz"; color: "#9CA3AF"; font.pixelSize: 14; Layout.preferredWidth: 40 }
                     }
 
-                    // -------- Update Button --------
                     Button {
                         id: updateButton
                         text: "Update Receiver Parameters"
@@ -594,9 +696,10 @@ Item {
                             if (!settingsPanel.krakenmapval) return
 
                             var mhz = Number(offcentersetInput.text)
-                            var bwHz = Number(bwInput.text)
+                            var bwKhz = Number(bwInput.text)
+                            var bwHz  = bwKhz * 1000.0
 
-                            if (isNaN(mhz) || isNaN(bwHz)) {
+                            if (isNaN(mhz) || isNaN(bwKhz) || !isFinite(bwHz)) {
                                 console.warn("Invalid input")
                                 return
                             }
@@ -661,7 +764,6 @@ Item {
     }
 
     // ✅ Click outside drawer to close (ROCK-SOLID)
-    // อยู่บนสุดของทุกอย่าง แล้วตัดสินใจเองว่า click อยู่ใน drawer หรือไม่
     MouseArea {
         id: clickOutsideToClose
         anchors.fill: parent
@@ -679,18 +781,14 @@ Item {
 
         onPressed: function(mouse) {
             if (isInsideDrawer(mouse.x, mouse.y)) {
-                // ✅ คลิกใน drawer -> ปล่อยให้ปุ่ม/ฟอร์มทำงาน
                 mouse.accepted = false
                 return
             }
-
-            // ✅ คลิกนอก drawer -> ปิด แล้วกิน event ไม่ให้ทะลุไปข้างหลัง
             mouse.accepted = true
             settingsPanel.close()
         }
 
         onReleased: function(mouse) {
-            // กันบางกรณีที่ release ไปโดนอย่างอื่น
             if (!isInsideDrawer(mouse.x, mouse.y))
                 mouse.accepted = true
             else
@@ -698,7 +796,6 @@ Item {
         }
 
         onClicked: function(mouse) {
-            // สำรองไว้ (บาง device ส่ง clicked อย่างเดียว)
             if (!isInsideDrawer(mouse.x, mouse.y)) {
                 mouse.accepted = true
                 settingsPanel.close()
@@ -712,10 +809,21 @@ Item {
     function open() {
         settingsPanel.state = "open"
         _syncSidePanel()
-    }
-    function close() {
-        settingsPanel.state = "closed"
+
+        if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
+            Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)
+        }
     }
 
-    Component.onCompleted: _syncSidePanel()
+
+    function close() { settingsPanel.state = "closed" }
+
+    Component.onCompleted: {
+        _syncSidePanel()
+
+        // ✅ ถ้า backend พร้อม ให้ sync ค่า “ที่จำไว้” ไปยังระบบ (ครั้งเดียว)
+        if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
+            Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)
+        }
+    }
 }

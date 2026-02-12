@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QString>
+#include <QStringList>
 #include <QVariantMap>
 #include <QJsonObject>
 
@@ -30,8 +31,20 @@ public:
     QString getTimezone() const;
     QJsonObject getNtpConfig() const;
 
+signals:
+    void applyNetworkConfigStarted(const QString &iface);
+    void applyNetworkConfigFinished(const QString &iface,
+                                    bool ok,
+                                    const QString &message,
+                                    const QString &gateway,
+                                    const QString &dns);
+
+    // ✅ NEW: แจ้งผลการ apply ด้วย nmcli (มาทีหลัง ไม่บล็อก UI)
+    void applyNetworkConfigNmcliFinished(const QString &iface,
+                                         bool ok,
+                                         const QString &message);
+
 private:
-    // ✅ ADD THIS
     void runCommand(const QString &cmd) const;
     void saveConfigToJson(const QJsonObject &obj);
     void runNmcliCommand(const QStringList &args);

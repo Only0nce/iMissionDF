@@ -1723,111 +1723,96 @@ void DatabaseiRec::filterRecordFiles(QString msg, QWebSocket* wClient)
              << "endTime=" << endTime;
 }
 
-//void DatabaseiRec::filterRecordFiles(QString msg, QWebSocket* wClient)
-//{
-//    qDebug() << "filterRecordFilesMysql:" << msg;
+ bool DatabaseiRec::removeAllUnder(const QString &rootPath)
+{
+    QDir root(rootPath);
 
-//    // Parse JSON
-//    QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8());
-//    if (!doc.isObject())
-//    {
-//        qWarning() << "Invalid JSON format";
-//        return;
-//    }
-//    QJsonObject obj = doc.object();
+    if (!root.exists()) {
+        qWarning() << "[formatDisk] path not found:" << rootPath;
+        return false;
+    }
 
-//    QString date = obj["dateTime"].toString().trimmed();
-//    QString startTime = obj["startTime"].toString().trimmed();
-//    QString endTime = obj["endTime"].toString().trimmed();
+    QDirIterator it(rootPath,
+                    QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System,
+                    QDirIterator::Subdirectories);
 
-//    if (date.isEmpty())
-//    {
-//        qWarning() << "Missing date in JSON";
-//        return;
-//    }
+    QList<QFileInfo> items;
+    while (it.hasNext()) {
+        it.next();
+        items.append(it.fileInfo());
+    }
 
-//    // Validate times if provided
-//    if (!startTime.isEmpty() && !endTime.isEmpty()) {
-//        QTime tStart = QTime::fromString(startTime, "HH:mm:ss");
-//        QTime tEnd = QTime::fromString(endTime, "HH:mm:ss");
-//        if (!tStart.isValid() || !tEnd.isValid()) {
-//            qWarning() << "Invalid time format!";
-//            return;
-//        }
-//    }
+    std::sort(items.begin(), items.end(),
+              [](const QFileInfo &a, const QFileInfo &b) {
+                  return a.filePath().length() > b.filePath().length();
+              });
 
-//    if (!db.isValid()) {
-//        qWarning() << "Database connection is invalid!";
-//        return;
-//    }
-//    if (!db.isOpen()) {
-//        if (!db.open()) {
-//            qWarning() << "Failed to open DB:" << db.lastError().text();
-//            return;
-//        }
-//    }
+    bool ok = true;
 
-//    QString sql = R"(
-//        SELECT *
-//        FROM record_files
-//        WHERE DATE(created_at) = :date
-//    )";
+    for (const QFileInfo &fi : items) {
+        const QString p = fi.filePath();
 
-//    if (!startTime.isEmpty() && !endTime.isEmpty()) {
-//        sql += " AND TIME(created_at) BETWEEN :start_time AND :end_time";
-//    }
+        if (QDir::cleanPath(p) == QDir::cleanPath(rootPath)) {
+            continue;
+        }
 
-//    QSqlQuery query(db);
-//    if (!query.prepare(sql))
-//    {
-//        qWarning() << "Prepare failed:" << query.lastError().text();
-//        return;
-//    }
+        if (fi.isSymLink() || fi.isFile()) {
+            if (!QFile::remove(p)) {
+                qWarning() << "[formatDisk] remove file failed:" << p;
+                ok = false;
+            }
+        } else if (fi.isDir()) {
+            QDir d(p);
+            if (!d.rmdir(".")) {
+                if (!d.removeRecursively()) {
+                    qWarning() << "[formatDisk] remove dir failed:" << p;
+                    ok = false;
+                }
+            }
+        } else {
+            if (!QFile::remove(p)) {
+                qWarning() << "[formatDisk] remove entry failed:" << p;
+                ok = false;
+            }
+        }
+    }
 
-//    query.bindValue(":date", date);
-//    if (!startTime.isEmpty() && !endTime.isEmpty()) {
-//        query.bindValue(":start_time", startTime);
-//        query.bindValue(":end_time", endTime);
-//    }
+    return ok;
+}
 
-//    if (!query.exec())
-//    {
-//        qWarning() << "Query failed:" << query.lastError().text();
-//        return;
-//    }
+void DatabaseiRec::formatDiskandDB()
+{
+    const QString rootPath = "/var/ivoicex";
+    qDebug() << "[formatDisk] deleting files under:" << rootPath;
 
-//    QJsonArray resultArray;
-//    int rowsCount = 0;
+    bool delOk = removeAllUnder(rootPath);
+    qDebug() << "[formatDisk] delete result:" << delOk;
 
-//    while (query.next())
-//    {
-//        QJsonObject record;
-//        record["id"] = QString(query.value("id").toByteArray().toHex());
-//        record["device"] = query.value("device").toString();
-//        record["filename"] = query.value("filename").toString();
-//        record["created_at"] = query.value("created_at").toString();
-//        record["continuous_count"] = query.value("continuous_count").toInt();
-//        record["file_path"] = query.value("file_path").toString();
-//        record["name"] = query.value("name").toString();
+    if (!db.isOpen()) {
+        qWarning() << "[formatDisk] Database not open";
+        return;
+    }
 
-//        resultArray.append(record);
-//        rowsCount++;
-//    }
+    QStringList tables = {
+        "record_files"
+    };
 
-//    QJsonObject response;
-//    response["objectName"] = "filteredRecordFiles";
-//    response["totalRows"] = rowsCount;
-//    response["records"] = resultArray;
+    QSqlQuery q(db);
 
-//    QJsonDocument responseDoc(response);
-//    QString messageOut = responseDoc.toJson(QJsonDocument::Compact);
+    q.exec("SET FOREIGN_KEY_CHECKS=0");
 
-//    if (wClient && wClient->isValid())
-//    {
-//        wClient->sendTextMessage(messageOut);
-//        qDebug() << "Sent filtered records:" << messageOut;
-//    }
-//}
+    for (const QString &t : tables) {
+        if (!q.exec("TRUNCATE TABLE " + t)) {
+            qWarning() << "[formatDisk] truncate failed:" << t << q.lastError().text();
+        } else {
+            qDebug() << "[formatDisk] truncated:" << t;
+        }
+    }
+
+    q.exec("SET FOREIGN_KEY_CHECKS=1");
+
+    qDebug() << "[formatDisk] done.";
+}
 
 
 QString DatabaseiRec::generateBcryptHash(const QString& password)
@@ -2740,145 +2725,6 @@ void DatabaseiRec::verifyTableSchema(const QString &tableName, const QMap<QStrin
     }
 }
 
-//void DatabaseiRec::checkFlieAndRemoveDB() {
-//    qDebug() << "checkFlieAndRemoveDB";
-
-//    // ใช้ชื่อ connection เฉพาะ thread
-//    QString connectionName = QString("preview_connection_%1").arg(reinterpret_cast<quintptr>(QThread::currentThreadId()));
-//    if (QSqlDatabaseiRec::contains(connectionName)) {
-//        QSqlDatabaseiRec::removeDatabase(connectionName);
-//    }
-
-//    QSqlDatabase db = QSqlDatabaseiRec::addDatabase("QMYSQL", connectionName);
-//    db.setDatabaseName("recorder");
-//    db.setUserName("root");
-//    db.setPassword("OTL324$");
-//    db.setHostName("localhost");
-
-//    if (!db.open()) {
-//        qWarning() << "Failed to open DB:" << db.lastError().text();
-//        return;
-//    }
-
-//    // 1. ตรวจสอบวันที่เก่าสุด
-//    QSqlQuery minQuery(db);
-//    if (!minQuery.exec("SELECT MIN(created_at) FROM record_files")) {
-//        qWarning() << "Failed to get MIN(created_at):" << minQuery.lastError().text();
-//        db.close();
-//        return;
-//    }
-
-//    QDateTime oldestDate;
-//    if (minQuery.next()) {
-//        oldestDate = minQuery.value(0).toDateTime();
-//        qDebug() << "Oldest created_at:" << oldestDate;
-//    }
-
-//    if (oldestDate.isNull() || oldestDate.daysTo(QDateTime::currentDateTime()) < 30) {
-//        qDebug() << "No cleanup needed. Oldest record is within 30 days.";
-//        db.close();
-//        return;
-//    }
-
-//    // 2. นับจำนวนข้อมูลทั้งหมด
-//    QSqlQuery countQuery(db);
-//    if (!countQuery.exec("SELECT COUNT(*) FROM record_files")) {
-//        qWarning() << "Failed to count records:" << countQuery.lastError().text();
-//        db.close();
-//        return;
-//    }
-
-//    int totalRows = 0;
-//    if (countQuery.next()) {
-//        totalRows = countQuery.value(0).toInt();
-//    }
-
-//    int rowsToDelete = qMax(1, int(totalRows * 0.2));  // อย่างน้อย 1 row
-//    qDebug() << "Preparing to delete" << rowsToDelete << "of" << totalRows << "rows";
-
-//    // 3. ดึงข้อมูล 20% แรกที่เก่าที่สุด
-//    QString selectSql = QString(R"(
-//        SELECT id, device, filename, created_at, continuous_count, file_path, name
-//        FROM record_files
-//        ORDER BY created_at ASC
-//        LIMIT %1
-//    )").arg(rowsToDelete);
-
-//    QSqlQuery selectQuery(db);
-//    if (!selectQuery.exec(selectSql)) {
-//        qWarning() << "Failed to select records to delete:" << selectQuery.lastError().text();
-//        db.close();
-//        return;
-//    }
-
-//    QJsonArray jsonArray;
-//    QStringList idList;
-//    int row = 0;
-
-//    while (selectQuery.next()) {
-//        QByteArray idBytes = selectQuery.value("id").toByteArray();
-//        QString idHex = QString::fromUtf8(idBytes.toHex());
-//        int device = selectQuery.value("device").toInt();
-//        QString filename = selectQuery.value("filename").toString();
-//        QString created_at = selectQuery.value("created_at").toDateTime().toString("yyyy-MM-dd HH:mm:ss");
-//        int count = selectQuery.value("continuous_count").toInt();
-//        QString file_path = selectQuery.value("file_path").toString();
-//        QString name = selectQuery.value("name").toString();
-
-//        qDebug() << QString("Row %1").arg(++row)
-//                 << "id:" << idHex
-//                 << "device:" << device
-//                 << "filename:" << filename
-//                 << "created_at:" << created_at
-//                 << "count:" << count
-//                 << "file_path:" << file_path
-//                 << "name:" << name;
-
-//        QJsonObject obj;
-//        obj["id"] = idHex;
-//        obj["device"] = device;
-//        obj["filename"] = filename;
-//        obj["created_at"] = created_at;
-//        obj["file_path"] = file_path;
-
-//        jsonArray.append(obj);
-//        idList << QString("0x%1").arg(idHex);
-//    }
-
-//    QJsonDocument doc(jsonArray);
-//    QString msg = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
-//    qDebug() << "storageManager:" << msg;
-
-//    if (storageManager) {
-//        DiskThreadArgs* args = new DiskThreadArgs;
-//        args->instance = this;
-//        args->msgs = msg;
-
-//        pthread_t idThread;
-//        int ret = pthread_create(&idThread, nullptr, &DatabaseiRec::ThreadFunc, args);
-//        if (ret != 0) {
-//            qWarning() << "Failed to create thread for checkDiskAndFormat";
-//            delete args;  // cleanup if thread not created
-//        } else {
-//            pthread_detach(idThread);  // ป้องกัน zombie thread
-//        }
-//    }
-
-//    // หลังจากส่งให้ storageManager แล้ว:
-//    if (!idList.isEmpty()) {
-//        QString deleteSql = QString("DELETE FROM record_files WHERE id IN (%1)").arg(idList.join(","));
-//        QSqlQuery deleteQuery(db);
-//        if (!deleteQuery.exec(deleteSql)) {
-//            qWarning() << "Failed to delete records:" << deleteQuery.lastError().text();
-//        } else {
-//            qDebug() << "Deleted" << idList.size() << "rows from record_files";
-//        }
-//    }
-//    db.close();
-//    QSqlDatabaseiRec::removeDatabase(connectionName);
-
-//}
-
 void DatabaseiRec::checkFlieAndRemoveDB() {
     qDebug() << "checkFlieAndRemoveDB";
 
@@ -2891,7 +2737,7 @@ void DatabaseiRec::checkFlieAndRemoveDB() {
     QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL", connectionName);
     db.setDatabaseName("recorder");
     db.setUserName("root");
-    db.setPassword("OTL324$");
+    db.setPassword("Ifz8zean6868**");
     db.setHostName("localhost");
 
     if (!db.open()) {

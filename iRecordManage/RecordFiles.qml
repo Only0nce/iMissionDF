@@ -611,6 +611,17 @@ Item {
                     popupDeleteWave.presetDays = 1
                     popupDeleteWave.open()
                 }
+            }
+            Button {
+                id: buttonFormatDisk
+                x: 432
+                y: -71
+                text: "Format Disk"
+                background: Rectangle { radius: 6; color: "#ded418" }
+
+                onClicked: {
+                    qmlCommand('{"menuID":"formatdisknow"}')
+                }
 
             }
             ToolButton {

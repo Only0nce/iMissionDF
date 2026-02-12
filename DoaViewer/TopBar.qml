@@ -25,6 +25,18 @@ Rectangle {
         return (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
     }
 
+    // ========= MHz UI <-> Hz backend helpers =========
+    function rfTextToHz(s) {
+        var mhz = parseFloat((s || "").toString().trim())
+        if (isNaN(mhz) || mhz <= 0) return NaN
+        return Math.round(mhz * 1e6)
+    }
+    function hzToMhzText(hz) {
+        var v = Number(hz)
+        if (isNaN(v) || v <= 0) return ""
+        return (v / 1e6).toFixed(6)
+    }
+
     // ================= RF ATT AGC (per-channel) =================
     property bool rfAgcAvailable: false
     property bool rfAgcEnabledGlobal: true
@@ -391,6 +403,7 @@ Rectangle {
                     }
                 }
             }
+
             DoaControlPanel {
                 Layout.preferredHeight: root.rowH + 20
                 Layout.preferredWidth: 240
@@ -431,17 +444,47 @@ Rectangle {
             Layout.fillWidth: true
             spacing: 8
 
-            Text { text: "RF (Hz)"; color: "#cccccc" }
+            Text { text: "RF (MHz)"; color: "#cccccc" }
 
+            // ===== RF input: UI MHz, backend Hz =====
             TextField {
                 id: freqField
                 Layout.preferredWidth: 200
-                inputMethodHints: Qt.ImhDigitsOnly
+
+                inputMethodHints: Qt.ImhFormattedNumbersOnly
+                validator: DoubleValidator {
+                    bottom: 0.001
+                    top: 6000.0
+                    decimals: 6
+                    notation: DoubleValidator.StandardNotation
+                }
+
                 text: {
                     var c = root.dc()
-                    return c ? c.fcHz.toFixed(0) : "130000000"
+                    return c ? root.hzToMhzText(c.fcHz) : "130.000"
                 }
-                placeholderText: "e.g. 130000000"
+
+                placeholderText: "e.g. 130.000"
+                selectByMouse: true
+
+                onEditingFinished: {
+                    var c = root.dc()
+                    if (!c) return
+
+                    var hz = root.rfTextToHz(text)
+                    if (isNaN(hz)) {
+                        text = root.hzToMhzText(c.fcHz)
+                        return
+                    }
+
+                    // set FC in Hz (no dependency on undefined root.sendSetFcHz)
+                    if (c.setFcHz !== undefined && typeof c.setFcHz === "function")
+                        c.setFcHz(hz, true)
+                    else if (c.fcHz !== undefined)
+                        c.fcHz = hz
+
+                    text = root.hzToMhzText(hz)
+                }
             }
 
             Text { text: "update_en"; color: "#cccccc" }
@@ -469,23 +512,14 @@ Rectangle {
                 onClicked: {
                     var c = root.dc()
                     if (!c) return
-                    var f = Number(freqField.text)
-                    if (isNaN(f) || f <= 0) return
-                    c.setFrequencyHz(f, updateEnSpin.value, true)
+
+                    // ✅ freqField is MHz -> convert to Hz
+                    var fHz = root.rfTextToHz(freqField.text)
+                    if (isNaN(fHz) || fHz <= 0) return
+
+                    c.setFrequencyHz(fHz, updateEnSpin.value, true)
                 }
             }
-
-            // Button {
-            //     text: "Set FC only"
-            //     enabled: root.dc() ? root.dc().connected : false
-            //     onClicked: {
-            //         var c = root.dc()
-            //         if (!c) return
-            //         var f = Number(freqField.text)
-            //         if (isNaN(f) || f <= 0) return
-            //         c.setFcHz(f, true)
-            //     }
-            // }
 
             Rectangle { width: 1; Layout.fillHeight: true; color: "#223049"; opacity: 0.7 }
 
@@ -536,13 +570,15 @@ Rectangle {
             Text {
                 text: {
                     var c = root.dc()
-                    return c ? ("Current: " + c.fcHz.toFixed(0) + " Hz") : "Current: --"
+                    if (!c) return "Current: --"
+                    return "Current: " + (c.fcHz/1e6).toFixed(6) + " MHz (" + c.fcHz.toFixed(0) + " Hz)"
                 }
                 color: "#6fbf73"
                 font.bold: true
             }
         }
-        // ===================== Row 2 =====================
+
+        // ===================== Row 2 (Tx Hz) =====================
         RowLayout {
             Layout.preferredHeight: 60
             Layout.fillWidth: true
@@ -603,8 +639,8 @@ Rectangle {
             }
         }
 
+        // ===================== RF AGC cards =====================
         RowLayout {
-            // width: 1920
             Layout.preferredHeight: 90
             Layout.fillWidth: true
             spacing: 2
@@ -644,7 +680,6 @@ Rectangle {
                     anchors.margins: 8
                     spacing: 4
 
-                    // ===== Row 1 : Label =====
                     Text {
                         text: "Scanner ATT #7"
                         color: "#E5E7EB"
@@ -652,7 +687,6 @@ Rectangle {
                         Layout.alignment: Qt.AlignHCenter
                     }
 
-                    // ===== Row 2 : Slider + Value =====
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
@@ -687,7 +721,6 @@ Rectangle {
                             rightPadding: 8
                             topPadding: 0
                             bottomPadding: 0
-
                             clip: true
 
                             background: Rectangle {
@@ -716,15 +749,13 @@ Rectangle {
                     anchors.margins: 6
                     spacing: 4
 
-                    // ===== Row 1 : Label =====
                     Text {
-                        text: "Target (DF CH0..CH4)"
+                        text: "Target (DF CH1..CH5)"
                         color: "#CBD5E1"
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignHCenter
                     }
 
-                    // ===== Row 2 : Slider + Value =====
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
@@ -762,7 +793,7 @@ Rectangle {
                 model: 5
                 delegate: Rectangle {
                     Layout.preferredHeight: 75
-                    Layout.preferredWidth: 240   // ✅ a bit wider for PH
+                    Layout.preferredWidth: 240
                     radius: 8
                     color: "#071025"
                     border.color: "#20304A"
@@ -774,24 +805,23 @@ Rectangle {
                         spacing: 2
 
                         Text {
-                            text: "CH" + index
+                            text: "CH" + (index + 1)   // UI: CH1..CH5 (backend still uses index 0..4)
                             color: "#CBD5E1"
                             font.pixelSize: 13
-                            Layout.preferredWidth: 28
+                            Layout.preferredWidth: 32
                         }
 
                         Switch {
                             visible: false
                             checked: !!root.rfAgcChEnabled[index]
                             enabled: rfAgcGlobalSwitch.checked && (root.dc() ? root.dc().connected : false)
-                            onToggled: root.sendRfAgcEnable(index, checked)
+                            onToggled: root.sendRfAgcEnable(index, checked) // backend: 0..4
                         }
 
                         Column {
                             Layout.fillWidth: true
                             spacing: 2
 
-                            // ---------- line 1 : RF AGC ----------
                             Text {
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignRight
@@ -802,11 +832,10 @@ Rectangle {
                                     return pk + " dB | ATT " + at + " | T " + tg
                                 }
                                 color: "#93c5fd"
-                                font.pixelSize: 12 //14
+                                font.pixelSize: 12
                                 elide: Text.ElideRight
                             }
 
-                            // ---------- line 2 : PHASE DEBUG ----------
                             Text {
                                 Layout.fillWidth: true
                                 horizontalAlignment: Text.AlignRight
@@ -826,12 +855,11 @@ Rectangle {
                                          + " | coh " + co.toFixed(3)
                                          + " | rms " + rm.toFixed(1) + " dBFS"
                                 }
-                                color: "#EAB308"   // เหลือง debug
-                                font.pixelSize:  10 //12
+                                color: "#EAB308"
+                                font.pixelSize: 10
                                 elide: Text.ElideRight
                             }
                         }
-
                     }
                 }
             }

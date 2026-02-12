@@ -14,7 +14,7 @@ EQ            = =
 
 CC            = /home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-gcc
 CXX           = /home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/bin/aarch64-linux-gnu-g++
-DEFINES       = -DQT_QUICK_LIB -DQT_WIDGETS_LIB -DQT_MULTIMEDIA_LIB -DQT_GUI_LIB -DQT_QMLMODELS_LIB -DQT_QML_LIB -DQT_WEBSOCKETS_LIB -DQT_NETWORK_LIB -DQT_SQL_LIB -DQT_CORE_LIB
+DEFINES       = -DQT_DEPRECATED_WARNINGS -DQT_NO_DEBUG_OUTPUT -DQT_QUICK_LIB -DQT_WIDGETS_LIB -DQT_MULTIMEDIA_LIB -DQT_GUI_LIB -DQT_QMLMODELS_LIB -DQT_QML_LIB -DQT_WEBSOCKETS_LIB -DQT_NETWORK_LIB -DQT_SQL_LIB -DQT_CORE_LIB
 CFLAGS        = -pipe -march=armv8-a+crypto+crc --sysroot=/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot -g -Wall -Wextra -D_REENTRANT -fPIC $(DEFINES)
 CXXFLAGS      = -pipe -march=armv8-a+crypto+crc --sysroot=/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot -g -std=gnu++1z -Wall -Wextra -D_REENTRANT -fPIC $(DEFINES)
 INCPATH       = -I. -I. -IiScreenDF -IiRecordManage -IDoaViewer -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQuick -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWidgets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtMultimedia -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtGui -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQmlModels -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQml -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWebSockets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtSql -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore -I. -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include/aarch64-linux-gnu -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/mkspecs/devices/linux-jetson-orin-g++
@@ -1041,21 +1041,26 @@ qrc_qml.cpp: qml.qrc \
 		MyMenuBar.qml \
 		SQLDrawer.qml \
 		Setting.qml \
-		iRecordManage/RegisterNewDevice.qml \
 		iRecordManage/WaveEditor.qml \
-		iRecordManage/CalendarPopup.qml \
-		iRecordManage/ExportFilesRecord.qml \
 		iRecordManage/RegisterDevice.qml \
+		iRecordManage/EditDeviceLists.qml \
+		iRecordManage/CPUused.qml \
+		iRecordManage/StorageUsed.qml \
+		iRecordManage/LogDataFIles.qml \
+		iRecordManage/UpTimeUsed.qml \
+		iRecordManage/RegisterNewDevice.qml \
+		iRecordManage/ExportFilesRecord.qml \
 		iRecordManage/PopUPDeletedFileWave.qml \
 		iRecordManage/PlayerController.qml \
-		iRecordManage/TapBarRecordFiles.qml \
-		iRecordManage/AddNewDevice.qml \
-		iRecordManage/TumblerDateTime.qml \
-		iRecordManage/KeyboardInput.qml \
 		iRecordManage/LogRegisterDevice.qml \
-		iRecordManage/LogDataFIles.qml \
-		iRecordManage/EditDeviceLists.qml \
+		iRecordManage/RAMused.qml \
 		iRecordManage/RecordFiles.qml \
+		iRecordManage/AddNewDevice.qml \
+		iRecordManage/MonitorDisplay.qml \
+		iRecordManage/TumblerDateTime.qml \
+		iRecordManage/TapBarRecordFiles.qml \
+		iRecordManage/KeyboardInput.qml \
+		iRecordManage/CalendarPopup.qml \
 		iRecordManage/images/remoteButtonSlave.png \
 		iRecordManage/images/grayButton.png \
 		iRecordManage/images/puaseLight.png \
@@ -1236,6 +1241,7 @@ qrc_qml.cpp: qml.qrc \
 		images/User.png \
 		images/headphone_mute.psd \
 		images/stopIcon.png \
+		images/Diagnostic.png \
 		images/lockIcon.png \
 		images/save2.png \
 		images/controlerSetupIcon.png \
@@ -2113,6 +2119,7 @@ moc_Mainwindows.cpp: Mainwindows.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QPointer \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qpointer.h \
 		NetworkController.h \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QVariantMap \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTimer \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qtimer.h \
@@ -2205,7 +2212,6 @@ moc_Mainwindows.cpp: Mainwindows.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qexception.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfactoryinterface.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfileselector.h \
-		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfilesystemwatcher.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfinalstate.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfuture.h \
@@ -2401,6 +2407,7 @@ moc_NetworkController.cpp: NetworkController.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qcontainerfwd.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qobject_impl.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QString \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QVariantMap \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qvariant.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qmap.h \
@@ -6467,6 +6474,9 @@ moc_mainwindowsiRec.cpp: iRecordManage/mainwindowsiRec.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDir \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QUuid \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTemporaryFile \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDate \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QLocale \
 		iRecordManage/FileDownloader.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QCoreApplication \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork/QNetworkAccessManager \
@@ -6489,6 +6499,7 @@ moc_mainwindowsiRec.cpp: iRecordManage/mainwindowsiRec.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTextStream \
 		ChatServer.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QPointer \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFileInfoList \
 		moc_predefs.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/bin/moc
 	/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/bin/moc $(DEFINES) --include /mnt/nas/only/iScanMR10/21012026/iScanMR10/moc_predefs.h -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/mkspecs/devices/linux-jetson-orin-g++ -I/mnt/nas/only/iScanMR10/21012026/iScanMR10 -I/mnt/nas/only/iScanMR10/21012026/iScanMR10 -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/iScreenDF -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/iRecordManage -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/DoaViewer -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQuick -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWidgets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtMultimedia -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtGui -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQmlModels -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQml -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWebSockets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtSql -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0 -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0/aarch64-linux-gnu -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0/backward -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/7.5.0/include -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/7.5.0/include-fixed -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include/aarch64-linux-gnu -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include iRecordManage/mainwindowsiRec.h -o moc_mainwindowsiRec.cpp
@@ -7229,6 +7240,11 @@ moc_databaseiRec.cpp: iRecordManage/databaseiRec.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDir \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QUuid \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTemporaryFile \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDateTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDate \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QLocale \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFileInfo \
 		moc_predefs.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/bin/moc
 	/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/bin/moc $(DEFINES) --include /mnt/nas/only/iScanMR10/21012026/iScanMR10/moc_predefs.h -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qtOrin5.15.2/mkspecs/devices/linux-jetson-orin-g++ -I/mnt/nas/only/iScanMR10/21012026/iScanMR10 -I/mnt/nas/only/iScanMR10/21012026/iScanMR10 -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/iScreenDF -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/iRecordManage -I/mnt/nas/only/iScanMR10/21012026/iScanMR10/DoaViewer -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQuick -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWidgets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtMultimedia -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtGui -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQmlModels -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtQml -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtWebSockets -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtSql -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0 -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0/aarch64-linux-gnu -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include/c++/7.5.0/backward -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/7.5.0/include -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/lib/gcc/aarch64-linux-gnu/7.5.0/include-fixed -I/home/ubuntu/gcc-linaro-7.5.0-2019.12-x86_64_aarch64-linux-gnu/aarch64-linux-gnu/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include/aarch64-linux-gnu -I/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/include iRecordManage/databaseiRec.h -o moc_databaseiRec.cpp
@@ -8074,6 +8090,7 @@ Mainwindows.o: Mainwindows.cpp Mainwindows.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QPointer \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qpointer.h \
 		NetworkController.h \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QVariantMap \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTimer \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qtimer.h \
@@ -8166,7 +8183,6 @@ Mainwindows.o: Mainwindows.cpp Mainwindows.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qexception.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfactoryinterface.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfileselector.h \
-		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfilesystemwatcher.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfinalstate.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qfuture.h \
@@ -8364,6 +8380,7 @@ NetworkController.o: NetworkController.cpp NetworkController.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qcontainerfwd.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qobject_impl.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QString \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QStringList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QVariantMap \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qvariant.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qmap.h \
@@ -8387,6 +8404,8 @@ NetworkController.o: NetworkController.cpp NetworkController.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qurl.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qurlquery.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/quuid.h \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QPointer \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qpointer.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QProcess \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qprocess.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFile \
@@ -8401,7 +8420,10 @@ NetworkController.o: NetworkController.cpp NetworkController.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QThread \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qthread.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qdeadlinetimer.h \
-		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qelapsedtimer.h
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/qelapsedtimer.h \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QRegularExpression \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTextStream \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QRegExp
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o NetworkController.o NetworkController.cpp
 
 OpenWebRxConfig.o: OpenWebRxConfig.cpp OpenWebRxConfig.h \
@@ -10798,6 +10820,9 @@ main.o: main.cpp /home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QCryptographicHash \
 		iRecordManage/storagemanagement.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTemporaryFile \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDate \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QLocale \
 		iRecordManage/FileDownloader.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QCoreApplication \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork/QNetworkAccessManager \
@@ -10816,6 +10841,7 @@ main.o: main.cpp /home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_
 		iRecordManage/ChatServerWebRec.h \
 		iRecordManage/ChatClientiGate.h \
 		iRecordManage/ChatiGateServer.h \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFileInfoList \
 		iRecordManage/FileReader.h \
 		DoaViewer/DoaClient.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o main.o main.cpp
@@ -16040,6 +16066,9 @@ mainwindowsiRec.o: iRecordManage/mainwindowsiRec.cpp iRecordManage/mainwindowsiR
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDir \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QUuid \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTemporaryFile \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDate \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QLocale \
 		iRecordManage/FileDownloader.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QCoreApplication \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtNetwork/QNetworkAccessManager \
@@ -16062,6 +16091,7 @@ mainwindowsiRec.o: iRecordManage/mainwindowsiRec.cpp iRecordManage/mainwindowsiR
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTextStream \
 		ChatServer.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QPointer \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFileInfoList \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QSaveFile
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o mainwindowsiRec.o iRecordManage/mainwindowsiRec.cpp
 
@@ -16798,6 +16828,10 @@ databaseiRec.o: iRecordManage/databaseiRec.cpp iRecordManage/databaseiRec.h \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QUuid \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTemporaryFile \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDateTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QTime \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QDate \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QLocale \
+		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QFileInfo \
 		/home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/qt5Orin/include/QtCore/QJsonValue
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o databaseiRec.o iRecordManage/databaseiRec.cpp
 

@@ -61,7 +61,6 @@ void iScreenDF::onCompassConnected()
             QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
 }
-
 void iScreenDF::onCompassDisconnected()
 {
     qDebug() << "[iScreenDF::onCompassDisconnected] Compass disconnected";
@@ -74,7 +73,6 @@ void iScreenDF::onCompassDisconnected()
             QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
 }
-
 void iScreenDF::onCompassError(const QString &err)
 {
     qWarning() << "[iScreenDF::onCompassError]" << err;
@@ -88,7 +86,6 @@ void iScreenDF::onCompassError(const QString &err)
             QJsonDocument(obj).toJson(QJsonDocument::Compact));
     }
 }
-
 void iScreenDF::calibStatusChanged(const QString &mode,const QString &state,const QString &rotate,double progressDeg,bool done,const QString &instruction)
 {
     // qDebug() << "[CompassClient:calibStatusChanged] >> " << "mode: " << mode << "state: " << state << "rotate: " << rotate << "progressDeg: " << progressDeg << "done: " << done << "instruction: " << instruction;
@@ -100,7 +97,6 @@ static inline double norm360(double deg)
     if (deg < 0) deg += 360.0;
     return deg;
 }
-
 void iScreenDF::onCompassHeadingUpdated(double heading)
 {
     // qDebug() << "[CompassClient:onCompassHeadingUpdated] >> " << heading ;
@@ -122,7 +118,6 @@ void iScreenDF::onCompassHeadingUpdated(double heading)
     broadcastMessageServerandClient(obj);
     emit updateDegreelocal(heading);
 }
-
 
 // void iScreenDF::onCompassHeadingUpdated(double heading)
 // {

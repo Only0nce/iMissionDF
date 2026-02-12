@@ -55,7 +55,7 @@ Item {
             waveColor:     "#12d27a",
             midLineColor:  "#3b3b3b",
             selectColor:   "#00b7ff55",
-            playheadColor: "#6c1bf7", //ffffff //6c1bf7 //E879F9
+            playheadColor: "#ed1fd5", //ffffff //6c1bf7 //E879F9
             frameBorder:   "#000000",
             segBorder:     "#f6ad55",
             segLabel:      "#e5e7eb",
@@ -1276,13 +1276,13 @@ Item {
                         phx = Math.max(0, Math.min(width, phx))
 
                         // 1) วาดแถบพื้นหลัง (โปร่ง ๆ) ให้เห็นชัด
-                        var bandW = 28  // ปรับความกว้างได้ (เช่น 18..40)
+                        var bandW = 32  // ปรับความกว้างได้ (เช่น 18..40)
                         ctx.fillStyle = "#31ffffff" //isDarkTheme ? "#31ffffff" : "#00000022"  // alpha ใน hex ได้
                         ctx.fillRect(Math.round(phx - bandW/2), 0, bandW, height)
 
                         // 2) วาดเส้นกลางให้คม (เหมือนรูป 2)
                         ctx.strokeStyle = playheadColor
-                        ctx.lineWidth = 1
+                        ctx.lineWidth = 4
                         ctx.beginPath()
                         ctx.moveTo(Math.round(phx) + 0.5, 0)
                         ctx.lineTo(Math.round(phx) + 0.5, height)

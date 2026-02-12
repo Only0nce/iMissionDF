@@ -44,6 +44,13 @@ mainwindowsiRec::mainwindowsiRec(QString platform,QObject *parent) : QObject(par
     else{
         qDebug() <<("Thread not created.\n");
     }
+    ret=pthread_create(&idThreadMonitor, NULL, ThreadMonitor, this);
+    if(ret==0){
+        qDebug() <<("Thread created successfully.\n");
+    }
+    else{
+        qDebug() <<("Thread not created.\n");
+    }
 
     mysql->VerifyUserDatabase();
     QTimer::singleShot(1000, this, [this]() {
@@ -62,6 +69,13 @@ void mainwindowsiRec::onFrequencyChangedFromMain(qint64 freqHz, double freqMHz)
     o["frequencyHz"] = QString::number(freqHz);
     o["frequencyMHz"] = freqMHz;
     cppCommand(QJsonDocument(o).toJson(QJsonDocument::Compact));
+
+}
+
+void mainwindowsiRec::RecevieCommandMainCpp(QString mesg)
+{
+    qDebug() << "RecevieCommandMainCpp:" << mesg;
+
 
 }
 
@@ -326,10 +340,31 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     // ถ้าคุณต้องการให้ restart เฉพาะตอน “แก้/สร้างจริง ๆ” บอกได้
     RestartSystemServicesAfter30s();
 }
+int mainwindowsiRec::getFsUsedPercent(const QString &path)
+{
+    struct statvfs s;
+    QByteArray p = path.toLocal8Bit();
 
+    if (statvfs(p.constData(), &s) != 0) {
+        qWarning() << "[storage] statvfs failed for" << path;
+        return -1;
+    }
+
+    // total blocks
+    unsigned long long total = (unsigned long long)s.f_blocks * (unsigned long long)s.f_frsize;
+
+    // available blocks for unprivileged user
+    unsigned long long avail = (unsigned long long)s.f_bavail * (unsigned long long)s.f_frsize;
+
+    if (total == 0) return -1;
+
+    unsigned long long used = total - avail;
+
+    double usedPercent = (double)used * 100.0 / (double)total;
+    return (int)(usedPercent + 0.5);
+}
 void mainwindowsiRec::getDateTime()
 {
-    // Update current date/time for display
     QDateTime currentDateTime = QDateTime::currentDateTime();
 
     const QDate d = currentDateTime.date();
@@ -342,25 +377,85 @@ void mainwindowsiRec::getDateTime()
            + QString::number(t.minute()).rightJustified(2, '0') + ':'
            + QString::number(t.second()).rightJustified(2, '0');
 
-    //    qDebug() << "date:" << date << "time:" << time;
-
     static int lastRunHour = -1;
     QTime nowTime = QTime::currentTime();
 
-    int targetMinute = 0;
-    int targetSecond = 0;
+    const int targetMinute = 0;
+    const int targetSecond = 0;
 
-    //        if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
-    //            int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
-    //            if (ret == 0) {
-    //                qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
-    //                lastRunHour = nowTime.hour();
-    //            } else {
-    //                qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
-    //            }
-    //        }
+    if (nowTime.minute() == targetMinute &&
+        nowTime.second() == targetSecond &&
+        nowTime.hour() != lastRunHour)
+    {
+        const QString storagePath = "/var/ivoicex";
+        const int usedPct = getFsUsedPercent(storagePath);
 
+        if (usedPct < 0) {
+            qWarning() << "[Hourly]" << nowTime.toString("hh:mm:ss")
+            << "cannot read storage usage, skip this hour.";
+            return;
+        }
+
+        qDebug() << "[Hourly]" << nowTime.toString("hh:mm:ss")
+                 << "storage used =" << usedPct << "% path =" << storagePath;
+
+        if (usedPct < 60) {
+            qDebug() << QString("[Hourly %1:00] Skip: storage used %2% < 60%")
+            .arg(nowTime.hour())
+                .arg(usedPct);
+            lastRunHour = nowTime.hour();
+            return;
+        }
+
+
+        int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
+        if (ret == 0) {
+            qDebug() << QString("[Hourly %1:00] Thread4 created successfully. used=%2%")
+            .arg(nowTime.hour())
+                .arg(usedPct);
+            lastRunHour = nowTime.hour();
+        } else {
+            qWarning() << QString("[Hourly %1:00] Thread4 not created. used=%2%")
+            .arg(nowTime.hour())
+                .arg(usedPct);
+        }
+    }
 }
+
+// void mainwindowsiRec::getDateTime()
+// {
+//     // Update current date/time for display
+//     QDateTime currentDateTime = QDateTime::currentDateTime();
+
+//     const QDate d = currentDateTime.date();
+//     date = QString::number(d.year()) + '/'
+//            + QString::number(d.month()).rightJustified(2, '0') + '/'
+//            + QString::number(d.day()).rightJustified(2, '0');
+
+//     const QTime t = currentDateTime.time();
+//     time = QString::number(t.hour()).rightJustified(2, '0') + ':'
+//            + QString::number(t.minute()).rightJustified(2, '0') + ':'
+//            + QString::number(t.second()).rightJustified(2, '0');
+
+//     //    qDebug() << "date:" << date << "time:" << time;
+
+//     static int lastRunHour = -1;
+//     QTime nowTime = QTime::currentTime();
+
+//     int targetMinute = 0;
+//     int targetSecond = 0;
+
+//        if (nowTime.minute() == targetMinute && nowTime.second() == targetSecond && nowTime.hour() != lastRunHour) {
+//            int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
+//            if (ret == 0) {
+//                qDebug() << QString("[Hourly %1:00] Thread4 created successfully.").arg(nowTime.hour());
+//                lastRunHour = nowTime.hour();
+//            } else {
+//                qWarning() << QString("[Hourly %1:00] Thread4 not created.").arg(nowTime.hour());
+//            }
+//        }
+
+// }
 
 void mainwindowsiRec::startRuntime()
 {
@@ -723,6 +818,15 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
     }else if (obj["menuID"].toString() == "playRecording") {
         qDebug() << "playRecording:";
         mysql->playRecording();
+    }else if (obj["menuID"].toString() == "formatdisknow"){
+        qDebug() << "formatdisknow:" << qmlJson;
+         mysql->formatDiskandDB();
+    }else if (obj["menuID"].toString() == "RestartSoftware"){
+        qDebug() << "RestartSoftware:" << qmlJson;
+        system("systemctl restart iScan.service ");
+    }else if (obj["menuID"].toString() == "ShutdownSoftware"){
+        qDebug() << "RestartSoftware:" << qmlJson;
+        system("systemctl shutdown now -f");
     }else {
         qWarning() << "[cppSubmitTextFiledMySQL] unknown menuID:" << menuID << qmlJson;
     }
@@ -1554,7 +1658,266 @@ void mainwindowsiRec::handlePauseAction(const QString &ip,
     });
 }
 
+// ================================
+// Monitor helpers (uptime/load/tasks/threads)
+// ================================
+static bool readLoadAvg(double &l1, double &l5, double &l15)
+{
+    l1 = l5 = l15 = 0.0;
+    QFile f("/proc/loadavg");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
 
+    const QString line = QString::fromUtf8(f.readLine()).trimmed();
+    // format: "1.23 0.98 0.76 2/123 4567"
+    const QStringList parts = line.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
+    if (parts.size() < 3)
+        return false;
+
+    l1  = parts[0].toDouble();
+    l5  = parts[1].toDouble();
+    l15 = parts[2].toDouble();
+    return true;
+}
+
+static bool readUptimeSeconds(double &uptimeSec)
+{
+    uptimeSec = 0.0;
+    QFile f("/proc/uptime");
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text))
+        return false;
+
+    const QString line = QString::fromUtf8(f.readLine()).trimmed();
+    // format: "12345.67 23456.78"
+    const QStringList parts = line.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
+    if (parts.isEmpty())
+        return false;
+
+    uptimeSec = parts[0].toDouble();
+    return true;
+}
+
+static QString formatUptimeHMS(double uptimeSec)
+{
+    if (uptimeSec < 0) uptimeSec = 0;
+    quint64 s = static_cast<quint64>(uptimeSec + 0.5);
+    quint64 hh = s / 3600; s %= 3600;
+    quint64 mm = s / 60;   s %= 60;
+    quint64 ss = s;
+
+    return QString("%1:%2:%3")
+        .arg(hh, 2, 10, QChar('0'))
+        .arg(mm, 2, 10, QChar('0'))
+        .arg(ss, 2, 10, QChar('0'));
+}
+
+// Count: tasks(total processes), running(process state 'R'), threads(total threads)
+static bool readProcTasksThreads(int &tasksTotal, int &threadsTotal, int &runningTasks)
+{
+    tasksTotal = 0;
+    threadsTotal = 0;
+    runningTasks = 0;
+
+    QDir proc("/proc");
+    const QFileInfoList list = proc.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot);
+
+    for (const QFileInfo &fi : list) {
+        const QString pidStr = fi.fileName();
+        bool ok = false;
+        pidStr.toInt(&ok);
+        if (!ok) continue; // not a pid dir
+
+        tasksTotal++;
+
+        // ---- running? read /proc/<pid>/stat (3rd field is state)
+        {
+            QFile f(fi.absoluteFilePath() + "/stat");
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                const QByteArray data = f.readAll();
+                // stat format: pid (comm) state ...
+                // find ") " then next char is state
+                int idx = data.indexOf(") ");
+                if (idx >= 0 && idx + 2 < data.size()) {
+                    char state = data.at(idx + 2);
+                    if (state == 'R') runningTasks++;
+                }
+            }
+        }
+
+        // ---- threads: read /proc/<pid>/status line "Threads:"
+        {
+            QFile f(fi.absoluteFilePath() + "/status");
+            if (f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+                while (!f.atEnd()) {
+                    const QString line = QString::fromUtf8(f.readLine());
+                    if (line.startsWith("Threads:")) {
+                        QString n = line;
+                        n.remove("Threads:");
+                        threadsTotal += n.trimmed().toInt();
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    return (tasksTotal > 0);
+}
+
+// ============================================================================
+// getMonitorParemeter()  (UPDATED: CPU + RAM + SWAP + STORAGE + UPTIME + LOAD + TASKS/THREADS)
+// ============================================================================
+void mainwindowsiRec::getMonitorParemeter()
+{
+    // ================= CPU =================
+    CpuStatSnap nowCpu;
+    readProcStatCpuOverall(nowCpu);
+    const double cpuPct = cpuUsagePercent(m_prevCpu, nowCpu);
+
+    qDebug() << "[Monitor][CPU] cpuPct =" << cpuPct;
+
+    // ================= RAM =================
+    double memUsedMb  = 0;
+    double memTotalMb = 0;
+
+    {
+        QProcess p;
+        const QString cmd = "free -m | awk '/Mem:/ {print $3 \" \" $2}'";
+        p.start("bash", QStringList() << "-c" << cmd);
+
+        if (!p.waitForFinished(1500)) {
+            qWarning() << "[Monitor][RAM] waitForFinished timeout, cmd =" << cmd;
+            p.kill();
+            p.waitForFinished(200);
+        }
+
+        const int ec = p.exitCode();
+        const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+        const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed();
+
+        qDebug() << "[Monitor][RAM] exitCode =" << ec << "out =" << out << "err =" << err;
+
+        QStringList parts = out.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
+        if (parts.size() >= 2) {
+            memUsedMb  = parts[0].toDouble();
+            memTotalMb = parts[1].toDouble();
+        }
+
+        qDebug() << "[Monitor][RAM] usedMB =" << memUsedMb << "totalMB =" << memTotalMb;
+    }
+
+    // ================= SWAP =================
+    double swapUsedMb  = 0;
+    double swapTotalMb = 0;
+
+    {
+        QProcess p;
+        const QString cmd = "free -m | awk '/Swap:/ {print $3 \" \" $2}'";
+        p.start("bash", QStringList() << "-c" << cmd);
+
+        if (!p.waitForFinished(1500)) {
+            qWarning() << "[Monitor][SWAP] waitForFinished timeout, cmd =" << cmd;
+            p.kill();
+            p.waitForFinished(200);
+        }
+
+        const int ec = p.exitCode();
+        const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+        const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed();
+
+        qDebug() << "[Monitor][SWAP] exitCode =" << ec << "out =" << out << "err =" << err;
+
+        QStringList parts = out.split(QRegExp("\\s+"), Qt::SkipEmptyParts);
+        if (parts.size() >= 2) {
+            swapUsedMb  = parts[0].toDouble();
+            swapTotalMb = parts[1].toDouble();
+        }
+
+        qDebug() << "[Monitor][SWAP] usedMB =" << swapUsedMb << "totalMB =" << swapTotalMb;
+    }
+
+    // ================= STORAGE =================
+    QStorageInfo storage = QStorageInfo::root();
+    double storageTotalGB = 0;
+    double storageUsedGB  = 0;
+
+    qDebug() << "[Monitor][STORAGE] rootPath =" << storage.rootPath()
+             << "valid =" << storage.isValid()
+             << "ready =" << storage.isReady()
+             << "fsType =" << storage.fileSystemType()
+             << "name =" << storage.name();
+
+    if (storage.isValid() && storage.isReady()) {
+        storageTotalGB = storage.bytesTotal() / (1024.0 * 1024.0 * 1024.0);
+        storageUsedGB  = (storage.bytesTotal() - storage.bytesAvailable())
+                       / (1024.0 * 1024.0 * 1024.0);
+    }
+
+    qDebug() << "[Monitor][STORAGE] usedGB =" << storageUsedGB
+             << "totalGB =" << storageTotalGB
+             << "availGB =" << (storage.bytesAvailable() / (1024.0 * 1024.0 * 1024.0));
+
+    // ================= UPTIME / LOAD / TASKS =================
+    double upSec = 0.0;
+    QString uptimeText = "00:00:00";
+    if (readUptimeSeconds(upSec)) {
+        uptimeText = formatUptimeHMS(upSec);
+    }
+    qDebug() << "[Monitor][UPTIME] sec =" << upSec << "text =" << uptimeText;
+
+    double l1=0, l5=0, l15=0;
+    if (!readLoadAvg(l1, l5, l15)) {
+        l1 = l5 = l15 = 0.0;
+    }
+    qDebug() << "[Monitor][LOAD] 1m/5m/15m =" << l1 << l5 << l15;
+
+    int tasksTotal=0, threadsTotal=0, runningTasks=0;
+    if (!readProcTasksThreads(tasksTotal, threadsTotal, runningTasks)) {
+        tasksTotal = threadsTotal = runningTasks = 0;
+    }
+    qDebug() << "[Monitor][TASKS] tasks =" << tasksTotal
+             << "threads =" << threadsTotal
+             << "running =" << runningTasks;
+
+    // ================= JSON =================
+    QJsonObject j;
+    j["menuID"] = "monitor";
+    j["ts"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    // CPU
+    j["cpu_usage_percent"] = (cpuPct >= 0.0) ? cpuPct : 0.0;
+
+    // RAM
+    j["mem_used_mb"]  = memUsedMb;
+    j["mem_total_mb"] = memTotalMb;
+
+    // SWAP
+    j["swap_used_mb"]  = swapUsedMb;
+    j["swap_total_mb"] = swapTotalMb;
+
+    // STORAGE
+    j["storage_used_gb"]  = storageUsedGB;
+    j["storage_total_gb"] = storageTotalGB;
+
+    // UPTIME / LOAD / TASKS
+    j["uptime_sec"]  = upSec;
+    j["uptime_text"] = uptimeText;
+
+    j["loadavg_1m"]  = l1;
+    j["loadavg_5m"]  = l5;
+    j["loadavg_15m"] = l15;
+
+    j["tasks_total"]   = tasksTotal;
+    j["threads_total"] = threadsTotal;
+    j["tasks_running"] = runningTasks;
+
+    const QString json = QString::fromUtf8(QJsonDocument(j).toJson(QJsonDocument::Compact));
+    qDebug() << "[Monitor][JSON]" << json;
+
+    emit cppCommand(json);
+}
+
+// ==============================
 void mainwindowsiRec::getSystemPage(QWebSocket *webSender)
 {
     qDebug() << "getSystemPage:" << webSender;
@@ -1611,4 +1974,13 @@ void* mainwindowsiRec::ThreadFunc4(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
     pThis->mysql->checkFlieAndRemoveDB();
+}
+void* mainwindowsiRec::ThreadMonitor(void* pTr)
+{
+    mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
+    while (true) {
+        emit pThis->getMonitorParemeter();
+        QThread::msleep(1000);
+    }
+    return nullptr;
 }

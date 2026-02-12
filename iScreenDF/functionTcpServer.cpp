@@ -111,7 +111,7 @@ void iScreenDF::GetrfsocParameter(bool  setDoaEnable, bool spectrumEnabled, int 
                                   int TargetOffsetHz, int DoaBwHz, double DoaPowerThresholdDb,
                                   const QString &DoaAlgorithm, double ucaRadiusM,
                                   double TargetDb, bool rfAgcEnabled,bool linkStatus
-                                  ,double offsetvalue, double compassoffset, int maxDoaLineMeters)
+                                  ,double offsetvalue, double compassoffset, int maxDoaLineMeters,const QString &ipLocalForRemoteGroup, int setDelayMs,int setDistance)
 {
     qDeleteAll(m_parameter);
     m_parameter.clear();
@@ -131,7 +131,7 @@ void iScreenDF::GetrfsocParameter(bool  setDoaEnable, bool spectrumEnabled, int 
     p->m_offset_value        = offsetvalue;
     p->m_compass_offset      = compassoffset;
     p->m_maxDoaLine_meters  = maxDoaLineMeters;
-
+    p->m_ipLocalForRemoteGroup = ipLocalForRemoteGroup;
     // =========================
     // RF AGC: ใช้ค่าจาก DB จริง
     // =========================
@@ -177,6 +177,11 @@ void iScreenDF::GetrfsocParameter(bool  setDoaEnable, bool spectrumEnabled, int 
     emit updatelinkStatus(p->m_linkStatus);
     emit updateGlobalOffsets( p->m_offset_value, p->m_compass_offset);
     emit updateDoaLineMeters( p->m_maxDoaLine_meters);
+    emit updateIPLocalForRemoteGroupFromServer(p->m_ipLocalForRemoteGroup);
+    emit mapOfflineChanged(true);
+    emit updateMaxDoaDelayMsFromServer(setDelayMs);
+    emit updateDoaLineDistanceMFromServer(setDistance);
+
     qDebug() << "[iScreenDF] GetrfsocParameter stored:"
              << "DoA=" << p->m_setDoaEnable
              << "Spec=" << p->m_spectrumEnabled
@@ -187,6 +192,16 @@ void iScreenDF::GetrfsocParameter(bool  setDoaEnable, bool spectrumEnabled, int 
              << "Offset=" << p->m_TargetOffsetHz
              << "BW=" << p->m_doaBwHz
              << "TH=" << p->m_doaPowerThresholdDb;
+}
+void iScreenDF::setIPLocalForRemoteGroup(const QString &ip)
+{
+    if (m_parameter.isEmpty() || !m_parameter.first()) return;
+
+    Parameter *p = m_parameter.first();
+    qDebug() << "[iScreenDF] sendMaxDoaLineMeters =" << ip ;
+    p->m_ipLocalForRemoteGroup  = ip;
+    db->UpdateParameterField("IPLocalForRemoteGroup", ip);
+    emit updateIPLocalForRemoteGroupFromServer( p->m_ipLocalForRemoteGroup);
 }
 void iScreenDF::sendMaxDoaLineMeters(int meters)
 {
@@ -409,16 +424,24 @@ void iScreenDF::onTcpMessage(const QString &message,
              << addr.toString() << ":" << port
              << "msg =" << message;
 
+    // if (m_parameter.isEmpty() || !m_parameter.first()) {
+    //     qWarning() << "[iScreenDF] onTcpMessage: no parameter";
+    //     return;
+    // }
+
+    // Parameter *p = m_parameter.first();
+    // if (!p) {
+    //     qWarning() << "[iScreenDF] onTcpMessage: no parameter";
+    //     return;
+    // }
+
+    // // ✅ ใช้ IP จาก Parameter แทน m_network2List.at(1)->ip_address
+    // const QString localIp = p->m_ipLocalForRemoteGroup.trimmed();
     if (m_parameter.isEmpty() || !m_parameter.first()) {
         qWarning() << "[iScreenDF] applyRfsocParameterToServer: no parameter";
         return;
     }
-
-    Parameter *p = (m_parameter.isEmpty() ? nullptr : m_parameter.first());
-    if (!p) {
-        qWarning() << "[iScreenDF] onTcpMessage: no parameter";
-        return;
-    }
+    Parameter *p = m_parameter.first();
 
     QJsonParseError err;
     const QJsonDocument doc = QJsonDocument::fromJson(message.toUtf8(), &err);
@@ -432,8 +455,7 @@ void iScreenDF::onTcpMessage(const QString &message,
             QJsonObject reply;
             reply["menuID"] = "statusReply";
             reply["msg"]    = "OK from iScreenDF";
-            if (!m_network2List.isEmpty() && m_network2List.at(1))
-                reply["ip"] = m_network2List.at(1)->ip_address;
+            reply["ip"] = p->m_ipLocalForRemoteGroup;
 
             const QString jsonReply = QString::fromUtf8(
                 QJsonDocument(reply).toJson(QJsonDocument::Compact));
@@ -452,8 +474,7 @@ void iScreenDF::onTcpMessage(const QString &message,
             reply["menuID"] = "getName";
             reply["name"]   = controllerName;
             reply["serial"] = Serialnumber;
-            if (!m_network2List.isEmpty() && m_network2List.at(1))
-                reply["ip"] = m_network2List.at(1)->ip_address;
+            reply["ip"] = p->m_ipLocalForRemoteGroup;
 
             const QString jsonReply = QString::fromUtf8(
                 QJsonDocument(reply).toJson(QJsonDocument::Compact));
@@ -472,7 +493,6 @@ void iScreenDF::onTcpMessage(const QString &message,
             qDebug() << "[iScreenDF][TCP] getState requested"
                      << "needAck =" << needAck;
 
-            // ✅ forward ข้อความเดิมไปปลายทาง
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
@@ -496,8 +516,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             bool enable = obj.value("enable").toBool(false);
             qDebug() << "[iScreenDF][TCP] setDoaEnable received:"
                      << "enable =" << enable;
-            p->m_setDoaEnable  = enable;
-            db->UpdateParameterField("setDoaEnable", enable ? 1 : 0);
+
+            p->m_setDoaEnable = enable;
+            if (db) db->UpdateParameterField("setDoaEnable", enable ? 1 : 0);
+
             if (localDFclient) {
                 emit rfsocDoaFftUpdated(p->m_setDoaEnable, p->m_spectrumEnabled);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
@@ -510,8 +532,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             bool enable = obj.value("enable").toBool(false);
             qDebug() << "[iScreenDF][TCP] setSpectrumEnable received:"
                      << "enable =" << enable;
+
             p->m_spectrumEnabled = enable;
-            db->UpdateParameterField("spectrumEnabled", enable ? 1 : 0);
+            if (db) db->UpdateParameterField("spectrumEnabled", enable ? 1 : 0);
+
             if (localDFclient) {
                 emit rfsocDoaFftUpdated(p->m_setDoaEnable, p->m_spectrumEnabled);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
@@ -524,8 +548,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             int ch = obj.value("channel").toInt(0);
             qDebug() << "[iScreenDF][TCP] setAdcChannel received:"
                      << "channel =" << ch;
+
             p->m_setAdcChannel = ch;
-            db->UpdateParameterField("setAdcChannel", ch);
+            if (db) db->UpdateParameterField("setAdcChannel", ch);
+
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
@@ -539,6 +565,7 @@ void iScreenDF::onTcpMessage(const QString &message,
             qDebug() << "[iScreenDF][TCP] setFftConfig received:"
                      << "fft_points =" << fftPoints
                      << "fft_downsample =" << fftDownsample;
+
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
@@ -550,8 +577,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             double hz = obj.value("hz").toDouble();
             qDebug() << "[iScreenDF][TCP] setTxHz received:"
                      << "hz =" << hz;
+
             p->m_txHz = hz;
-            db->UpdateParameterField("TxHz", p->m_txHz);
+            if (db) db->UpdateParameterField("TxHz", p->m_txHz);
+
             if (localDFclient) {
                 emit updateTxHzFromServer(p->m_txHz);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
@@ -564,8 +593,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             double offsetHz = obj.value("offset_hz").toDouble();
             qDebug() << "[iScreenDF][TCP] setDoaTargetOffsetHz received:"
                      << "offset_hz =" << offsetHz;
+
             p->m_TargetOffsetHz = offsetHz;
-            db->UpdateParameterField("TargetOffsetHz", offsetHz);
+            if (db) db->UpdateParameterField("TargetOffsetHz", offsetHz);
+
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
@@ -577,8 +608,10 @@ void iScreenDF::onTcpMessage(const QString &message,
             double bwHz = obj.value("bw_hz").toDouble();
             qDebug() << "[iScreenDF][TCP] setDoaBwHz received:"
                      << "bw_hz =" << bwHz;
+
             p->m_doaBwHz = bwHz;
-            db->UpdateParameterField("DoaBwHz", bwHz);
+            if (db) db->UpdateParameterField("DoaBwHz", bwHz);
+
             if (localDFclient) {
                 emit rfsocParameterUpdated(p->m_Frequency, p->m_doaBwHz);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
@@ -596,16 +629,15 @@ void iScreenDF::onTcpMessage(const QString &message,
 
             p->m_doaPowerThresholdDb = static_cast<float>(thDb);
 
-            // save DB
-            db->UpdateParameterField("DoaPowerThresholdDb", thDb);
+            if (db) db->UpdateParameterField("DoaPowerThresholdDb", thDb);
 
-            // forward ไป server เฉพาะตอนมี client
             if (localDFclient) {
                 emit updateGateThDbFromServer(p->m_doaPowerThresholdDb);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ 13) setFrequencyHz ============
         else if (menuID == "setFrequencyHz") {
             qint64 freqHz = obj.value("freq_hz").toVariant().toLongLong();
@@ -617,25 +649,30 @@ void iScreenDF::onTcpMessage(const QString &message,
             p->m_Frequency = static_cast<int>(freqHz);
             p->m_update_en = updateEn;
 
-            db->UpdateParameterField("Frequency", static_cast<qint64>(freqHz));
-            db->UpdateParameterField("update_en", updateEn);
+            if (db) {
+                db->UpdateParameterField("Frequency", static_cast<qint64>(freqHz));
+                db->UpdateParameterField("update_en", updateEn);
+            }
+
             if (localDFclient) {
                 emit rfsocParameterUpdated(p->m_Frequency, p->m_doaBwHz);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ 14) setFcHz ============
         else if (menuID == "setFcHz") {
             qint64 fcHz = obj.value("fc_hz").toVariant().toLongLong();
             qDebug() << "[iScreenDF][TCP] setFcHz received:"
                      << "fc_hz =" << fcHz;
-            // p->m_fcHz = fcHz;
+
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ RF AGC: setRfAgcEnable ============
         else if (menuID == "setRfAgcEnable") {
             int ch = obj.value("ch").toInt(-1);     // -1 = all
@@ -645,50 +682,26 @@ void iScreenDF::onTcpMessage(const QString &message,
             qDebug() << "[iScreenDF][TCP] setRfAgcEnable received:"
                      << "ch =" << ch << "enable =" << enable << "needAck =" << needAck;
 
-            if (m_parameter.isEmpty() || !m_parameter.first()) {
-                qWarning() << "[iScreenDF][TCP] setRfAgcEnable: m_parameter empty/null";
-                return;
-            }
-            Parameter *p = m_parameter.first();
-
-            // ===== debug กันซ้ำ =====
-            bool changed = false;
-            if (ch < 0) {
-                if (p->m_rfAgcEnabled != enable) changed = true;
-                for (int i = 0; i < 5; ++i)
-                    if (p->m_rfAgcChEnabled[i] != enable) changed = true;
-            } else if (ch >= 0 && ch < 5) {
-                if (p->m_rfAgcChEnabled[ch] != enable) changed = true;
-            }
-            qDebug() << "[iScreenDF][TCP] setRfAgcEnable apply:"
-                     << "ch=" << ch << "enable=" << enable << "changed=" << changed;
-
             // update local parameter state
             if (ch < 0) {
                 p->m_rfAgcEnabled = enable;
                 for (int i = 0; i < 5; ++i) p->m_rfAgcChEnabled[i] = enable;
-
-                // ✅ save "ตัวเดียว" ลง DB
                 if (db) db->UpdateParameterField("rf_agc_enabled", enable ? 1 : 0);
-
             } else if (ch >= 0 && ch < 5) {
                 p->m_rfAgcChEnabled[ch] = enable;
-                // (ถ้าคุณยังไม่มี per-channel column ก็ไม่ต้อง save DB ช่องนี้)
-
             } else {
                 qWarning() << "[iScreenDF][TCP] setRfAgcEnable: invalid ch =" << ch;
                 return;
             }
 
-            // ส่งไป QML ให้ checkbox ตาม server
             emit updateRfAgcEnableFromServer(ch, enable);
 
-            // forward ไป RFSoC server
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ RF AGC: setRfAgcChannel ============
         else if (menuID == "setRfAgcChannel") {
             int ch = obj.value("ch").toInt(-1);
@@ -698,27 +711,25 @@ void iScreenDF::onTcpMessage(const QString &message,
             qDebug() << "[iScreenDF][TCP] setRfAgcChannel received:"
                      << "ch =" << ch << "target_db =" << targetDb << "needAck =" << needAck;
 
-            // update local parameter state
             if (ch < 0) {
-                // -1 = set all channels
-                for (int i = 0; i < 5; ++i)
-                    p->m_rfAgcTargetDb[i] = targetDb;
+                for (int i = 0; i < 5; ++i) p->m_rfAgcTargetDb[i] = targetDb;
             } else if (ch >= 0 && ch < 5) {
                 p->m_rfAgcTargetDb[ch] = targetDb;
             } else {
                 qWarning() << "[iScreenDF][TCP] setRfAgcChannel: invalid ch =" << ch;
             }
 
-            // update DB (ถ้ามี field ให้ปรับชื่อให้ตรงของคุณ)
-            db->UpdateParameterField("rf_agc_target_db", targetDb);
+            if (db) db->UpdateParameterField("rf_agc_target_db", targetDb);
 
             emit updateRfAgcTargetFromServer(ch, targetDb);
-            // forward ไป RFSoC server
+
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
+        // ============ 15) setDoaAlgorithm ============
         else if (menuID == "setDoaAlgorithm") {
             const QString algo = obj.value("algo").toString().trimmed();
             const bool needAck = obj.value("needAck").toBool(false);
@@ -729,16 +740,16 @@ void iScreenDF::onTcpMessage(const QString &message,
 
             if (!algo.isEmpty()) {
                 p->m_doaAlgorithm = algo;
-                db->UpdateParameterField("DoaAlgorithm", algo);   // ปรับชื่อ field ให้ตรง DB คุณ
+                if (db) db->UpdateParameterField("DoaAlgorithm", algo);
             }
 
-            // forward ไป RFSoC server
             if (localDFclient) {
                 emit updateDoaAlgorithmFromServer(p->m_doaAlgorithm);
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ 16) setUcaRadiusM ============
         else if (menuID == "setUcaRadiusM") {
             double radiusM = obj.value("radius_m").toDouble();
@@ -748,19 +759,16 @@ void iScreenDF::onTcpMessage(const QString &message,
                      << "radius_m =" << radiusM
                      << "needAck =" << needAck;
 
-            // update local parameter
             p->m_ucaRadiusM = radiusM;
+            if (db) db->UpdateParameterField("uca_radius_m", radiusM);
 
-            // update DB (ปรับชื่อ field ให้ตรงของคุณ)
-            db->UpdateParameterField("uca_radius_m", radiusM);
-            // forward ไป RFSoC / DOA server
             if (localDFclient) {
                 emit updateUcaRadiusFromServer(radiusM);
-                const QByteArray forwardLine =
-                    QJsonDocument(obj).toJson(QJsonDocument::Compact);
+                const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
             }
         }
+
         // ============ Scanner ATT: setScannerAttDb ============
         else if (menuID == "setScannerAttDb") {
             const double attDb = obj.value("att_db").toDouble(0.0);
@@ -770,13 +778,9 @@ void iScreenDF::onTcpMessage(const QString &message,
                      << "att_db =" << attDb
                      << "needAck =" << needAck;
 
-            // เก็บ state ไว้ใน parameter (ถ้ามี)
             p->m_scannerAttDb = attDb;  // ต้องมี field นี้ใน Parameter (double)
+            // if (db) db->UpdateParameterField("scanner_att_db", attDb);
 
-            // บันทึก DB (ปรับชื่อ field ให้ตรงของคุณ)
-            // db->UpdateParameterField("scanner_att_db", attDb);
-
-            // forward ไป RFSoC server
             if (localDFclient) {
                 const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
                 localDFclient->sendLine(forwardLine, true);
@@ -784,9 +788,7 @@ void iScreenDF::onTcpMessage(const QString &message,
         }
 
         else {
-            // qDebug() << "[iScreenDF][TCP] Unknown menuID =" << menuID;
-
-            // จะ forward unknown ด้วยก็ได้
+            // unknown menuID -> จะ forward ก็ได้
             // if (localDFclient) {
             //     const QByteArray forwardLine = QJsonDocument(obj).toJson(QJsonDocument::Compact);
             //     localDFclient->sendLine(forwardLine, true);
@@ -801,6 +803,7 @@ void iScreenDF::onTcpMessage(const QString &message,
         }
     }
 }
+
 
 
 void iScreenDF::onTcpClientConnected(const QHostAddress &addr,
@@ -840,15 +843,15 @@ void iScreenDF::updateReceiverParametersFreqandbw(int frequencyHz, int bandwidth
     const double offsetHz = bandwidthHz * 1.0; // 0.51
     updateReceiverParametersFreqOffsetBw((qint64)frequencyHz, offsetHz, (double)bandwidthHz);
 
-    if (chatServerDF) {
-        QJsonObject obj;
-        obj["menuID"]   = "updateReceiverFreqandbw";
-        obj["Freq"]   = p->m_Frequency;
-        obj["BW"]      = p->m_doaBwHz;
-        obj["linkstatus"] = p->m_linkStatus;
-        broadcastMessageServerandClient(obj);
-        qDebug() << "[functionTcpServer] updateReceiverFreqandbw:" << obj;
-    }
+    // if (chatServerDF) {
+    QJsonObject obj;
+    obj["menuID"]   = "updateReceiverFreqandbw";
+    obj["Freq"]   = p->m_Frequency;
+    obj["BW"]      = p->m_doaBwHz;
+    obj["linkstatus"] = p->m_linkStatus;
+    broadcastMessageServerandClient(obj);
+    qDebug() << "[functionTcpServer] updateReceiverFreqandbw:" << obj;
+    // }
 }
 
 static double clampDouble(double v, double lo, double hi)
@@ -966,7 +969,7 @@ void iScreenDF::sendGateThDb(double v)
 
 
     // update DB
-        db->UpdateParameterField("DoaPowerThresholdDb",p->m_doaPowerThresholdDb);
+    db->UpdateParameterField("DoaPowerThresholdDb",p->m_doaPowerThresholdDb);
 
     // ส่งไป server (TCP / WS)
     if (localDFclient) {
@@ -993,7 +996,7 @@ void iScreenDF::sendTxHz(double v)
     Parameter *p = m_parameter.first();
     m_blockUiSync = true;
 
-        p->m_txHz =v;   // แนะนำให้ m_txHz เป็น double
+    p->m_txHz =v;   // แนะนำให้ m_txHz เป็น double
 
     // update DB
     db->UpdateParameterField("TxHz", p->m_txHz);
@@ -1047,9 +1050,9 @@ void iScreenDF::sendUcaRadiusM(double radiusM)
 
     m_blockUiSync = true;
 
-        p->m_ucaRadiusM = radiusM;   // ✅ ให้ field เป็น double
+    p->m_ucaRadiusM = radiusM;   // ✅ ให้ field เป็น double
 
-        db->UpdateParameterField("uca_radius_m",  p->m_ucaRadiusM);
+    db->UpdateParameterField("uca_radius_m",  p->m_ucaRadiusM);
 
     // sync UI (เผื่อมีหลายหน้า/หลาย component)
     emit updateUcaRadiusFromServer(radiusM);
@@ -1106,7 +1109,7 @@ void iScreenDF::sendRfAgcTargetAllDb(double targetDb)
             obj["ch"]        = ch;
             obj["target_db"] = targetDb;
             obj["needAck"]   = true;
-             qDebug() << "[iScreenDF] sendRfAgcTargetDb: setRfAgcChannel ch =" << ch;
+            qDebug() << "[iScreenDF] sendRfAgcTargetDb: setRfAgcChannel ch =" << ch;
             localDFclient->sendLine(QJsonDocument(obj).toJson(QJsonDocument::Compact), true);
         }
     } else {

@@ -1,3 +1,4 @@
+//TapBarRecordFiles.qml
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 
@@ -118,8 +119,43 @@ Item {
                     qmlCommand(getRegisterDevicePage)
                 }
             }
+            // =============== TAB 2: MONITOR DISPLAY ===============
+//            OldControls.Tab {
+//                id: tabMonitor
+//                title: "MONITOR DISPLAY"
 
-            // =============== STYLE ของ TabView (ยังเป็นของ Controls 1.4) ===============
+//                Rectangle {
+//                    anchors.fill: parent
+//                    color: "#234654"
+//                }
+//                MonitorDisplay {
+//                    id: rootmonitorView
+//                    anchors.fill: parent
+
+//                    cpuPct: monitorCpuPct
+//                    updatedText: monitorTs
+
+////                    // RAM
+//                    memUsedMB: monitorMemUsed
+//                    memTotalMB: monitorMemTotal
+//                    percentRAMUsed: monitorPercentRAM
+
+////                    // STORAGE
+//                    storageUsedGB: monitorStorageUsed
+//                    storageTotalGB: monitorStorageTotal
+
+//                    // ✅ TOP (uptime/load/tasks)
+//                    hTopUptimeText: monitorUptimeText
+//                    hTopLoad1: monitorLoad1
+//                    hTopLoad5: monitorLoad5
+//                    hTopLoad15: monitorLoad15
+//                    hTopTasksTotal: monitorTasksTotal
+//                    hTopThreadsTotal: monitorThreadsTotal
+//                    hTopTasksRunning: monitorTasksRunning
+//                }
+
+//            }
+
             // =============== STYLE ของ TabView (ยังเป็น Controls 1.4) ===============
             style: TabViewStyle {
                 tab: Rectangle {

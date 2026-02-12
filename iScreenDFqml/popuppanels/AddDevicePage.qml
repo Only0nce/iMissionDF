@@ -1,4 +1,4 @@
-//  /popuppanels/AddDevicePage.qml
+// /popuppanels/AddDevicePage.qml
 import QtQuick 2.15
 import QtGraphicalEffects 1.12
 import QtQuick.Controls 2.15
@@ -40,13 +40,11 @@ Item {
     property var existingDevices: []        // [{id, name, ip, uid}]
     property var _filteredDevices: []       // [{id, name, ip, uid}]
 
-    function _normName(s) { return String(s||"").trim().toLowerCase() }
-
     /* ====== Helpers ====== */
     function isValidIp(ip) {
         // IPv4 basic
         var re = /^(25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])(\.(25[0-5]|2[0-4][0-9]|[01]?[0-9]?[0-9])){3}$/
-        return re.test(ip)
+        return re.test(String(ip||"").trim())
     }
     function isDupIp(ip) {
         if (!existingIPs || existingIPs.length === 0) return false
@@ -57,6 +55,23 @@ Item {
         return existingNames.indexOf(name) !== -1
     }
 
+    function ipToU32(ip) {
+        // return uint32, invalid -> -1
+        var s = String(ip||"").trim()
+        if (!isValidIp(s)) return -1
+        var p = s.split(".")
+        var a = parseInt(p[0],10), b = parseInt(p[1],10), c = parseInt(p[2],10), d = parseInt(p[3],10)
+        return ((a<<24)>>>0) + ((b<<16)>>>0) + ((c<<8)>>>0) + (d>>>0)
+    }
+    function u32ToIp(u) {
+        u = (u>>>0)
+        var a = (u>>>24) & 255
+        var b = (u>>>16) & 255
+        var c = (u>>>8)  & 255
+        var d = (u>>>0)  & 255
+        return a+"."+b+"."+c+"."+d
+    }
+
     function _rebuildExistingDevices() {
         var out = []
         var n = Math.max(existingIPs.length||0,
@@ -65,7 +80,7 @@ Item {
                          existingDeviceUids.length||0)
         for (var i=0;i<n;i++) {
             out.push({
-                id:   (existingIds[i]  !== undefined ? existingIds[i]  : i), // fallback เป็น index
+                id:   (existingIds[i]  !== undefined ? existingIds[i]  : i),
                 name: existingNames[i] || "",
                 ip:   existingIPs[i]   || "",
                 uid:  existingDeviceUids[i] !== undefined ? existingDeviceUids[i] : ""
@@ -94,7 +109,6 @@ Item {
             var ips = [], names = [], ids = [], uids = []
             for (var i = 0; i < obj.records.length; ++i) {
                 var r = obj.records[i]
-                // รองรับหลายชื่อคีย์: id, ID, deviceId, DeviceID ...
                 var rid = (r.id !== undefined) ? r.id :
                           (r.ID !== undefined) ? r.ID :
                           (r.deviceId !== undefined) ? r.deviceId :
@@ -103,7 +117,6 @@ Item {
                 ips.push(String(r.ip || r.IPAddress || ""))
                 names.push(String(r.name || r.Name || ""))
 
-                // ⭐ รองรับชื่อ key หลายแบบสำหรับ deviceUniqueId
                 var duid = r.deviceUniqueId || r.deviceUID || r.uid || ""
                 uids.push(String(duid))
             }
@@ -111,9 +124,6 @@ Item {
             existingNames       = names
             existingIds         = ids
             existingDeviceUids  = uids
-
-            console.log("[AddDevicePage] updated existing list:", ips.length,
-                        "items, first uid =", (uids.length > 0 ? uids[0] : "none"))
 
             _rebuildExistingDevices()
             _updateFiltered()
@@ -285,7 +295,7 @@ Item {
                             TextField {
                                 id: nameField
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 34        // สูงเท่ากับ TextField ตัวอื่น
+                                Layout.preferredHeight: 34
 
                                 placeholderText: "e.g. beacon_one"
                                 color: colText
@@ -299,7 +309,6 @@ Item {
 
                                 background: Rectangle {
                                     radius: 8
-                                    // ใช้สี field มาตรฐาน ถ้าชอบสีเดิมก็เปลี่ยนกลับเป็น "#141922" ได้
                                     color: "#141922"
                                     border.color: nameDupWarn.visible ? "#eab308" : colBorder
                                     border.width: 1
@@ -380,7 +389,6 @@ Item {
                                     }
                                 }
 
-                                // spacing between IP and Serial
                                 Item { width: 16 }
 
                                 // ===== Right: Serial Number =====
@@ -488,15 +496,11 @@ Item {
                                                 spacing: 10
                                                 anchors.verticalCenter: parent.verticalCenter
 
-                                                // =============================
-                                                // LEFT COLUMN: Name + IP + SN
-                                                // =============================
                                                 Column {
                                                     width: Math.max(160, parent.width * 0.55)
                                                     spacing: 3
                                                     anchors.verticalCenter: parent.verticalCenter
 
-                                                    // ---- Name ----
                                                     Label {
                                                         text: _filteredDevices[index].name
                                                         color: colText
@@ -504,7 +508,6 @@ Item {
                                                         elide: Text.ElideRight
                                                     }
 
-                                                    // ---- IP + SN (same line) ----
                                                     Row {
                                                         spacing: 6
                                                         visible: _filteredDevices[index].ip ||
@@ -528,12 +531,8 @@ Item {
                                                     }
                                                 }
 
-                                                // spacer -> push buttons to the far right
                                                 Item { Layout.fillWidth: true }
 
-                                                // =============================
-                                                // Buttons
-                                                // =============================
                                                 Button {
                                                     text: "Edit"
                                                     width: 64; height: 30
@@ -588,7 +587,6 @@ Item {
                                                                 deviceUniqueId: d.uid
                                                             }]
                                                         })
-                                                        console.log("Delete device:", jsonDelete)
                                                         if (krakenmapval)
                                                             krakenmapval.groupSetting("DeleteDevice", 0, jsonDelete)
                                                     }
@@ -617,10 +615,8 @@ Item {
                                     if (!name.length || !isValidIp(ip)) return false
 
                                     if (!editing) {
-                                        // โหมดเพิ่มใหม่: ห้ามซ้ำทั้งชื่อและ IP
                                         return !isDupName(name) && !isDupIp(ip)
                                     } else {
-                                        // โหมดแก้ไข:
                                         if (name !== editOrigName && isDupName(name)) return false
                                         if (ip   !== editOrigIp   && isDupIp(ip))     return false
                                         return true
@@ -642,20 +638,12 @@ Item {
                                     var newName = nameField.text.trim()
                                     var newIp   = ipField.text.trim()
                                     var newUid  = serialField.text.trim()
-                                    var wasEditing = editing   // ⭐ เก็บไว้ใช้ใน toast
+                                    var wasEditing = editing
 
                                     if (editing) {
-                                        // ถ้าไม่กรอก ให้ใช้ uid เดิม
                                         if (!newUid.length)
                                             newUid = editDeviceUid
 
-                                        console.log("[AddDevicePage] id:", editId,
-                                                    "oldUid:", editDeviceUid,
-                                                    "newUid:", newUid,
-                                                    "Name:", newName,
-                                                    "ip:", newIp)
-
-                                        // ⭐ ส่งทั้ง oldDeviceUniqueId + deviceUniqueId ใหม่
                                         var updatePayload = [{
                                             id:   editId,
                                             Name: newName,
@@ -667,9 +655,7 @@ Item {
 
                                         if (krakenmapval)
                                             krakenmapval.groupSetting("UpdateDevice", 0, jsonUpdate)
-                                        console.log("[AddDevicePage] UpdateDevice :", jsonUpdate)
                                     } else {
-                                        // Add ใหม่: ถ้า user กรอก serial -> ส่งไปด้วย
                                         var payloadObj = { Name: newName, ip: newIp }
                                         if (newUid.length > 0)
                                             payloadObj.deviceUniqueId = newUid
@@ -707,14 +693,98 @@ Item {
                         anchors.fill: parent
                         spacing: 10
 
+                        // ===== Scan control row =====
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 8
+
                             Label {
                                 text: "Network Scan"
                                 color: colSubtext
                                 font.pixelSize: 12
                             }
+
+                            // ✅ Start IP full
+                            TextField {
+                                id: startIpField
+                                Layout.preferredWidth: 220
+                                Layout.preferredHeight: 36   // เพิ่มจาก 32 -> 36 (ปลอดภัยกว่า)
+                                implicitHeight: 36
+
+                                text: ""
+                                placeholderText: "Start IP (e.g. 192.168.10.1)"
+                                color: colText
+                                font.pixelSize: 13
+
+                                // ✅ ทำให้ข้อความอยู่กลางแนวตั้ง
+                                verticalAlignment: Text.AlignVCenter
+
+                                leftPadding: 10
+                                rightPadding: 10
+                                topPadding: 6
+                                bottomPadding: 6
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: "#141922"
+                                    border.color: colBorder
+                                    border.width: 1
+                                }
+
+                                onTextChanged: {
+                                    startIpError.visible = (text.trim().length > 0 && !isValidIp(text))
+                                }
+                            }
+
+                            Label { text: "to"; color: colSubtext; font.pixelSize: 12 }
+
+                            // ✅ End IP full
+                            TextField {
+                                id: endIpField
+                                Layout.preferredWidth: 220
+                                Layout.preferredHeight: 36
+                                implicitHeight: 36
+
+                                text: ""
+                                placeholderText: "End IP (e.g. 192.168.10.254)"
+                                color: colText
+                                font.pixelSize: 13
+
+                                verticalAlignment: Text.AlignVCenter
+
+                                leftPadding: 10
+                                rightPadding: 10
+                                topPadding: 6
+                                bottomPadding: 6
+
+                                background: Rectangle {
+                                    radius: 8
+                                    color: "#141922"
+                                    border.color: colBorder
+                                    border.width: 1
+                                }
+
+                                onTextChanged: {
+                                    endIpError.visible = (text.trim().length > 0 && !isValidIp(text))
+                                }
+                            }
+
+                            // inline errors
+                            Label {
+                                id: startIpError
+                                visible: false
+                                text: "Start IP invalid"
+                                color: "#ef4444"
+                                font.pixelSize: 11
+                            }
+                            Label {
+                                id: endIpError
+                                visible: false
+                                text: "End IP invalid"
+                                color: "#ef4444"
+                                font.pixelSize: 11
+                            }
+
                             Item { Layout.fillWidth: true }
 
                             Button {
@@ -722,6 +792,7 @@ Item {
                                 text: scanning ? "Scanning..." : "Scan"
                                 property bool scanning: false
                                 padding: 10
+                                enabled: !scanning
                                 background: Rectangle {
                                     radius: 10
                                     color: btnScan.scanning ? colAccentDim : colAccent
@@ -735,11 +806,36 @@ Item {
                                 }
                                 onClicked: {
                                     if (scanning) return
+
+                                    var sIp = startIpField.text.trim()
+                                    var eIp = endIpField.text.trim()
+
+                                    if (!isValidIp(sIp) || !isValidIp(eIp)) {
+                                        toast.show("Please enter valid Start/End IP.")
+                                        return
+                                    }
+
+                                    var sU = ipToU32(sIp)
+                                    var eU = ipToU32(eIp)
+                                    if (sU < 0 || eU < 0) {
+                                        toast.show("Invalid IP range.")
+                                        return
+                                    }
+
+                                    // ✅ swap if reversed
+                                    if (eU < sU) { var t=sU; sU=eU; eU=t }
+
+                                    // sync back to fields (nice)
+                                    startIpField.text = u32ToIp(sU)
+                                    endIpField.text   = u32ToIp(eU)
+
                                     scanning = true
                                     scanModel.clear()
-                                    toast.show("Scanning...")
+                                    toast.show("Scanning " + startIpField.text + " to " + endIpField.text + " ...")
+
+                                    // ✅ call C++ (ต้องมี Q_INVOKABLE/slot)
                                     if (krakenmapval)
-                                        krakenmapval.scanDevices()
+                                        krakenmapval.scanDevicesRange(startIpField.text, endIpField.text)
                                 }
                             }
                         }
@@ -768,16 +864,13 @@ Item {
                                     border.color: colBorder
 
                                     property bool hovered: false
-                                    property bool selected: false
 
                                     MouseArea {
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         onEntered: parent.hovered = true
                                         onExited: parent.hovered = false
-                                        onClicked: {
-                                            scanModel.setProperty(index, "__selected", !(model.__selected === true))
-                                        }
+                                        onClicked: scanModel.setProperty(index, "__selected", !(model.__selected === true))
                                     }
 
                                     Row {
@@ -799,18 +892,21 @@ Item {
                                             Label { text: name; color: colText; font.pixelSize: 14 }
                                             Row {
                                                 spacing: 8
-                                                Label {text: ip;color: colSubtext;font.pixelSize: 12;}
-                                                Label {visible: serial !== undefined && serial.length > 0;text: serial !== undefined && serial.length > 0 ? ("SN: " + serial) : "";color: colSubtext;font.pixelSize: 12;}
-                                               }
+                                                Label { text: ip; color: colSubtext; font.pixelSize: 12 }
+                                                Label {
+                                                    visible: serial !== undefined && serial.length > 0
+                                                    text: (serial !== undefined && serial.length > 0) ? ("SN: " + serial) : ""
+                                                    color: colSubtext
+                                                    font.pixelSize: 12
+                                                }
+                                            }
                                         }
 
                                         Item { width: 10 }
 
                                         Label {
                                             visible: isDupIp(ip) || isDupName(name)
-                                            text: isDupIp(ip)
-                                                ? "Duplicate IP"
-                                                : "Duplicate Name"
+                                            text: isDupIp(ip) ? "Duplicate IP" : "Duplicate Name"
                                             color: "#ef4444"
                                             font.pixelSize: 11
                                         }
@@ -895,12 +991,7 @@ Item {
                                         var it = scanModel.get(i)
                                         if (it.__selected && !isDupIp(it.ip) && !isDupName(it.name)) {
 
-                                            console.log("[AddDevicePage] ScanAddDevice:", it.name, it.ip, "serial=", it.serial)
-
-                                            // สร้าง object payload
                                             var payloadObj = { Name: it.name, ip: it.ip }
-
-                                            // ✅ ส่ง serial ไปด้วย (ใช้ key เดียวกับฝั่ง Manual)
                                             if (it.serial !== undefined && String(it.serial).trim().length > 0) {
                                                 payloadObj.deviceUniqueId = String(it.serial).trim()
                                             }
@@ -927,28 +1018,12 @@ Item {
                         }
                     }
 
-                    Timer {
-                        id: scanTimer
-                        interval: 1200; repeat: false; running: false
-                        onTriggered: {
-                            var samples = [
-                                { name:"Device_A12",  ip:"192.168.1.10", ping:3, __selected:false },
-                                { name:"beacon_two",  ip:"192.168.10.19", ping:5, __selected:false },
-                                { name:"sensor_room", ip:"192.168.10.25", ping:7, __selected:false },
-                                { name:"gateway_lte", ip:"192.168.10.50", ping:2, __selected:false }
-                            ]
-                            for (var i=0;i<samples.length;i++) scanModel.append(samples[i])
-                            btnScan.scanning = false
-                            toast.show("Scan complete.")
-                        }
-                    }
-
                     Connections {
                         target: krakenmapval
                         function onDeviceFound(name, serial, ip, ping) {
                             scanModel.append({
                                 name:    name,
-                                serial:  serial,        // ⭐ เก็บ serial ด้วย
+                                serial:  serial,
                                 ip:      ip,
                                 ping:    ping,
                                 __selected: false

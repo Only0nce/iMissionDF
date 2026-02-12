@@ -442,5 +442,11 @@
         <file>iRecordManage/PopUPDeletedFileWave.qml</file>
         <file>iRecordManage/TumblerDateTime.qml</file>
         <file>DoaViewer/WaterfallCanvas.qml</file>
+        <file>iRecordManage/MonitorDisplay.qml</file>
+        <file>iRecordManage/CPUused.qml</file>
+        <file>images/Diagnostic.png</file>
+        <file>iRecordManage/StorageUsed.qml</file>
+        <file>iRecordManage/RAMused.qml</file>
+        <file>iRecordManage/UpTimeUsed.qml</file>
     </qresource>
 </RCC>

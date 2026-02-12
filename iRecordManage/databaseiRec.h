@@ -12,10 +12,23 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QCryptographicHash>
-#include <QProcess>
 #include "storagemanagement.h"
 #include <QUuid>
 #include <QTemporaryFile>
+#include <QJsonArray>
+#include <QDateTime>
+#include <QTime>
+#include <QDate>
+#include <QLocale>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QDebug>
+#include <algorithm>
+#include <cstring>
+
+
+
 class DatabaseiRec : public QObject
 {
     Q_OBJECT
@@ -109,6 +122,7 @@ public slots:
     void upDateTableFileRecord();
     void deletedFileWave(const QString &jsonString, QWebSocket *wClient);
     void playRecording();
+    void formatDiskandDB();
 
 private:
     void addMissingColumn(const QString &tableName, const QString &columnName, const QString &columnType);  // ✅ เพิ่มบรรทัดนี้
@@ -132,6 +146,7 @@ private:
     pthread_t idThread;
     QString m_lastRecordCreatedAt;
     QString m_lastRecordId;
+    bool removeAllUnder(const QString &rootPath);
 
     bool execSql(QSqlDatabase& d, const QString& sql, QString* errOut = nullptr);
     bool ensureMysqlUser(QSqlDatabase& d,

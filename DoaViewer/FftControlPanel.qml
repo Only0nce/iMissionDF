@@ -31,10 +31,16 @@ Rectangle {
         ComboBox {
             id: chCombo
             Layout.preferredWidth: 110
-            model: ["CH0","CH1","CH2","CH3","CH4"]
-            currentIndex: doaClient.fftChannel
             enabled: doaClient.connected
-            onActivated: doaClient.fftChannel = currentIndex
+
+            model: ["CH1","CH2","CH3","CH4","CH5"]
+
+            // fftChannel = 0..4
+            currentIndex: doaClient.fftChannel
+
+            onActivated: {
+                doaClient.fftChannel = currentIndex   // ส่ง 0..4
+            }
         }
 
         Text {

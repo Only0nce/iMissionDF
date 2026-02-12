@@ -160,10 +160,6 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         });
         // db->editGroupName(id, GroupsName);
     }
-    else if (objectName == "scanDevices")
-    {
-        scanDevices();
-    }
     if(menuID == "getSystem")
     {
         hardwareInfo();
@@ -232,17 +228,24 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         // emit setNetwork(networks->dhcpmethod,networks->ip_address,networks->subnet,networks->ip_gateway,networks->pridns,networks->secdns,networks->krakenserver);
         // setupNetworktoDisplay(networks->dhcpmethod,networks->ip_address,networks->subnet,networks->ip_gateway, networks->pridns,networks->secdns);
     }
+    else if (menuID == "scanDevicesRange")
+    {
+        QString startIp = obj["startIp"].toString();
+        QString endIp = obj["endIp"].toString();
+        scanDevicesRange(startIp, endIp);
+    }
+
     // else if (menuID == "GPS_Data") {
-        // QString GPS_DateStr  = obj["GPS_Date"].toString();
-        // QString GPS_TimeStr  = obj["GPS_Time"].toString();
-        // QString latStr    = QString::number(obj["GPS_Lat"].toDouble(), 'f', 6);
-        // QString lonStr    = QString::number(obj["GPS_Long"].toDouble(), 'f', 6);
-        // QString altStr    = QString::number(obj["GPS_Alt"].toDouble(), 'f', 4);
+    // QString GPS_DateStr  = obj["GPS_Date"].toString();
+    // QString GPS_TimeStr  = obj["GPS_Time"].toString();
+    // QString latStr    = QString::number(obj["GPS_Lat"].toDouble(), 'f', 6);
+    // QString lonStr    = QString::number(obj["GPS_Long"].toDouble(), 'f', 6);
+    // QString altStr    = QString::number(obj["GPS_Alt"].toDouble(), 'f', 4);
 
-        // qDebug() << "[functionServer] GPS_Data :" << GPS_Date << GPS_Time << latStr << lonStr << altStr;
+    // qDebug() << "[functionServer] GPS_Data :" << GPS_Date << GPS_Time << latStr << lonStr << altStr;
 
-        // emit updateLocationLatLongFromGPS(latStr, lonStr, altStr);
-        // emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
+    // emit updateLocationLatLongFromGPS(latStr, lonStr, altStr);
+    // emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
     // }
     // else if (menuID == "getName"){
     //     qDebug() << "getName";
@@ -254,15 +257,15 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
     // }
     // else if (menuID == "compass"){
     //     qDebug() << "compass";
-        // if(!compassTimer->isActive()) {
-        //     compassTimer->start(2000);
-        //     qDebug() << "Compass timer started";
-        // }
-        // QJsonObject single;
-        // single["objectName"] = "SetBaudrate";
-        // single["baudrate"] = 4;
-        // QString sendJson = QString::fromUtf8(QJsonDocument(single).toJson(QJsonDocument::Compact));
-        // chatServer->broadcastMessage(sendJson);
+    // if(!compassTimer->isActive()) {
+    //     compassTimer->start(2000);
+    //     qDebug() << "Compass timer started";
+    // }
+    // QJsonObject single;
+    // single["objectName"] = "SetBaudrate";
+    // single["baudrate"] = 4;
+    // QString sendJson = QString::fromUtf8(QJsonDocument(single).toJson(QJsonDocument::Compact));
+    // chatServer->broadcastMessage(sendJson);
     // }
     else if (menuID == "connectGroupSingle")
     {
@@ -321,8 +324,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         qDebug() << "[DFLOG selected]" << files.size() << "deleted=" << deleted;
 
         QJsonObject resp{
-            {"menuID","reloadweb"},
-        };
+                         {"menuID","reloadweb"},
+                         };
         sendResult(resp);
         return;
     }
@@ -334,8 +337,8 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
 
         qDebug() << "[DFLOG one]" << rel << ok << reason;
         QJsonObject resp{
-         {"menuID","reloadweb"},
-         };
+                         {"menuID","reloadweb"},
+                         };
         sendResult(resp);
         return;
     }
@@ -376,7 +379,7 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
 }
 
 void iScreenDF::sendToWeb(const QString &data){
-        // emit serverSendMessage(data);
+    // emit serverSendMessage(data);
 }
 
 void iScreenDF::updateFirmware() {

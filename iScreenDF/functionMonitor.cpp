@@ -50,7 +50,7 @@ void iScreenDF::groupSetting(const QString &title, int id, const QString &json)
     //         db->saveGroupSettingFromJson(json);
     //     });
 
-        // db->saveGroupSettingFromJson(json);
+    // db->saveGroupSettingFromJson(json);
     //     return;
     // }
     // if (title == "EditGroupbyID") {
@@ -247,7 +247,7 @@ void iScreenDF::remoteSideRemoteJson(const QString &json){
 }
 
 void iScreenDF::sigGroupsInGroupSetting(const QString &json) {
-       qDebug() << "[functionMonitor]  sigGroupsInGroupSetting:" << json;
+    qDebug() << "[functionMonitor]  sigGroupsInGroupSetting:" << json;
     emit setsigGroupsInGroupSetting(json);
 }
 
@@ -256,48 +256,140 @@ void iScreenDF::cancelScan()
     m_scanning.storeRelease(false);
 }
 
-void iScreenDF::scanDevices()
-{
-    if (m_network2List.isEmpty()) {
-        qWarning() << "[functionMonitor] m_network2List is empty";
-        return;
-    }
-    QString ip = m_network2List.at(1)->ip_address;
-    QStringList parts = ip.split('.');
+// void iScreenDF::scanDevices()
+// {
+//     if (m_network2List.isEmpty()) {
+//         qWarning() << "[functionMonitor] m_network2List is empty";
+//         return;
+//     }
+//     QString ip = m_network2List.at(1)->ip_address;
+//     QStringList parts = ip.split('.');
 
-    if (parts.size() != 4) {
-        qWarning() << "[functionMonitor] invalid ip:" << ip;
+//     if (parts.size() != 4) {
+//         qWarning() << "[functionMonitor] invalid ip:" << ip;
+//         return;
+//     }
+//     QString baseIp = parts[0] + "." + parts[1] + "." + parts[2] + ".";
+
+//     QThread *thread = new QThread(this);
+//     WorkerScan *worker = new WorkerScan();
+//     worker->baseIp    = baseIp;
+//     worker->selfIp    = ip;
+//     worker->start     = 1;
+//     worker->end       = 254;
+//     worker->port      = 9000;
+//     worker->timeoutMs = 200;
+//     qDebug() << "[functionMonitor]  scanDevices:"  << baseIp;
+
+//     worker->moveToThread(thread);
+
+//     connect(thread, &QThread::started, worker, &WorkerScan::process);
+
+//     connect(worker, &WorkerScan::deviceFound,this,&iScreenDF::ondeviceFound,Qt::QueuedConnection);
+//     connect(worker, &WorkerScan::scanFinished,
+//             this, [=]() {
+//                 emit scanFinished();
+//                 thread->quit();
+//             });
+//     connect(this, &iScreenDF::scanFinished,
+//             this, &iScreenDF::onScanFinishedBroadcast);
+//     connect(thread, &QThread::finished,worker, &QObject::deleteLater);
+//     connect(thread, &QThread::finished,thread, &QObject::deleteLater);
+
+//     thread->start();
+// }
+
+static bool parseIPv4Parts(const QString &ip, int out[4])
+{
+    QString s = ip.trimmed();
+    const QStringList p = s.split('.');
+    if (p.size() != 4) return false;
+
+    bool ok = false;
+    for (int i = 0; i < 4; ++i) {
+        int v = p[i].toInt(&ok);
+        if (!ok || v < 0 || v > 255) return false;
+        out[i] = v;
+    }
+    return true;
+}
+
+void iScreenDF::scanDevicesRange(const QString &startIp, const QString &endIp)
+{
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[functionMonitor] no parameter";
+        emit scanFinished();
         return;
     }
-    QString baseIp = parts[0] + "." + parts[1] + "." + parts[2] + ".";
+    Parameter *p = m_parameter.first();
+
+    // 🔥 ใช้ IP จาก parameter แทน network list
+    const QString selfIp = p->m_ipLocalForRemoteGroup;
+
+    int s[4], e[4];
+    if (!parseIPv4Parts(startIp, s) || !parseIPv4Parts(endIp, e)) {
+        qWarning() << "[functionMonitor] scanDevicesRange invalid start/end ip:"
+                   << startIp << endIp;
+        emit scanFinished();
+        return;
+    }
+
+    if (s[0] != e[0] || s[1] != e[1] || s[2] != e[2]) {
+        qWarning() << "[functionMonitor] scanDevicesRange different subnet:"
+                   << startIp << "->" << endIp
+                   << "(only supports same /24)";
+        emit scanFinished();
+        return;
+    }
+
+    const QString baseIp = QString("%1.%2.%3.").arg(s[0]).arg(s[1]).arg(s[2]);
+
+    int startHost = s[3];
+    int endHost   = e[3];
+
+    if (startHost < 1) startHost = 1;
+    if (endHost > 254) endHost = 254;
+    if (endHost < startHost) std::swap(startHost, endHost);
 
     QThread *thread = new QThread(this);
     WorkerScan *worker = new WorkerScan();
+
     worker->baseIp    = baseIp;
-    worker->selfIp    = ip;
-    worker->start     = 1;
-    worker->end       = 254;
+    worker->selfIp    = selfIp;     // 🔥 เปลี่ยนตรงนี้
+    worker->start     = startHost;
+    worker->end       = endHost;
     worker->port      = 9000;
     worker->timeoutMs = 200;
-    qDebug() << "[functionMonitor]  scanDevices:"  << baseIp;
+
+    qDebug() << "[functionMonitor] scanDevicesRange baseIp=" << baseIp
+             << "range=" << startHost << "-" << endHost
+             << "selfIp=" << selfIp
+             << "startIp=" << startIp
+             << "endIp=" << endIp;
 
     worker->moveToThread(thread);
 
     connect(thread, &QThread::started, worker, &WorkerScan::process);
 
-    connect(worker, &WorkerScan::deviceFound,this,&iScreenDF::ondeviceFound,Qt::QueuedConnection);
+    connect(worker, &WorkerScan::deviceFound,
+            this, &iScreenDF::ondeviceFound, Qt::QueuedConnection);
+
     connect(worker, &WorkerScan::scanFinished,
             this, [=]() {
                 emit scanFinished();
                 thread->quit();
             });
+
     connect(this, &iScreenDF::scanFinished,
             this, &iScreenDF::onScanFinishedBroadcast);
-    connect(thread, &QThread::finished,worker, &QObject::deleteLater);
-    connect(thread, &QThread::finished,thread, &QObject::deleteLater);
+
+    connect(thread, &QThread::finished, worker, &QObject::deleteLater);
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
 
     thread->start();
 }
+
+
 
 void iScreenDF::onScanFinishedBroadcast()
 {
@@ -476,11 +568,18 @@ void iScreenDF::setMode(const QString &mode)
         db->UpdateMode(mode);
     }
 
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[setMode] no parameter";
+        return;
+    }
+    Parameter *p = m_parameter.first();
+
     RemoteStatus = mode;
     emit updateParameterMode(mode);
     qDebug() << "[functionMonitor] setMode :" << mode;
+
     QJsonObject obj;
-    obj["menuID"]   = "updateParameterMode";
+    obj["menuID"] = "updateParameterMode";
     obj["mode"]   = mode;
     QJsonDocument doc(obj);
     const QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
@@ -492,19 +591,21 @@ void iScreenDF::setMode(const QString &mode)
         m_pendingConnectGroup = false;
         processConnectGroupSingleInternal(m_pendingConnectObj);
         m_pendingConnectObj = QJsonObject();  // clear
-    } else if (RemoteStatus == "LOCAL")
+    }
+    else if (RemoteStatus == "LOCAL")
     {
-        QJsonDocument jsonDoc;
         QJsonObject Param;
-        QString raw_data;
         Param.insert("objectName", "StopConnecting");
-        Param.insert("ip", m_network2List.at(1)->ip_address);
-        jsonDoc.setObject(Param);
-        raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
+        Param.insert("ip", p->m_ipLocalForRemoteGroup);  // 🔥 เปลี่ยนตรงนี้
+
+        const QString raw_data =
+            QString::fromUtf8(QJsonDocument(Param).toJson(QJsonDocument::Compact));
+
         chatServerDF->broadcastMessage(raw_data);
         qDebug() << "[functionMonitor] broadcastMessage :" << raw_data;
     }
 }
+
 
 
 void iScreenDF::parameterReceived(const QString &mode,const QString &deviceName,const QString &serial)
@@ -538,6 +639,10 @@ void iScreenDF::parameterReceived(const QString &mode,const QString &deviceName,
 
 void iScreenDF::handleConnectGroupSingle(const QJsonObject &obj)
 {
+    if (m_parameter.isEmpty() || !m_parameter.first()) return;
+
+    Parameter *p = m_parameter.first();
+
     QString groupUniqueId = obj["groupUniqueId"].toString();
     uniqueIdInGroupSelected = groupUniqueId;
     qDebug() << "[connectGroupSingle] RemoteStatus =" << RemoteStatus;
@@ -555,7 +660,7 @@ void iScreenDF::handleConnectGroupSingle(const QJsonObject &obj)
     QString raw_data;
     Param.insert("objectName", "getstatus");
     Param.insert("Status", RemoteStatus);
-    Param.insert("ip", m_network2List.at(1)->ip_address);
+    Param.insert("ip", p->m_ipLocalForRemoteGroup );
     jsonDoc.setObject(Param);
     raw_data = QJsonDocument(Param).toJson(QJsonDocument::Compact).toStdString().c_str();
     chatServerDF->broadcastMessage(raw_data);
@@ -577,10 +682,14 @@ void iScreenDF::handleConnectGroupSingle(const QJsonObject &obj)
 // ------------------------------------------------------------------
 void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
 {
-    int groupId           = obj["groupId"].toInt();
-    QString groupName     = obj["groupName"].toString();
-    QString groupUniqueId = obj["groupUniqueId"].toString();
-    QJsonArray devices    = obj["devices"].toArray();
+    if (m_parameter.isEmpty() || !m_parameter.first()) return;
+
+    Parameter *p = m_parameter.first();
+
+    int groupId            = obj["groupId"].toInt();
+    QString groupName      = obj["groupName"].toString();
+    QString groupUniqueId  = obj["groupUniqueId"].toString();
+    QJsonArray devices     = obj["devices"].toArray();
 
     qDebug() << "groupId           =" << groupId;
     qDebug() << "groupName         =" << groupName;
@@ -588,27 +697,26 @@ void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
     qDebug() << "----------------------------------------";
     qDebug() << "devices in same group =" << devices.size();
 
-    QString localIp;
-    if (!m_network2List.isEmpty() && m_network2List.at(1)) {
-        localIp = m_network2List.at(1)->ip_address;
-    }
-    qDebug() << "[connectGroupSingle] localIp =" << localIp;
+    // ✅ เปลี่ยนจาก m_network2List.at(1)->ip_address มาใช้ค่าใน Parameter
+    // NOTE: แนะนำให้ m_ipLocalForRemoteGroup เป็น QString IP เช่น "10.10.0.20"
+    QString localIp = p->m_ipLocalForRemoteGroup;
+    qDebug() << "[connectGroupSingle] localIp(from Parameter) =" << localIp;
 
     bool hasOtherDevice = false;
 
     // --- วนลูปดู devices ทั้งกลุ่ม ---
     for (int i = 0; i < devices.size(); ++i) {
-        QJsonObject dv   = devices.at(i).toObject();
-        int deviceId     = dv.value("deviceId").toInt();
-        int deviceGroupId= dv.value("deviceGroupId").toInt();
-        int gIdInDevice  = dv.value("groupId").toInt();
-        QString groupsName = dv.value("groupsName").toString();
-        QString uidGroup   = dv.value("uniqueIdInGroup").toString();
-        QString name       = dv.value("name").toString();
-        QString ip         = dv.value("ip").toString();
-        int port           = dv.value("port").toInt();
-        QString deviceUid  = dv.value("deviceUniqueId").toString();
-        bool isController  = dv.value("isController").toBool();
+        QJsonObject dv    = devices.at(i).toObject();
+        int deviceId      = dv.value("deviceId").toInt();
+        int deviceGroupId = dv.value("deviceGroupId").toInt();
+        int gIdInDevice   = dv.value("groupId").toInt();
+        QString groupsName= dv.value("groupsName").toString();
+        QString uidGroup  = dv.value("uniqueIdInGroup").toString();
+        QString name      = dv.value("name").toString();
+        QString ip        = dv.value("ip").toString();
+        int port          = dv.value("port").toInt();
+        QString deviceUid = dv.value("deviceUniqueId").toString();
+        bool isController = dv.value("isController").toBool();
 
         qDebug() << "   [" << i << "]"
                  << "deviceId ="        << deviceId
@@ -622,7 +730,7 @@ void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
                  << "ip ="              << ip
                  << "port ="            << port;
 
-        // เก็บชื่อ/serial ของตัวเรา (เครื่อง local)
+        // เก็บชื่อ/serial ของตัวเรา (เครื่อง local) โดยเทียบกับ localIp จาก Parameter
         if (!localIp.isEmpty() && ip == localIp) {
             controllerName = name;
             Serialnumber   = deviceUid;
@@ -659,6 +767,7 @@ void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
     // setupServerClientForDevices(groupId, groupName, devices);
 }
 
+
 void iScreenDF::setParameterdevice(const QString &deviceName, const QString &serial)
 {
     qDebug()  << "[functionMonitor] setParameterdevice" << deviceName << serial;
@@ -668,4 +777,19 @@ void iScreenDF::setParameterdevice(const QString &deviceName, const QString &ser
     QTimer::singleShot(0, db, [db = db, deviceName, serial]() {
         db->UpdateDeviceParameter(deviceName,serial);
     });
+}
+
+void iScreenDF::setUseOfflineMapStyle(bool mapStatus)
+{
+    emit useOfflineMapStyleChanged(mapStatus);
+}
+void iScreenDF::setDelayMs(const int ms){
+    qDebug()  << "[functionMonitor] setDelayMs" << ms;
+    db->UpdateParameterField("setDelayMs", ms);
+    emit updateMaxDoaDelayMsFromServer(ms);
+}
+void iScreenDF::setDistance(const int m){
+    qDebug()  << "[functionMonitor] setDistance" << m;
+    db->UpdateParameterField("setDistance", m);
+    emit updateDoaLineDistanceMFromServer(m);
 }
