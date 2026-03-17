@@ -22,6 +22,7 @@ import Qt.labs.settings 1.1
 
 import "../i18n" as I18n
 import "./"
+
 Item {
     z: 100
 
@@ -716,20 +717,6 @@ Item {
                                 if (typeof mainWindows !== "undefined" && mainWindows && typeof mainWindows.sendmessage === "function") {
                                     var msg = '{"type":"setfrequency","params":{"frequency":' + freqHz + ',"key":"memagic"}}'
                                     mainWindows.sendmessage(msg)
-
-                                    if (((centerFreq + SpectrumGLPlot.offsetFrequency) > (centerFreq + (sampRate / 2))) ||
-                                        ((centerFreq + offsetFrequency) < (centerFreq - (sampRate / 2)))) {
-                                        centerFreq = centerFreq + offsetFrequency
-                                        offsetFrequency = 0
-                                        mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFreq + ',"key":"memagic"}}')
-                                        updateFrequency()
-                                    } else {
-                                        mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
-                                        freqScan = centerFreq + offsetFrequency
-                                        updateFrequency()
-                                    }
-
-                                    mainWindows.updateCurrentOffsetFreq(0, freqHz)
                                     console.log("[sendmessage] " + msg)
                                 } else {
                                     console.warn("mainWindows.sendmessage not available")

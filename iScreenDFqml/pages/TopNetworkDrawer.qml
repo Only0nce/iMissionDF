@@ -1227,7 +1227,7 @@ Drawer {
                                         dns1Field.originalValue = dns1Field.text
                                         dns2Field.originalValue = dns2Field.text
 
-                                        requestNetworkRefresh()
+                                        // requestNetworkRefresh()
                                     }
                                 }
 

@@ -7,6 +7,9 @@ Item {
     id: rootTumblerDateTime
     width: 900
     height: 420
+    property int wYear: 160
+    property int wMonth: 160
+    property int wDay: 160
 
     /* ===================== API ===================== */
     function pad2(n) { n = Number(n); return (n < 10 ? "0" : "") + n }
@@ -211,14 +214,15 @@ Item {
                     Layout.preferredWidth: 520
                     Layout.preferredHeight: 134
                     spacing: 6
-                    property int wYear: 160
-                    property int wMonth: 160
-                    property int wDay: 160
+//                    property int wYear: 160
+//                    property int wMonth: 160
+//                    property int wDay: 160
 
                     RowLayout {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 22
                         spacing: 10
+
                         Rectangle { Layout.preferredWidth: wYear; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
                             Text { anchors.centerIn: parent; text: "Year"; color: "white"; font.pixelSize: 12 } }
                         Rectangle { Layout.preferredWidth: wMonth; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1

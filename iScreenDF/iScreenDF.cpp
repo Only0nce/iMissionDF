@@ -304,14 +304,16 @@ static void latLonToUTMAndMGRS(double lat, double lon, QString &utmStr, QString 
 
 void iScreenDF::gps1Updated(const GPSInfo &info)
 {
-    const bool good = isGoodFix(info);
+    const bool manual = m_manualGps1.enabled;
+    const bool good = (!manual && isGoodFix(info));
 
-    // เวลา (ถ้า parse ไม่ได้ ให้ใช้ raw)
     QDateTime t = parseGpsDateTimeLocalSafe(info.date, info.time);
+    if (!t.isValid() && manual)
+        t = QDateTime::currentDateTime();
+
     QString GPS_TimeStr = t.isValid() ? t.time().toString("HH:mm:ss") : info.time;
     QString GPS_DateStr = t.isValid() ? t.date().toString("yyyy-MM-dd") : info.date;
 
-    // เตรียมค่าที่จะส่ง (good ใช้ของใหม่, ไม่ good ใช้ last)
     double lat = info.lat;
     double lon = info.lon;
     double alt = info.alt;
@@ -319,10 +321,25 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
 
     bool fallback = false;
 
-    if (good) {
+    if (manual) {
+        lat = m_manualGps1.lat;
+        lon = m_manualGps1.lon;
+        alt = m_manualGps1.alt;
+
         latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
 
-        // เก็บ last good
+        m_lastGps1.valid = true;
+        m_lastGps1.lat   = lat;
+        m_lastGps1.lon   = lon;
+        m_lastGps1.alt   = std::isfinite(alt) ? alt : 0.0;
+        m_lastGps1.date  = GPS_DateStr;
+        m_lastGps1.time  = GPS_TimeStr;
+        m_lastGps1.utm   = utmStr;
+        m_lastGps1.mgrs  = mgrsStr;
+
+    } else if (good) {
+        latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
+
         m_lastGps1.valid = true;
         m_lastGps1.lat   = lat;
         m_lastGps1.lon   = lon;
@@ -333,7 +350,6 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
         m_lastGps1.mgrs  = mgrsStr;
 
     } else if (m_lastGps1.valid) {
-        // ✅ fallback ใช้ค่าก่อนหน้า
         fallback = true;
         lat      = m_lastGps1.lat;
         lon      = m_lastGps1.lon;
@@ -343,33 +359,28 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
         utmStr   = m_lastGps1.utm;
         mgrsStr  = m_lastGps1.mgrs;
     } else {
-        // ยังไม่มี last good เลย -> ไม่ส่ง marker/utm (กัน 0)
         qDebug() << "[GPS1] no fix and no last -> skip marker";
         return;
     }
 
-    // --- UI/QML ---
     const QString latStr = QString::number(lat, 'f', 6);
     const QString lonStr = QString::number(lon, 'f', 6);
     const QString altStr = QString::number(alt, 'f', 4);
 
     emit updateLocationLatLongFromGPS(latStr, lonStr, altStr, utmStr, mgrsStr);
     emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
-
-    // ✅ ปักหมุดด้วยค่าที่เลือกแล้ว (good หรือ fallback)
     emit updateGpsMarker(Serialnumber, controllerName, lat, lon, alt, GPS_DateStr, GPS_TimeStr);
 
-    // อัปเดต state เก็บไว้ด้วย (ถ้าจะใช้ภายหลัง)
     state1_ = info;
 
-    // --- WebSocket ---
     if (chatServerDF) {
         QJsonObject obj;
         obj["menuID"]   = "UpdateGPSMarker";
         obj["source"]   = "GPS1";
-        obj["locked"]   = (info.locked == 1);
-        obj["satUse"]   = info.satUse;
-        obj["fallback"] = fallback;     // ✅ บอกฝั่งเว็บว่าใช้ค่าก่อนหน้า
+        obj["locked"]   = manual ? false : (info.locked == 1);
+        obj["satUse"]   = manual ? 0 : info.satUse;
+        obj["manual"]   = manual;
+        obj["fallback"] = fallback;
         obj["lat"]      = lat;
         obj["lon"]      = lon;
         obj["alt"]      = alt;
@@ -377,8 +388,6 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
         obj["time"]     = GPS_TimeStr;
         obj["utm"]      = utmStr;
         obj["mgrs"]     = mgrsStr;
-
-        // raw จาก gpsd (เอาไว้ debug)
         obj["raw_date"] = info.date;
         obj["raw_time"] = info.time;
 
@@ -390,9 +399,13 @@ void iScreenDF::gps1Updated(const GPSInfo &info)
 
 void iScreenDF::gps2Updated(const GPSInfo &info)
 {
-    const bool good = isGoodFix(info);
+    const bool manual = m_manualGps2.enabled;
+    const bool good = (!manual && isGoodFix(info));
 
     QDateTime t = parseGpsDateTimeLocalSafe(info.date, info.time);
+    if (!t.isValid() && manual)
+        t = QDateTime::currentDateTime();
+
     QString GPS_TimeStr = t.isValid() ? t.time().toString("HH:mm:ss") : info.time;
     QString GPS_DateStr = t.isValid() ? t.date().toString("yyyy-MM-dd") : info.date;
 
@@ -402,7 +415,23 @@ void iScreenDF::gps2Updated(const GPSInfo &info)
     QString utmStr, mgrsStr;
     bool fallback = false;
 
-    if (good) {
+    if (manual) {
+        lat = m_manualGps2.lat;
+        lon = m_manualGps2.lon;
+        alt = m_manualGps2.alt;
+
+        latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
+
+        m_lastGps2.valid = true;
+        m_lastGps2.lat   = lat;
+        m_lastGps2.lon   = lon;
+        m_lastGps2.alt   = std::isfinite(alt) ? alt : 0.0;
+        m_lastGps2.date  = GPS_DateStr;
+        m_lastGps2.time  = GPS_TimeStr;
+        m_lastGps2.utm   = utmStr;
+        m_lastGps2.mgrs  = mgrsStr;
+
+    } else if (good) {
         latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
 
         m_lastGps2.valid = true;
@@ -428,7 +457,6 @@ void iScreenDF::gps2Updated(const GPSInfo &info)
         return;
     }
 
-    // ถ้าคุณไม่ต้องการ update UI ด้วย GPS2 ให้คอมเมนต์ส่วน emit QML ตรงนี้ได้
     const QString latStr = QString::number(lat, 'f', 6);
     const QString lonStr = QString::number(lon, 'f', 6);
     const QString altStr = QString::number(alt, 'f', 4);
@@ -442,8 +470,9 @@ void iScreenDF::gps2Updated(const GPSInfo &info)
         QJsonObject obj;
         obj["menuID"]   = "UpdateGPSMarker";
         obj["source"]   = "GPS2";
-        obj["locked"]   = (info.locked == 1);
-        obj["satUse"]   = info.satUse;
+        obj["locked"]   = manual ? false : (info.locked == 1);
+        obj["satUse"]   = manual ? 0 : info.satUse;
+        obj["manual"]   = manual;
         obj["fallback"] = fallback;
         obj["lat"]      = lat;
         obj["lon"]      = lon;
@@ -611,3 +640,99 @@ void iScreenDF::socketClientClosed(int socketID, const QString &ip)
                << socketID << "ip" << ip;
 }
 
+void iScreenDF::applyManualGps(double lat, double lon, double alt)
+{
+    if (!std::isfinite(lat) || !std::isfinite(lon) || !std::isfinite(alt)) {
+        qWarning() << "[ManualGPS] invalid input:" << lat << lon << alt;
+        return;
+    }
+
+    m_manualGps1.enabled = true;
+    m_manualGps1.lat = lat;
+    m_manualGps1.lon = lon;
+    m_manualGps1.alt = alt;
+
+    m_manualGps2.enabled = true;
+    m_manualGps2.lat = lat;
+    m_manualGps2.lon = lon;
+    m_manualGps2.alt = alt;
+
+    QString utmStr, mgrsStr;
+    latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
+
+    const QString dateStr = QDate::currentDate().toString("yyyy-MM-dd");
+    const QString timeStr = QTime::currentTime().toString("HH:mm:ss");
+
+    m_lastGps1.valid = true;
+    m_lastGps1.lat   = lat;
+    m_lastGps1.lon   = lon;
+    m_lastGps1.alt   = alt;
+    m_lastGps1.date  = dateStr;
+    m_lastGps1.time  = timeStr;
+    m_lastGps1.utm   = utmStr;
+    m_lastGps1.mgrs  = mgrsStr;
+
+    m_lastGps2.valid = true;
+    m_lastGps2.lat   = lat;
+    m_lastGps2.lon   = lon;
+    m_lastGps2.alt   = alt;
+    m_lastGps2.date  = dateStr;
+    m_lastGps2.time  = timeStr;
+    m_lastGps2.utm   = utmStr;
+    m_lastGps2.mgrs  = mgrsStr;
+
+    emit updateLocationLatLongFromGPS(
+        QString::number(lat, 'f', 6),
+        QString::number(lon, 'f', 6),
+        QString::number(alt, 'f', 4),
+        utmStr,
+        mgrsStr
+        );
+
+    emit updatecurrentFromGPSTime(dateStr, timeStr);
+    emit updateGpsMarker(Serialnumber, controllerName, lat, lon, alt, dateStr, timeStr);
+
+    if (chatServerDF) {
+        QJsonObject obj1;
+        obj1["menuID"]   = "UpdateGPSMarker";
+        obj1["source"]   = "GPS1";
+        obj1["locked"]   = false;
+        obj1["satUse"]   = 0;
+        obj1["manual"]   = true;
+        obj1["fallback"] = false;
+        obj1["lat"]      = lat;
+        obj1["lon"]      = lon;
+        obj1["alt"]      = alt;
+        obj1["date"]     = dateStr;
+        obj1["time"]     = timeStr;
+        obj1["utm"]      = utmStr;
+        obj1["mgrs"]     = mgrsStr;
+        obj1["raw_date"] = "";
+        obj1["raw_time"] = "";
+
+        const QString jsonStr1 = QString::fromUtf8(QJsonDocument(obj1).toJson(QJsonDocument::Compact));
+        chatServerDF->broadcastMessage(jsonStr1);
+        broadcastMessageServerandClient(obj1);
+
+        QJsonObject obj2 = obj1;
+        obj2["source"] = "GPS2";
+
+        const QString jsonStr2 = QString::fromUtf8(QJsonDocument(obj2).toJson(QJsonDocument::Compact));
+        chatServerDF->broadcastMessage(jsonStr2);
+        broadcastMessageServerandClient(obj2);
+    }
+
+    qDebug() << "[ManualGPS] applyManualGps =" << lat << lon << alt;
+}
+
+void iScreenDF::disableManualGps1()
+{
+    m_manualGps1.enabled = false;
+    qDebug() << "[ManualGPS] GPS1 manual disabled";
+}
+
+void iScreenDF::disableManualGps2()
+{
+    m_manualGps2.enabled = false;
+    qDebug() << "[ManualGPS] GPS2 manual disabled";
+}

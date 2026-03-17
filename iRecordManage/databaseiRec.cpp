@@ -368,6 +368,7 @@ CREATE DATABASE IF NOT EXISTS `recorder`;
 CREATE USER IF NOT EXISTS 'recorder'@'localhost' IDENTIFIED BY 'Ifz8zean6868**';
 CREATE USER IF NOT EXISTS 'recorder'@'127.0.0.1' IDENTIFIED BY 'Ifz8zean6868**';
 CREATE USER IF NOT EXISTS 'recorder'@'%'         IDENTIFIED BY 'Ifz8zean6868**';
+CREATE USER IF NOT EXISTS 'root'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY 'OTL324$';
 
 CREATE USER IF NOT EXISTS 'iScreenKraken'@'localhost' IDENTIFIED BY 'Ifz8zean6868**';
 CREATE USER IF NOT EXISTS 'iScreenKraken'@'127.0.0.1' IDENTIFIED BY 'Ifz8zean6868**';
@@ -380,6 +381,8 @@ ALTER USER 'recorder'@'%'         IDENTIFIED WITH mysql_native_password BY 'Ifz8
 ALTER USER 'iScreenKraken'@'localhost' IDENTIFIED WITH mysql_native_password BY 'Ifz8zean6868**';
 ALTER USER 'iScreenKraken'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY 'Ifz8zean6868**';
 ALTER USER 'iScreenKraken'@'%'         IDENTIFIED WITH mysql_native_password BY 'Ifz8zean6868**';
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'OTL324$';
+ALTER USER 'root'@'127.0.0.1' IDENTIFIED WITH mysql_native_password BY 'OTL324$';
 
 GRANT ALL PRIVILEGES ON `recorder`.* TO 'recorder'@'localhost';
 GRANT ALL PRIVILEGES ON `recorder`.* TO 'recorder'@'127.0.0.1';
@@ -388,7 +391,8 @@ GRANT ALL PRIVILEGES ON `recorder`.* TO 'recorder'@'%';
 GRANT ALL PRIVILEGES ON `recorder`.* TO 'iScreenKraken'@'localhost';
 GRANT ALL PRIVILEGES ON `recorder`.* TO 'iScreenKraken'@'127.0.0.1';
 GRANT ALL PRIVILEGES ON `recorder`.* TO 'iScreenKraken'@'%';
-
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION;
+GRANT ALL PRIVILEGES ON *.* TO 'root'@'127.0.0.1' WITH GRANT OPTION;
 FLUSH PRIVILEGES;
 )SQL";
 
@@ -439,6 +443,7 @@ FLUSH PRIVILEGES;
 
     return true;
 }
+
 bool DatabaseiRec::ensureMysqlUser(QSqlDatabase& d, const QString& user, const QString& host, const QString& password, const QString& dbName, QString* errOut){
     // 1) CREATE USER IF NOT EXISTS
     {
@@ -520,6 +525,7 @@ void DatabaseiRec::VerifyUserDatabase()
 
     emit verifyUserDatabaseDone(true, "VerifyUserDatabase OK: bootstrap fixed recorder login.");
 }
+
 void DatabaseiRec::getCurrentPath() {
     qDebug() << "getCurrentPath:";
 

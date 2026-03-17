@@ -76,33 +76,12 @@ ChatServer::~ChatServer()
 
 void ChatServer::onNewConnection()
 {
-//    QWebSocket *pSocket = m_pWebSocketServer->nextPendingConnection();
-//    connect(pSocket, &QWebSocket::textMessageReceived, this, &ChatServer::processMessage);
-//    connect(pSocket, &QWebSocket::disconnected, this, &ChatServer::socketDisconnected);
-//    m_clients << pSocket;
-//    qDebug() << "On New Connection from address : " << pSocket->peerName();
-//    emit onNewClientConneced(pSocket);
-//    if (clientNum <= 0)
-//    {
-//        clientNum = m_clients.length();
-//        emit onNumClientChanged(clientNum);
-//    }
-//    else {
-//        clientNum = m_clients.length();
-//    }
     QWebSocket *pSocket = m_pWebSocketServer->nextPendingConnection();
-
     connect(pSocket, &QWebSocket::textMessageReceived, this, &ChatServer::processMessage);
     connect(pSocket, &QWebSocket::disconnected, this, &ChatServer::socketDisconnected);
-
     m_clients << pSocket;
-
     qDebug() << "On New Connection from address : " << pSocket->peerName();
     emit onNewClientConneced(pSocket);
-
-    // ✅ เพิ่ม: ส่ง init command ครั้งเดียวหลัง connect
-    sendInitCommandsOnce(pSocket);
-
     if (clientNum <= 0)
     {
         clientNum = m_clients.length();
@@ -111,6 +90,7 @@ void ChatServer::onNewConnection()
     else {
         clientNum = m_clients.length();
     }
+
 }
 
 void ChatServer::broadcastMessage(QString message){
@@ -197,7 +177,7 @@ void ChatServer::socketDisconnected()
 //    }
     QWebSocket *pClient = qobject_cast<QWebSocket *>(sender());
     if (!pClient) return;
-    m_bootInitSent.remove(pClient);
+
     qDebug().noquote()
         << "[WS DISCONNECT]"
         << "peer=" << pClient->peerAddress().toString() << pClient->peerPort()
@@ -205,11 +185,13 @@ void ChatServer::socketDisconnected()
         << "recSocketClient(before)=" << recSocketClient.size()
         << "m_WebSocketRecClients(before)=" << m_WebSocketRecClients.size();
 
+    // ✅ 1) remove from plain socket lists (QList<QWebSocket*>)
     m_clients.removeAll(pClient);
     m_WebSocketClients.removeAll(pClient);
     m_WebSocketVUClients.removeAll(pClient);
     m_WebSocketRecClients.removeAll(pClient);
 
+    // ✅ 2) remove from your wrapper lists (delete wrapper ONLY, not socket)
     for (int i = softPhoneSocketClient.size() - 1; i >= 0; --i) {
         auto c = softPhoneSocketClient[i];
         if (!c) { softPhoneSocketClient.removeAt(i); continue; }
@@ -234,10 +216,13 @@ void ChatServer::socketDisconnected()
 
         if (c->SocketClients == pClient) {
             qDebug() << "[WS DISCONNECT] remove recSocketClient softPhoneID=" << c->softPhoneID;
-            delete c;
+            delete c;                   // ✅ delete wrapper
             recSocketClient.removeAt(i);
         }
     }
+
+    // ✅ 3) IMPORTANT: DO NOT delete socket here (avoid double-delete / timing issues)
+    // pClient->deleteLater();   ❌ remove this line
 
     qDebug().noquote()
         << "[WS DISCONNECT DONE]"
@@ -369,22 +354,4 @@ void ChatServer::sendMessageToRecService(const QString& message, int softPhoneID
     }
 
     qWarning() << "[SEND to REC] target softPhoneID not found:" << softPhoneID;
-}
-void ChatServer::sendInitCommandsOnce(QWebSocket *pSocket)
-{
-    if (!pSocket) return;
-
-    // กันส่งซ้ำ
-    if (m_bootInitSent.contains(pSocket)) {
-        qDebug() << "[ChatServer] init already sent to client";
-        return;
-    }
-    m_bootInitSent.insert(pSocket);
-
-    // ✅ ส่ง 3 command เหมือนหน้าเว็บ
-    pSocket->sendTextMessage(QStringLiteral("{\"menuID\":\"getSystemPage\"}"));
-    pSocket->sendTextMessage(QStringLiteral("{\"menuID\":\"getSystemPageWeb\"}"));
-    pSocket->sendTextMessage(QStringLiteral("{\"menuID\":\"getVuMeter\"}"));
-
-    qDebug() << "[ChatServer] init commands sent -> getSystemPage/getSystemPageWeb/getVuMeter";
 }

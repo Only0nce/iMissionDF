@@ -128,13 +128,13 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
         }
     });
 
-//    int ret = pthread_create(&idThreadSqlWatcher, nullptr, ThreadFuncSqlWatcher, this);
-//    if(ret==0){
-//        qDebug() <<("Thread created successfully.\n");
-//    }
-//    // main thread (Mainwindows ctor/init)
-//    m_lastRecIsRecord = false;
-//    m_lastRecState = "UNKNOWN";
+    int ret = pthread_create(&idThreadSqlWatcher, nullptr, ThreadFuncSqlWatcher, this);
+    if(ret==0){
+        qDebug() <<("Thread created successfully.\n");
+    }
+    // main thread (Mainwindows ctor/init)
+    m_lastRecIsRecord = false;
+    m_lastRecState = "UNKNOWN";
 
     //    LogWatcher *watcher = new LogWatcher(this);
     //    connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
@@ -151,57 +151,20 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     //        }
     //    });
     //    watcher->startWatching("/tmp/alsarecd_production.log");
-//    LogWatcher *watcher = new LogWatcher(this);
-//    connect(watcher, &LogWatcher::stateChanged, this,
-//            [this](const QString &id, const QString &conn, const QString &state)
-//    {
-//        qDebug() << "[LogWatcher] stateChanged id=" << id
-//                 << "conn=" << conn
-//                 << "state=" << state;
-
-//        m_lastRecState = state;
-//        m_lastRecIsRecord = (state == "RECORD");
-//        recRunningCount = 0;
-
-//        qDebug() << "[LogWatcher] emit onRecStatusChanged =" << m_lastRecIsRecord;
-//        emit onRecStatusChanged(m_lastRecIsRecord);
-//    });
-
-//    watcher->startWatching("/tmp/alsarecd_id_1.log");
-    int retFindLog = pthread_create(&idThreadFindRecLog, nullptr, ThreadFuncFindRecLog, this);
-    if (retFindLog == 0) {
-        qDebug() << "Thread find rec log created successfully.";
-    } else {
-        qDebug() << "Thread find rec log not created.";
-    }
-    m_lastRecIsRecord = false;
-    m_lastRecState = "UNKNOWN";
-
     LogWatcher *watcher = new LogWatcher(this);
-    connect(m_logWatcher, &LogWatcher::stateChanged, this,
+    connect(watcher, &LogWatcher::stateChanged, this,
             [this](const QString &id, const QString &conn, const QString &state)
     {
-        const QString cleanState = state.trimmed().toUpper();
-
         qDebug() << "[LogWatcher] stateChanged id=" << id
                  << "conn=" << conn
-                 << "state=" << cleanState;
+                 << "state=" << state;
 
-        m_lastRecState = cleanState;
-        m_lastRecIsRecord = (cleanState == "RECORD");
+        m_lastRecState = state;
+        m_lastRecIsRecord = (state == "RECORD");
         recRunningCount = 0;
 
+        qDebug() << "[LogWatcher] emit onRecStatusChanged =" << m_lastRecIsRecord;
         emit onRecStatusChanged(m_lastRecIsRecord);
-
-        // 🔹 ส่ง SQL update ไป QML เหมือน logic เดิม
-        if ((cleanState == "RECORD") && (currentSQLValue == false))
-        {
-            onSQLChanged(currentSQLValue);
-        }
-        else if ((cleanState == "PAUSE") && (currentSQLValue == true))
-        {
-            onSQLChanged(currentSQLValue);
-        }
     });
 
     watcher->startWatching("/tmp/alsarecd_id_1.log");
@@ -283,29 +246,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     #endif
 
 }
-static QString findBestRecLogPath()
-{
-    QFileInfo f1("/tmp/alsarecd_id_1.log");
-    if (f1.exists() && f1.isFile())
-        return f1.absoluteFilePath();
 
-    // 2) fallback production
-    QFileInfo fProd("/tmp/alsarecd_production.log");
-    if (fProd.exists() && fProd.isFile())
-        return fProd.absoluteFilePath();
-
-    QDir dir("/tmp");
-    QFileInfoList list = dir.entryInfoList(
-        QStringList() << "alsarecd_id_*.log",
-        QDir::Files | QDir::Readable,
-        QDir::Time // ใหม่สุดก่อน
-    );
-
-    if (!list.isEmpty())
-        return list.first().absoluteFilePath();
-
-    return QString();
-}
 static bool splitIpCidrV4(const QString &cidr, QString &ip, QString &netmask, int &prefix)
 {
     ip.clear();
@@ -449,6 +390,7 @@ void Mainwindows::onSetFreqDone(quint64 freqHz, bool ok)
 {
     qWarning() << "[UI] setFreq done freqHz=" << freqHz << "ok=" << ok;
 
+    // ถ้าจะ update UI ทำที่นี่ได้เลย ปลอดภัย (กลับมา UI thread แล้ว)
 }
 
 void Mainwindows::onRecorderConfigSaved()
@@ -2462,59 +2404,26 @@ void Mainwindows::setLocation(QString location){
         timeLocation = location;
     }
 }
-void* Mainwindows::ThreadFuncFindRecLog(void* pTr)
+
+void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
 {
     Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
 
     while (pThis->m_threadRunning) {
-        const QString bestPath = findBestRecLogPath();
 
-        if (!bestPath.isEmpty()) {
-            if (pThis->m_currentWatchLogPath != bestPath || !pThis->m_logWatcherStarted) {
-                qDebug() << "[FindRecLog] found log path =" << bestPath;
+        const bool v = pThis->m_lastRecIsRecord;
 
-                pThis->m_currentWatchLogPath = bestPath;
-
-                QMetaObject::invokeMethod(pThis, [pThis, bestPath]() {
-                    if (!pThis->m_logWatcher)
-                        return;
-
-                    qDebug() << "[FindRecLog] startWatching =" << bestPath;
-                    pThis->m_logWatcher->startWatching(bestPath);
-                    pThis->m_logWatcherStarted = true;
-                }, Qt::QueuedConnection);
+        QMetaObject::invokeMethod(pThis, [pThis, v]() {
+            emit pThis->onRecStatusChanged(v);
+            if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
+                pThis->onSQLChanged(pThis->currentSQLValue);
             }
-        } else {
-            qDebug() << "[FindRecLog] no alsarecd log found in /tmp";
-        }
+        }, Qt::QueuedConnection);
 
-        QThread::sleep(1);
+        QThread::msleep(300);
     }
-
     return nullptr;
 }
-//void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
-//{
-//    Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
-
-//    while (pThis->m_threadRunning) {
-
-//        const bool v = pThis->m_lastRecIsRecord;
-
-//        QMetaObject::invokeMethod(pThis, [pThis, v]() {
-//            emit pThis->onRecStatusChanged(v);
-
-//            // ถ้าคุณอยากให้ SQL ถูกยิงซ้ำด้วย
-//            if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
-//                pThis->onSQLChanged(pThis->currentSQLValue);
-//            }
-//        }, Qt::QueuedConnection);
-
-//        QThread::msleep(300);
-//    }
-//    return nullptr;
-//}
-
 bool Mainwindows::setHwclockFromSystem()
 {
     int result = QProcess::execute("sudo",

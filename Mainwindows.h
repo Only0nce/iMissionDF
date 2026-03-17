@@ -23,7 +23,7 @@
 #include "alsarecconfigmanager.h"
 #include <QThread>
 #include "SetFreqWorker.h"
-#include "logwatcher.h"
+
 #pragma once
 
 #define GPA0   0
@@ -501,15 +501,9 @@ private:
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,1.0};
-//    static void* ThreadFuncSqlWatcher(void* pTr);
-//    typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
-//    pthread_t idThreadSqlWatcher;
-    LogWatcher *m_logWatcher = nullptr;
-    QString m_currentWatchLogPath;
-    static void* ThreadFuncFindRecLog(void* pTr);
-    pthread_t idThreadFindRecLog;
-    bool m_logWatcherStarted = false;
-
+    static void* ThreadFuncSqlWatcher(void* pTr);
+    typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
+    pthread_t idThreadSqlWatcher;
     std::atomic_bool m_threadRunning{true};
     QString m_lastRecState;     // เช่น "RECORD", "PAUSE"
     bool m_lastRecIsRecord = false;

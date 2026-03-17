@@ -169,6 +169,9 @@ public:
 
     void setBaseDir(const QString &dir) { m_txBaseDir = dir;}
 
+    Q_INVOKABLE void applyManualGps(double lat, double lon, double alt);
+    Q_INVOKABLE void disableManualGps1();
+    Q_INVOKABLE void disableManualGps2();
 
 signals:
     // EMIT  FROM cpp to /MainPage.qml
@@ -474,6 +477,14 @@ private:
         QString m_ipLocalForRemoteGroup = "10.10.0.20";
     };
 
+    struct ManualGpsConfig
+    {
+        bool enabled = false;
+        double lat = 0.0;
+        double lon = 0.0;
+        double alt = 0.0;
+    };
+
     Network *networks;
     NetworkServerKraken *netServerKraken;
     DatabaseDF *db;
@@ -514,6 +525,9 @@ private:
 
     //////////////connectCompassServer /////////////////////////////////
     CompassClient *m_compassClient = nullptr;
+
+    ManualGpsConfig m_manualGps1;
+    ManualGpsConfig m_manualGps2;
 
 private:
     QString m_imgBaseDir = "/var/www/html/image";

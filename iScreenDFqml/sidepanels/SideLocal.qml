@@ -1326,6 +1326,195 @@ Item {
                         }
                     }
                 }
+                /* ===== Location ===== */
+                Label {
+                    text: "Location"
+                    font.pixelSize: 20
+                    font.bold: true
+                    color: "#ffffff"
+                }
+
+                GridLayout {
+                    id: locationLayout
+                    columns: 2
+                    rowSpacing: 20
+                    columnSpacing: 30
+                    Layout.fillWidth: true
+
+                    property bool manualMode: gpsModeCombo.currentIndex === 1
+
+                    Label { text: "Mode:"; font.pixelSize: 16; color: "#ffffff" }
+
+                    ComboBox {
+                        id: gpsModeCombo
+                        Layout.preferredWidth: 220
+                        Layout.preferredHeight: 40
+                        font.pixelSize: 16
+                        model: ["Auto", "Manual"]
+                        currentIndex: 0
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: "#1B8F77"
+                            border.width: 1
+                        }
+
+                        contentItem: Text {
+                            text: gpsModeCombo.displayText
+                            color: "#7AE2CF"
+                            font.pixelSize: 16
+                            verticalAlignment: Text.AlignVCenter
+                            leftPadding: 10
+                            elide: Text.ElideRight
+                        }
+
+                        delegate: ItemDelegate {
+                            width: gpsModeCombo.width
+                            contentItem: Text {
+                                text: modelData
+                                color: "#7AE2CF"
+                                font.pixelSize: 16
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 10
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        onCurrentIndexChanged: {
+                            locationLayout.manualMode = (currentIndex === 1)
+
+                            if (!krakenmapval)
+                                return
+
+                            if (!locationLayout.manualMode) {
+                                if (typeof krakenmapval.disableManualGps1 === "function")
+                                    krakenmapval.disableManualGps1()
+                                if (typeof krakenmapval.disableManualGps2 === "function")
+                                    krakenmapval.disableManualGps2()
+                            }
+                        }
+                    }
+
+                    Label { text: "Latitude:"; font.pixelSize: 16; color: "#ffffff" }
+                    TextField {
+                        id: latitudeInput
+                        Layout.preferredWidth: 220
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 16
+                        color: locationLayout.manualMode ? "#7AE2CF" : "#1B8F77"
+                        placeholderText: "e.g. 13.756331"
+                        placeholderTextColor: "#888"
+                        readOnly: !locationLayout.manualMode
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignLeft
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 4
+                        bottomPadding: 4
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        validator: DoubleValidator { bottom: -90.0; top: 90.0; decimals: 6 }
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: latitudeInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                            border.width: 1
+                            opacity: locationLayout.manualMode ? 1.0 : 0.75
+                        }
+                    }
+
+                    Label { text: "Longitude:"; font.pixelSize: 16; color: "#ffffff" }
+                    TextField {
+                        id: longitudeInput
+                        Layout.preferredWidth: 220
+                        Layout.preferredHeight: 32
+                        font.pixelSize: 16
+                        color: locationLayout.manualMode ? "#7AE2CF" : "#1B8F77"
+                        placeholderText: "e.g. 100.501762"
+                        placeholderTextColor: "#888"
+                        readOnly: !locationLayout.manualMode
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignLeft
+                        leftPadding: 10
+                        rightPadding: 10
+                        topPadding: 4
+                        bottomPadding: 4
+                        inputMethodHints: Qt.ImhFormattedNumbersOnly
+                        validator: DoubleValidator { bottom: -180.0; top: 180.0; decimals: 6 }
+
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: longitudeInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                            border.width: 1
+                            opacity: locationLayout.manualMode ? 1.0 : 0.75
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    RowLayout {
+                        Layout.columnSpan: 2
+                        Layout.fillWidth: true
+                        spacing: 10
+                        visible: locationLayout.manualMode
+
+                        Button {
+                            id: applyAllGpsButton
+                            text: "Apply to GPS"
+                            Layout.preferredWidth: 220
+                            Layout.preferredHeight: 40
+
+                            background: Rectangle {
+                                radius: 8
+                                color: applyAllGpsButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
+                            }
+
+                            contentItem: Text {
+                                text: applyAllGpsButton.text
+                                anchors.centerIn: parent
+                                color: "#212121"
+                                font.pixelSize: 15
+                                font.bold: true
+                            }
+
+                            onClicked: {
+                                if (!krakenmapval) return
+
+                                var lat = Number(latitudeInput.text)
+                                var lon = Number(longitudeInput.text)
+
+                                if (!isFinite(lat) || !isFinite(lon)) {
+                                    console.log("[QML] invalid manual GPS input")
+                                    return
+                                }
+
+                                if (typeof krakenmapval.applyManualGps === "function") {
+                                    krakenmapval.applyManualGps(lat, lon, 0.0)
+                                    console.log("[QML] applyManualGps:", lat, lon, 0.0)
+                                } else {
+                                    console.log("[QML] krakenmapval.applyManualGps is not available")
+                                }
+                            }
+                        }
+                    }
+
+                    Connections {
+                        target: krakenmapval
+
+                        function onUpdateLocationLatLongFromGPS(latStr, lonStr, altStr, utmText, mgrsText) {
+                            if (locationLayout.manualMode)
+                                return
+
+                            if (!latitudeInput.activeFocus)
+                                latitudeInput.text = String(latStr)
+
+                            if (!longitudeInput.activeFocus)
+                                longitudeInput.text = String(lonStr)
+                        }
+                    }
+                }
 
                 /* ===== Compass ===== */
                 Label {
