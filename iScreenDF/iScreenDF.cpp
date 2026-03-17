@@ -304,92 +304,136 @@ static void latLonToUTMAndMGRS(double lat, double lon, QString &utmStr, QString 
 
 void iScreenDF::gps1Updated(const GPSInfo &info)
 {
-    // const QString message = makeGpsJson("GPS1", info);
-    // if (chatServer) {
-    //     chatServer->broadcastMessage(message);
-    // }
-    // state1_ = info;
-    // updatePpsCtl();
-    double adjLon = info.lon + 0.05;
-    QString latStr = QString::number(info.lat, 'f', 6);
-    QString lonStr = QString::number(info.lon, 'f', 6);
-    QString altStr = QString::number(info.alt, 'f', 4);
+    const bool good = isGoodFix(info);
 
-    QDateTime t = QDateTime::fromString(info.date + " " + info.time, "yyyy-MM-dd HH:mm:ss.zzz");
-    t = t.toLocalTime();
-    QString GPS_TimeStr = t.time().toString("HH:mm:ss");
-    QString GPS_DateStr = t.date().toString("yyyy-MM-dd");
+    // เวลา (ถ้า parse ไม่ได้ ให้ใช้ raw)
+    QDateTime t = parseGpsDateTimeLocalSafe(info.date, info.time);
+    QString GPS_TimeStr = t.isValid() ? t.time().toString("HH:mm:ss") : info.time;
+    QString GPS_DateStr = t.isValid() ? t.date().toString("yyyy-MM-dd") : info.date;
 
-    // ✅ UTM
+    // เตรียมค่าที่จะส่ง (good ใช้ของใหม่, ไม่ good ใช้ last)
+    double lat = info.lat;
+    double lon = info.lon;
+    double alt = info.alt;
     QString utmStr, mgrsStr;
-    latLonToUTMAndMGRS(info.lat, info.lon, utmStr, mgrsStr, 5);
 
-    emit updateLocationLatLongFromGPS(
-        latStr,
-        lonStr,
-        altStr,
-        utmStr,
-        mgrsStr
-        );
+    bool fallback = false;
 
+    if (good) {
+        latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
+
+        // เก็บ last good
+        m_lastGps1.valid = true;
+        m_lastGps1.lat   = lat;
+        m_lastGps1.lon   = lon;
+        m_lastGps1.alt   = std::isfinite(alt) ? alt : 0.0;
+        m_lastGps1.date  = GPS_DateStr;
+        m_lastGps1.time  = GPS_TimeStr;
+        m_lastGps1.utm   = utmStr;
+        m_lastGps1.mgrs  = mgrsStr;
+
+    } else if (m_lastGps1.valid) {
+        // ✅ fallback ใช้ค่าก่อนหน้า
+        fallback = true;
+        lat      = m_lastGps1.lat;
+        lon      = m_lastGps1.lon;
+        alt      = m_lastGps1.alt;
+        GPS_DateStr = m_lastGps1.date;
+        GPS_TimeStr = m_lastGps1.time;
+        utmStr   = m_lastGps1.utm;
+        mgrsStr  = m_lastGps1.mgrs;
+    } else {
+        // ยังไม่มี last good เลย -> ไม่ส่ง marker/utm (กัน 0)
+        qDebug() << "[GPS1] no fix and no last -> skip marker";
+        return;
+    }
+
+    // --- UI/QML ---
+    const QString latStr = QString::number(lat, 'f', 6);
+    const QString lonStr = QString::number(lon, 'f', 6);
+    const QString altStr = QString::number(alt, 'f', 4);
+
+    emit updateLocationLatLongFromGPS(latStr, lonStr, altStr, utmStr, mgrsStr);
     emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
 
-    emit updateGpsMarker(Serialnumber ,controllerName,info.lat,info.lon,info.alt,GPS_DateStr,GPS_TimeStr);
+    // ✅ ปักหมุดด้วยค่าที่เลือกแล้ว (good หรือ fallback)
+    emit updateGpsMarker(Serialnumber, controllerName, lat, lon, alt, GPS_DateStr, GPS_TimeStr);
 
+    // อัปเดต state เก็บไว้ด้วย (ถ้าจะใช้ภายหลัง)
     state1_ = info;
 
+    // --- WebSocket ---
     if (chatServerDF) {
         QJsonObject obj;
-        obj["menuID"]   = "UpdateGPSMarker";  // ฝั่ง JS เช็คจาก menuID นี้
-        obj["source"]   = "GPS1";             // แยกหมุด GPS1 / GPS2
-        obj["lat"]      = info.lat;          // ใช้ double ตรง ๆ
-        obj["lon"]      = info.lon;
-        obj["alt"]      = info.alt;
+        obj["menuID"]   = "UpdateGPSMarker";
+        obj["source"]   = "GPS1";
+        obj["locked"]   = (info.locked == 1);
+        obj["satUse"]   = info.satUse;
+        obj["fallback"] = fallback;     // ✅ บอกฝั่งเว็บว่าใช้ค่าก่อนหน้า
+        obj["lat"]      = lat;
+        obj["lon"]      = lon;
+        obj["alt"]      = alt;
         obj["date"]     = GPS_DateStr;
         obj["time"]     = GPS_TimeStr;
+        obj["utm"]      = utmStr;
+        obj["mgrs"]     = mgrsStr;
 
-        // optional: raw string จาก GPS
+        // raw จาก gpsd (เอาไว้ debug)
         obj["raw_date"] = info.date;
         obj["raw_time"] = info.time;
 
-        QJsonDocument doc(obj);
-        const QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+        const QString jsonStr = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
         chatServerDF->broadcastMessage(jsonStr);
-
         broadcastMessageServerandClient(obj);
-        // qDebug() << "[gps1Updated] broadcast:" << jsonStr;
     }
 }
 
 void iScreenDF::gps2Updated(const GPSInfo &info)
 {
-    // const QString message = makeGpsJson("GPS2", info);
-    // if (chatServer) {
-    //     chatServer->broadcastMessage(message);
-    // }
-    // state2_ = info;
-    // updatePpsCtl();
-    QString latStr = QString::number(info.lat, 'f', 6);
-    QString lonStr = QString::number(info.lon, 'f', 6);
-    QString altStr = QString::number(info.alt, 'f', 4);
+    const bool good = isGoodFix(info);
 
-    QDateTime t = QDateTime::fromString(info.date + " " + info.time, "yyyy-MM-dd HH:mm:ss.zzz");
-    t = t.toLocalTime();
-    QString GPS_TimeStr = t.time().toString("HH:mm:ss");
-    QString GPS_DateStr = t.date().toString("yyyy-MM-dd");
+    QDateTime t = parseGpsDateTimeLocalSafe(info.date, info.time);
+    QString GPS_TimeStr = t.isValid() ? t.time().toString("HH:mm:ss") : info.time;
+    QString GPS_DateStr = t.isValid() ? t.date().toString("yyyy-MM-dd") : info.date;
 
-    // ✅ UTM
+    double lat = info.lat;
+    double lon = info.lon;
+    double alt = info.alt;
     QString utmStr, mgrsStr;
-    latLonToUTMAndMGRS(info.lat, info.lon, utmStr, mgrsStr, 5);
+    bool fallback = false;
 
-    emit updateLocationLatLongFromGPS(
-        latStr,
-        lonStr,
-        altStr,
-        utmStr,
-        mgrsStr
-        );
+    if (good) {
+        latLonToUTMAndMGRS(lat, lon, utmStr, mgrsStr, 5);
 
+        m_lastGps2.valid = true;
+        m_lastGps2.lat   = lat;
+        m_lastGps2.lon   = lon;
+        m_lastGps2.alt   = std::isfinite(alt) ? alt : 0.0;
+        m_lastGps2.date  = GPS_DateStr;
+        m_lastGps2.time  = GPS_TimeStr;
+        m_lastGps2.utm   = utmStr;
+        m_lastGps2.mgrs  = mgrsStr;
+
+    } else if (m_lastGps2.valid) {
+        fallback = true;
+        lat      = m_lastGps2.lat;
+        lon      = m_lastGps2.lon;
+        alt      = m_lastGps2.alt;
+        GPS_DateStr = m_lastGps2.date;
+        GPS_TimeStr = m_lastGps2.time;
+        utmStr   = m_lastGps2.utm;
+        mgrsStr  = m_lastGps2.mgrs;
+    } else {
+        qDebug() << "[GPS2] no fix and no last -> skip marker";
+        return;
+    }
+
+    // ถ้าคุณไม่ต้องการ update UI ด้วย GPS2 ให้คอมเมนต์ส่วน emit QML ตรงนี้ได้
+    const QString latStr = QString::number(lat, 'f', 6);
+    const QString lonStr = QString::number(lon, 'f', 6);
+    const QString altStr = QString::number(alt, 'f', 4);
+
+    emit updateLocationLatLongFromGPS(latStr, lonStr, altStr, utmStr, mgrsStr);
     emit updatecurrentFromGPSTime(GPS_DateStr, GPS_TimeStr);
 
     state2_ = info;
@@ -397,20 +441,23 @@ void iScreenDF::gps2Updated(const GPSInfo &info)
     if (chatServerDF) {
         QJsonObject obj;
         obj["menuID"]   = "UpdateGPSMarker";
-        obj["source"]   = "GPS2";             // ระบุว่าเป็น GPS2
-        obj["lat"]      = info.lat;
-        obj["lon"]      = info.lon;
-        obj["alt"]      = info.alt;
+        obj["source"]   = "GPS2";
+        obj["locked"]   = (info.locked == 1);
+        obj["satUse"]   = info.satUse;
+        obj["fallback"] = fallback;
+        obj["lat"]      = lat;
+        obj["lon"]      = lon;
+        obj["alt"]      = alt;
         obj["date"]     = GPS_DateStr;
         obj["time"]     = GPS_TimeStr;
+        obj["utm"]      = utmStr;
+        obj["mgrs"]     = mgrsStr;
         obj["raw_date"] = info.date;
         obj["raw_time"] = info.time;
 
-        QJsonDocument doc(obj);
-        const QString jsonStr = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
+        const QString jsonStr = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
         chatServerDF->broadcastMessage(jsonStr);
         broadcastMessageServerandClient(obj);
-        // qDebug() << "[gps2Updated] broadcast:" << jsonStr;
     }
 }
 /////////////////////////////GPSInfo END//////////////////////////////////////////////
@@ -420,17 +467,18 @@ void iScreenDF::gps2Updated(const GPSInfo &info)
 ///
 void iScreenDF::gpioInit()
 {
-
+#ifdef PLATFORM_JETSON
     displaysetting = new newGPIOClassDF(GPIO_SETUP_DISPLAY);
 
     displaysetting->requestOutput();
     QThread::msleep(200);
     displaysetting->setValue(true);
-    // QThread::msleep(200);
-    // qDebug() << "GPIO_SETUP_DISPLAY";
-    // displaysetting->setValue(false);
-    // QThread::msleep(200);
-    // displaysetting->setValue(true);
+// QThread::msleep(200);
+// qDebug() << "GPIO_SETUP_DISPLAY";
+// displaysetting->setValue(false);
+// QThread::msleep(200);
+// displaysetting->setValue(true);
+#endif
 }
 
 

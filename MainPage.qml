@@ -17,7 +17,6 @@ Item {
     id: mainPage
     width: 1920
     height: 1080
-
     property bool savedDaqVisible: true
     property bool savelockFadeButton: true
     Material.theme: Material.Dark
@@ -526,19 +525,36 @@ Item {
 
     PopupSettingDrawer {
         id: popupSetting
-        width: 1100
-        height: 600
-        anchors.top: loader.bottom
-        anchors.bottom: loader.top
-        anchors.leftMargin: -1417
-        anchors.rightMargin: -1603
-        anchors.topMargin: -990
-        anchors.bottomMargin: -690
         z: 10000
         visible: false
-        anchors.left: loader.right
-        anchors.right: loader.left
         krakenmapval: Krakenmapval
+
+        // ===== Responsive size =====
+        // อิง design 1920x1080 (เหมือนหน้าอื่น)
+        readonly property real designW: 1920
+        readonly property real designH: 1080
+        readonly property real uiScale: Math.max(0.6, Math.min(parent.width / designW, parent.height / designH))
+        function dp(v) { return Math.round(v * uiScale) }
+        function clamp(v, mn, mx) { return Math.max(mn, Math.min(mx, v)) }
+
+        // target size (จากเดิม 1100x600)
+        readonly property int targetW: dp(1100)
+        readonly property int targetH: dp(600)
+
+        // จำกัดไม่ให้ล้นจอ + เว้นขอบ
+        width:  clamp(targetW, dp(520), parent.width  - dp(40))
+        height: clamp(targetH, dp(360), parent.height - dp(80))
+
+        // ===== Placement =====
+        // วางกลางจอเสมอ (ไม่ต้องใช้ margin ติดลบ)
+        anchors.centerIn: parent
+
+        // ถ้าคุณอยากให้ยึดกับ loader แต่ยัง responsive:
+        // anchors.centerIn: loader
+
+        // กันหลุดขอบเวลาจอเล็กมาก
+        // (Popup บางตัวมี shadow/rounded ต้องเว้นขอบ)
+        anchors.margins: dp(10)
     }
 
     TopNetworkDrawer {

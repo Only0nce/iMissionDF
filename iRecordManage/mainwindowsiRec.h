@@ -89,7 +89,7 @@ public slots:
     void cppSubmitTextFiled(QString qmlJson);
     void startRuntime();
     void getDateTime();
-    void checkAndUpdateRTC();
+    // void checkAndUpdateRTC();
     void cppSubmitTextFiledMySQL(QString qmlJson);
     void recordDeviceLiveStream(QString,QWebSocket*);
     void deviceStatus(QString);
@@ -201,7 +201,7 @@ private:
     bool serverInit = false;
     void RestartSystemServicesAfter30s();
 
-//========================================================================
+    //========================================================================
     struct CpuStatSnap {
         quint64 idleAll = 0;
         quint64 nonIdle = 0;
@@ -263,9 +263,9 @@ private:
     NetSnap m_prevNet;
     // helpers
 
-//========================================================================
+    //========================================================================
 private slots:
-    void InitializingRTCtoSystem();
+    // void InitializingRTCtoSystem();
     void recLogging(int softPhoneID, int recorderID,QString recState, QString message);
     void VerifyFolderAndText();
     void installFfmpegIfNeeded();

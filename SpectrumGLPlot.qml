@@ -1,9 +1,14 @@
+// SpectrumGLPlot.qml  (FULL FILE)
+// ✅ Fix4: Cached grid (works on x86 + Jetson)
+// ✅ Fix CPU: remove paint-loop, add 30fps throttle
+// ✅ Fix labels: X axis labels on TOP (no overlap)
+// ✅ IMPORTANT: This file MUST NOT instantiate SpectrumGLPlot inside itself (prevents recursive instantiation)
+
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
 import QtQuick.Controls.Material 2.4
 import QtQuick.Layouts 1.0
-// import QtGraphicalEffects 1.15
 import "ui"
 
 Item {
@@ -16,21 +21,21 @@ Item {
     property real plotWidth: root.width
     property real dataCount : 0
     property real smeterLevel: -100
-    property var spectrumData: []
-    property var waterfallBuffer: []
-    property var waterfallColorMap: []
+    property var  spectrumData: []
+    property var  waterfallBuffer: []
+    property var  waterfallColorMap: []
     property real smeterBuffered: smeterLevel
 
     signal spectrumUpdated(var spectrum)
     signal waterfallUpdated(var line)
     signal waterfallColorUpdate(var colors)
 
-    property var maxHoldKept: []
-    property var peakVal: []
+    property var  maxHoldKept: []
+    property var  peakVal: []
     property bool rfScannerInterlock: false
 
-    property real centerFreq: mainWindows.center_freq()    // in Hz
-    property int sampRate: mainWindows.samp_rate()        // in Hz
+    property real centerFreq: mainWindows.center_freq()    // Hz
+    property int  sampRate:   mainWindows.samp_rate()      // Hz
 
     property real waterfallMinDb: -100
     property real waterfallMaxDb: 0
@@ -38,17 +43,16 @@ Item {
     property real waterfallMin: -100
     property alias autoScaleTimer: autoScaleTimer
 
-    property real offsetFrequency: 0      // in Hz
-    property int bandwidth: high_cut-low_cut         // in Hz
-    property int low_cut: bwModel.get(scanBwSelected).low_cut
-    property int high_cut: bwModel.get(scanBwSelected).high_cut
-    property int offsetSnapStep: 100   // in Hz (e.g. 12.5 kHz)
+    property real offsetFrequency: 0      // Hz
+    property int  bandwidth: high_cut - low_cut
+    property int  low_cut:  bwModel.get(scanBwSelected).low_cut
+    property int  high_cut: bwModel.get(scanBwSelected).high_cut
+    property int  offsetSnapStep: 100     // Hz
 
     property bool autoScaleEnabled: false
 
-    // property int sampRate: 2500000  // initial span in Hz
-    property int sampRateMin: 50000
-    property int sampRateMax: 24.576e6
+    property int  sampRateMin: 50000
+    property int  sampRateMax: 24.576e6
     property real zoomStep: root.width
     property string start_mod: ""
     property real xPos: 0
@@ -56,17 +60,30 @@ Item {
     property bool initFreq: false
 
     property int offsetStart: -1600000
-    property int offsetStop:  1600000
-    property int offsetStep:  1000
-    property int dwellMs:     500
+    property int offsetStop:   1600000
+    property int offsetStep:   1000
+    property int dwellMs:      500
     property int currentOffset: offsetStart
     property bool scanning: false
 
     property int keptStart: 0
     property int profileViewIndex: 0
 
-    Theme{
-        id: theme
+    Theme { id: theme }
+
+    // ============================================================
+    // ✅ FIX CPU: throttle spectrum paint (30fps)
+    // ============================================================
+    Timer {
+        id: spectrumPaintTimer
+        interval: 33
+        repeat: false
+        onTriggered: spectrumCanvas.requestPaint()
+    }
+
+    function scheduleSpectrumPaint() {
+        if (!spectrumPaintTimer.running)
+            spectrumPaintTimer.start()
     }
 
     // ===== Timer ที่ใช้แทน for loop =====
@@ -76,98 +93,72 @@ Item {
         repeat: true
         running: false
         onTriggered: {
-            // ตั้งค่า offset ใหม่
-            offsetFrequency = currentOffset      // <- ค่านี้คุณส่งไป backend ได้ เช่น mainWindows.sendOffset(offsetFrequency)
-            console.log("offset =", offsetFrequency)
-
-            // เพิ่มค่า
+            offsetFrequency = currentOffset
             currentOffset += offsetStep
-
-            // ถึงขอบบนแล้วหยุด
-            if (currentOffset > offsetStop) {
-                stopScan()
-            }
+            if (currentOffset > offsetStop) stopScan()
         }
     }
 
     function startScan() {
-        if (scanning)
-            return
+        if (scanning) return
         currentOffset = offsetStart
         scanning = true
         scanTimer.start()
-        console.log("scan started")
     }
 
     function stopScan() {
         scanning = false
         scanTimer.stop()
-        console.log("scan stopped")
     }
 
-
     onBandwidthChanged: {
-        console.log("Bandwidth:",bandwidth,low_cut,high_cut)
+        console.log("Bandwidth:", bandwidth, low_cut, high_cut)
     }
 
     onStart_modChanged: {
         let idx = getReceiverIndex(start_mod);
-        console.log("onStart_modChanged index:", idx);
-        if (idx !== -1) {
-            scanReceiverModeSelected = idx;
-            console.log("Selected index:", idx);
-        }
+        if (idx !== -1) scanReceiverModeSelected = idx;
         currentModIndex = scanReceiverModeSelected
     }
 
     onOffsetFrequencyChanged: {
-        // console.log("onOffsetFrequencyChanged")
-        if (((centerFreq+offsetFrequency) > (centerFreq+(sampRate/2))) || ((centerFreq+offsetFrequency) < (centerFreq-(sampRate/2)))){
-            centerFreq = centerFreq+offsetFrequency
+        if (((centerFreq + offsetFrequency) > (centerFreq + (sampRate / 2))) ||
+            ((centerFreq + offsetFrequency) < (centerFreq - (sampRate / 2)))) {
+            centerFreq = centerFreq + offsetFrequency
             offsetFrequency = 0
-            mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":'+ centerFreq +',"key":"memagic"}}')
+            mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFreq + ',"key":"memagic"}}')
+            updateFrequency()
+        } else {
+            mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
+            freqScan = centerFreq + offsetFrequency
             updateFrequency()
         }
-        else
-        {
-            mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": '+offsetFrequency+'}}')
-            freqScan = centerFreq+offsetFrequency
-            // console.log("freqScan" , freqScan)
-            updateFrequency()
-        }
-        mainWindows.updateCurrentOffsetFreq(offsetFrequency,centerFreq)
+        mainWindows.updateCurrentOffsetFreq(offsetFrequency, centerFreq)
     }
 
-
-    onCenterFreqChanged:
-    {
-        // console.log("onCenterFreqChanged")
+    onCenterFreqChanged: {
         spectrumCanvas.clearPeakTimer.start()
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
-    onSetCenterFreqChanged:
-    {
-        // console.log("onSetCenterFreqChanged")
-        if (setCenterFreq != centerFreq)
-        {
-            mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":'+ setCenterFreq +',"key":"memagic"}}')
+    onSetCenterFreqChanged: {
+        if (setCenterFreq !== centerFreq) {
+            mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + setCenterFreq + ',"key":"memagic"}}')
         }
         spectrumCanvas.clearPeakTimer.start()
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
-
 
     onSampRateChanged: {
-        spectrumCanvas.requestPaint();
-        waterfallCanvas.requestPaint();
-        overlayCanvas.requestPaint();
-        // if (initFreq == false){
-        //     if (centerFreq != 0){
-        //         mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":'+ centerFreq +',"key":"memagic"}}')
-        //         mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": '+offsetFrequency+'}}')
-        //         initFreq = true
-        //     }
-        // }
+        scheduleSpectrumPaint()
+        waterfallCanvas.requestPaint()
+        overlayCanvas.requestPaint()
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
+
+    onWaterfallMinDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
+    onWaterfallMaxDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
+
     Component.onCompleted: {
         mainWindows.updateCenterFreq.connect(updateCenterFreq)
 
@@ -176,76 +167,47 @@ Item {
         mainWindows.waterfallColorUpdate.connect(waterfallColorUpdate)
 
         mainWindows.findBandsWithProfile.connect(findBandsWithProfile)
-        // mainWindows.waterfallLevelsChanged.connect(function(levelsmin, levelsmax) {
-        //     console.log("Updated waterfall range:",levelsmin,levelsmax)
-        //     updateWaterfallLevels(levelsmin, levelsmax)
-        // })
-
 
         mainWindows.smeterValueUpdated.connect(function(smeter) {
             smeterValueUpdated(smeter)
         })
 
-    }
-
-    function temperature(value)
-    {
-
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
     function setOffset(freqOffset) {
         offsetFrequency = freqOffset;
-        // if (offsetFrequency > sampRate/2){
-        //     setCenterFreq = centerFreq+(sampRate/2);
-        //     offsetFrequency = 0;
-        // }
-        // if (offsetFrequency < sampRate/(-2)) {
-        //     setCenterFreq = centerFreq-(sampRate/2);
-        //     offsetFrequency = 0;
-        // }
-        // overlayCanvas.requestPaint();       // if you show offset visually
-        // spectrumCanvas.requestPaint();      // update spectrum
-        // waterfallCanvas.requestPaint();     // update waterfall
     }
 
-    function setManualOffset(freq)
-    {
-        let freqOffset = freq-centerFreq
+    function setManualOffset(freq) {
+        let freqOffset = freq - centerFreq
         offsetFrequency = freqOffset;
-        console.log("setManualOffset",freq, " freqOffset",freqOffset)
-        overlayCanvas.requestPaint();       // if you show offset visually
-        spectrumCanvas.requestPaint();      // update spectrum
-        waterfallCanvas.requestPaint();     // update waterfall
+        overlayCanvas.requestPaint()
+        scheduleSpectrumPaint()
+        waterfallCanvas.requestPaint()
     }
 
     function zoomIn() {
         plotWidth += zoomStep
-        if (plotWidth > root.width*20)
-            plotWidth = root.width*20
-
+        if (plotWidth > root.width * 20) plotWidth = root.width * 20
         applyZoom()
     }
 
     function zoomOut() {
         plotWidth -= zoomStep
-        if (plotWidth < root.width)
-            plotWidth = root.width
-
+        if (plotWidth < root.width) plotWidth = root.width
         applyZoom()
     }
 
     function applyZoom() {
-        spectrumCanvas.requestPaint();
-        waterfallCanvas.requestPaint();
-        overlayCanvas.requestPaint();
+        scheduleSpectrumPaint()
+        waterfallCanvas.requestPaint()
+        overlayCanvas.requestPaint()
         zoomNav.rectangle.opacity = 1
-        console.log("applyZoom",plotWidth,"xPos",xPos)
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
-    function smeterValueUpdated(smeter)
-    {
-        smeterLevel = smeter
-    }
+    function smeterValueUpdated(smeter) { smeterLevel = smeter }
 
     function updateWaterfallLevels(minDb, maxDb) {
         waterfallMinDb = minDb;
@@ -254,53 +216,46 @@ Item {
         waterfallScaleControl.waterfallMaxDb = waterfallMaxDb
     }
 
-    function updateCenterFreq()
-    {
+    function updateCenterFreq() {
         sampRate = mainWindows.samp_rate()
         centerFreq = mainWindows.center_freq()
         sampRateMax = mainWindows.samp_rate()
         start_mod = mainWindows.start_mod()
-        console.log("mainWindows.start_mod()",mainWindows.start_mod()," start_mod",start_mod)
         freqScan = centerFreq
         updateFrequency()
-        resetCenterFreqTimer.start();
+        resetCenterFreqTimer.start()
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
     function autoScaleWaterfallColor() {
-        if (waterfallBuffer.length === 0)
-            return;
-
+        if (waterfallBuffer.length === 0) return;
         var latestLine = waterfallBuffer[waterfallBuffer.length - 1];
-        if (!latestLine || latestLine.length < 2)
-            return;
+        if (!latestLine || latestLine.length < 2) return;
 
         var minVal = latestLine[0];
         var maxVal = latestLine[0];
-
         for (var i = 1; i < latestLine.length; ++i) {
             var v = latestLine[i];
             if (v < minVal) minVal = v;
             if (v > maxVal) maxVal = v;
         }
 
-        // Clamp to avoid over-scaling
         waterfallMin = Math.max(minVal - 5, -120);
         waterfallMax = Math.min(maxVal + 5, 0);
 
         waterfallMinDb = waterfallMin < waterfallMinDb ? waterfallMin : waterfallMinDb
         waterfallMaxDb = waterfallMax > waterfallMaxDb ? waterfallMax : waterfallMaxDb
 
-        console.log("Auto-scaled waterfall:", waterfallMinDb, waterfallMaxDb);
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
-    function resetCenterFreq()
-    {
-        if (initFreq == false){
-            if (centerFreq != 0){
+    function resetCenterFreq() {
+        if (initFreq === false) {
+            if (centerFreq !== 0) {
                 let centerFrequency = centerFreq;
-                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":'+ 30000000 +',"key":"memagic"}}')
-                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":'+ centerFrequency +',"key":"memagic"}}')
-                mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": '+offsetFrequency+'}}')
+                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + 30000000 + ',"key":"memagic"}}')
+                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFrequency + ',"key":"memagic"}}')
+                mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
                 initFreq = true
             }
         }
@@ -308,7 +263,7 @@ Item {
 
     Timer {
         id: resetCenterFreqTimer
-        interval: 1000  // ms
+        interval: 1000
         repeat: false
         running: false
         onTriggered: resetCenterFreq()
@@ -316,25 +271,153 @@ Item {
 
     Timer {
         id: autoScaleTimer
-        interval: 500  // ms
+        interval: 500
         repeat: true
         running: autoScaleEnabled
         onTriggered: autoScaleWaterfallColor()
     }
 
+    /* ============================================================
+       ✅ Fix4: Cached grid canvas (X axis on TOP, works x86+Jetson)
+       - DO NOT set visible:false (x86 often won't render => drawImage blank)
+       ============================================================ */
+    Canvas {
+        id: spectrumGridCanvas
+        width: spectrumCanvas.width
+        height: spectrumCanvas.height
+
+        visible: true
+        opacity: 0.0
+        z: -1000
+
+        renderTarget: Canvas.FramebufferObject
+        renderStrategy: Canvas.Immediate
+        antialiasing: false
+        smooth: false
+
+        property bool ready: false
+
+        function invalidate() {
+            ready = false
+            requestPaint()
+        }
+
+        onWidthChanged:  invalidate()
+        onHeightChanged: invalidate()
+
+        onPaint: {
+            var ctx = getContext("2d")
+            var w = width
+            var h = height
+            ctx.clearRect(0, 0, w, h)
+            if (w < 2 || h < 2) return
+
+            const minDb = root.waterfallMinDb
+            const maxDb = root.waterfallMaxDb
+            const rangeDb = Math.max(1e-6, (maxDb - minDb))
+
+            // ===== Y grid + dB labels =====
+            ctx.strokeStyle = theme.gridLine
+            ctx.lineWidth = 1
+            ctx.font = "11px monospace"
+            ctx.fillStyle = theme.axisText
+
+            for (var db = minDb; db <= maxDb; db += 10) {
+                let y = h - ((db - minDb) / rangeDb) * h
+                ctx.beginPath()
+                ctx.moveTo(0, y)
+                ctx.lineTo(w, y)
+                ctx.stroke()
+                ctx.fillText(db.toFixed(0) + " dBm ", 4, y - 2)
+            }
+
+            // ===== X axis (TOP) + freq labels =====
+            const xAxisH   = 18
+            const yAxisBot = xAxisH
+
+            let startFreq = root.centerFreq - root.sampRate / 2
+            let stopFreq  = root.centerFreq + root.sampRate / 2
+            let freqRange = Math.max(1, (stopFreq - startFreq))
+
+            // baseline (top axis line)
+            ctx.strokeStyle = theme.gridLine
+            ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.moveTo(0, yAxisBot)
+            ctx.lineTo(w, yAxisBot)
+            ctx.stroke()
+
+            // label step by pixel spacing
+            ctx.font = "11px monospace"
+            let pixelsPerHz = w / Math.max(1, root.sampRate)
+            let minLabelSpacingPx = 160
+            let rawStep = minLabelSpacingPx / Math.max(1e-12, pixelsPerHz)
+            let pow10 = Math.pow(10, Math.floor(Math.log10(rawStep)))
+            let freqStep = pow10
+            if (rawStep / pow10 >= 5) freqStep = 5 * pow10
+            else if (rawStep / pow10 >= 2) freqStep = 2 * pow10
+
+            ctx.strokeStyle = theme.gridLine
+            ctx.fillStyle = theme.axisText
+            ctx.lineWidth = 1
+
+            // ✅ anti-overlap: purely by X spacing
+            let lastX = -1e9
+
+            for (var f = Math.ceil(startFreq / freqStep) * freqStep; f <= stopFreq; f += freqStep) {
+                let x = ((f - startFreq) / freqRange) * w
+                if (!isFinite(x)) continue
+                if (x < 0) x = 0
+                if (x > w) x = w
+
+                // vertical grid line (start below top axis so it won't touch label)
+                ctx.beginPath()
+                ctx.moveTo(x, yAxisBot)
+                ctx.lineTo(x, h)
+                ctx.stroke()
+
+                // tick
+                ctx.beginPath()
+                ctx.moveTo(x, yAxisBot)
+                ctx.lineTo(x, yAxisBot + 6)
+                ctx.stroke()
+
+                // label
+                if (x - lastX < minLabelSpacingPx) continue
+                lastX = x
+
+                let label = (f / 1e6).toFixed(2) + " MHz"
+                let tw = ctx.measureText(label).width
+                if (!isFinite(tw) || tw <= 0) tw = label.length * 7
+
+                let lx = x - tw / 2
+                if (lx < 0) lx = 0
+                if (lx > w - tw) lx = w - tw
+
+                ctx.fillText(label, lx, 12)
+            }
+
+            ready = true
+
+            // ✅ IMPORTANT: grid finished -> paint spectrum once (no loop)
+            root.scheduleSpectrumPaint()
+        }
+    }
+
     Canvas {
         id: spectrumCanvas
         width: plotWidth
-        // height: rfScannerInterlock ? parent.height / 4 : parent.height / 2
         height: parent.height / 4
         renderTarget: Canvas.FramebufferObject
         renderStrategy: Canvas.Cooperative
         antialiasing: false
         smooth: false
         x: plotWidth > root.width ? zoomNav.rectangle.x * (plotWidth / root.width) * (-1) : 0
+
         property alias clearPeakTimer: clearPeakTimer
         property var maxHold: []
         property bool showMaxHold: true
+
         function clearPeaks() {
             maxHold = []
             maxHoldKept = []
@@ -347,93 +430,68 @@ Item {
             onTriggered: spectrumCanvas.clearPeaks()
         }
 
+        onWidthChanged:  { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
+        onHeightChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
+
         onPaint: {
             var ctx = getContext("2d");
-            var w = spectrumCanvas.width;
-            var h = spectrumCanvas.height;
+            var w = width;
+            var h = height;
 
             ctx.clearRect(0, 0, w, h);
 
-            if (spectrumData.length < 2)
+            if (!spectrumData || spectrumData.length < 2)
                 return;
 
-            const minDb = waterfallMinDb;
-            const maxDb = waterfallMaxDb;
-            const rangeDb = maxDb - minDb;
-
-            let startFreq = centerFreq - sampRate / 2;
-            let stopFreq = centerFreq + sampRate / 2;
-            let freqRange = stopFreq - startFreq;
-
-            let pixelsPerFreqHz = plotWidth / sampRate;
-            let minLabelSpacing = 200;
-
-            let rawStep = minLabelSpacing / pixelsPerFreqHz;
-            let pow10 = Math.pow(10, Math.floor(Math.log10(rawStep)));
-            let freqStep = pow10;
-
-            if (rawStep / pow10 >= 5) freqStep = 5 * pow10;
-            else if (rawStep / pow10 >= 2) freqStep = 2 * pow10;
-
-            // --- spectrumCanvas.onPaint: grid + labels ---
-            ctx.strokeStyle = theme.gridLine;
-            ctx.lineWidth = 1;
-            ctx.font = "11px monospace";
-            ctx.fillStyle = theme.axisText;
-
-            for (var db = minDb; db <= maxDb; db += 10) {
-                let y = h - ((db - minDb) / rangeDb) * h;
-                ctx.beginPath();
-                ctx.moveTo(0, y);
-                ctx.lineTo(w, y);
-                ctx.stroke();
-                let label = db.toFixed(0) + " dBm ";
-                ctx.fillText(label, 4, y - 2);
+            // ✅ draw cached grid ONLY if ready (no requestPaint here -> avoids CPU loop)
+            if (spectrumGridCanvas && spectrumGridCanvas.ready) {
+                ctx.drawImage(spectrumGridCanvas, 0, 0, w, h)
             }
 
-            ctx.strokeStyle = theme.spectrumLine;
-            ctx.lineWidth = 1;
-            ctx.font = "11px monospace";
-            ctx.fillStyle = "#aaa";
+            const minDb = root.waterfallMinDb;
+            const maxDb = root.waterfallMaxDb;
+            const rangeDb = Math.max(1e-6, (maxDb - minDb));
 
-            for (var freq = startFreq; freq <= stopFreq; freq += freqStep) {
-                let x = ((freq - startFreq) / freqRange) * plotWidth;
-                ctx.beginPath();
-                ctx.moveTo(x, 0);
-                ctx.lineTo(x, 8);
-                ctx.stroke();
-                let label = (freq / 1e6).toFixed(1) + " MHz";
-                ctx.fillText(label, x, 12);
-            }
+            const xAxisH = 18
+            const plotH = h - xAxisH
 
+            function yOf(v) { return plotH - ((v - minDb) / rangeDb) * plotH; }
+
+            // Spectrum line
             ctx.beginPath();
             ctx.strokeStyle = "#00FF00";
-            ctx.moveTo(0, h - ((spectrumData[0] - minDb) / rangeDb) * h);
+            ctx.lineWidth = 1;
+            ctx.moveTo(0, yOf(spectrumData[0]));
 
-            for (var i = 1; i < spectrumData.length; ++i) {
+            // (optional) speed: sample step by pixel width
+            let step = Math.max(1, Math.floor(spectrumData.length / Math.max(1, w)))
+            for (var i = step; i < spectrumData.length; i += step) {
                 let x = i / (spectrumData.length - 1) * w;
-                let y = h - ((spectrumData[i] - minDb) / rangeDb) * h;
+                let y = yOf(spectrumData[i]);
                 ctx.lineTo(x, y);
             }
             ctx.stroke();
 
-            // Max hold logic
-            for (var i = 0; i < spectrumData.length; ++i) {
+            // Max hold
+            for (var j = 0; j < spectrumData.length; ++j) {
                 if (maxHold.length < spectrumData.length)
-                    maxHold.push(spectrumData[i]);
-                else if (spectrumData[i] > maxHold[i])
-                    maxHold[i] = spectrumData[i];
+                    maxHold.push(spectrumData[j]);
+                else if (spectrumData[j] > maxHold[j])
+                    maxHold[j] = spectrumData[j];
             }
             maxHoldKept = maxHold
-            // console.log("maxHoldKept already kept data!")
+
             if (showMaxHold && maxHold.length === spectrumData.length) {
                 ctx.beginPath();
                 ctx.strokeStyle = theme.maxHoldLine;
-                ctx.moveTo(0, h - ((maxHold[0] - minDb) / rangeDb) * h);
-                for (var i = 1; i < maxHold.length; ++i) {
-                    let x = i / (maxHold.length - 1) * w;
-                    let y = h - ((maxHold[i] - minDb) / rangeDb) * h;
-                    ctx.lineTo(x, y);
+                ctx.lineWidth = 1;
+                ctx.moveTo(0, yOf(maxHold[0]));
+
+                let step2 = Math.max(1, Math.floor(maxHold.length / Math.max(1, w)))
+                for (var k = step2; k < maxHold.length; k += step2) {
+                    let x2 = k / (maxHold.length - 1) * w;
+                    let y2 = yOf(maxHold[k]);
+                    ctx.lineTo(x2, y2);
                 }
                 ctx.stroke();
             }
@@ -442,8 +500,8 @@ Item {
         Connections {
             target: root
             function onSpectrumUpdated(spectrum) {
-                spectrumData = spectrum;
-                spectrumCanvas.requestPaint();
+                spectrumData = spectrum
+                root.scheduleSpectrumPaint()   // ✅ throttle (fix CPU)
             }
         }
     }
@@ -453,19 +511,17 @@ Item {
         y: spectrumCanvas.height
         x: spectrumCanvas.x
         width: spectrumCanvas.width
-        // height: rfScannerInterlock ? parent.height / 4 : parent.height/2
         height: parent.height / 4
+
         onPaint: {
             const minDb = waterfallMinDb;
             const maxDb = waterfallMaxDb;
             const rangeDb = maxDb - minDb;
-            const colorCount = waterfallColorMap.length;
             var ctx = getContext("2d");
 
-            // Scroll existing content down by 1 pixel
+            // Scroll down by 1px
             ctx.drawImage(waterfallCanvas, 0, 0, width, height - 1, 0, 1, width, height - 1);
 
-            // Get the newest row (line) to draw at the top
             var line = waterfallBuffer[waterfallBuffer.length - 1];
             if (!line || typeof line.length === "undefined") return;
 
@@ -473,11 +529,10 @@ Item {
             const bins = line.length;
 
             for (let i = 0; i < bins; ++i) {
-                // x position of this bin on canvas
                 const x = Math.floor(i / (bins - 1) * canvasWidth);
 
                 const dB = Math.max(minDb, Math.min(maxDb, line[i]));
-                const norm = (dB - minDb) / rangeDb;
+                const norm = (dB - minDb) / Math.max(1e-9, rangeDb);
                 const colorIndex = Math.floor(norm * (waterfallColorMap.length - 1));
 
                 const rgb = waterfallColorMap[colorIndex] || 0;
@@ -492,25 +547,16 @@ Item {
 
         Connections {
             target: root
-            function onWaterfallColorUpdate(colors)
-            {
-                waterfallColorMap = colors
-            }
+            function onWaterfallColorUpdate(colors) { waterfallColorMap = colors }
         }
 
         Connections {
             target: root
-            function onWaterfallUpdated(line)
-            {
-                dataCount++;
+            function onWaterfallUpdated(line) {
                 if (waterfallBuffer.length >= waterfallCanvas.height)
-                {
                     waterfallBuffer.shift();
-                }
-
                 waterfallBuffer.push(line);
                 waterfallCanvas.requestPaint();
-                dataCount=0;
             }
         }
     }
@@ -520,13 +566,10 @@ Item {
         z: 10
         antialiasing: false
 
-        // ผูกครอบตั้งแต่บน spectrum จนถึงล่าง waterfall
         anchors.left:   spectrumCanvas.left
         anchors.right:  spectrumCanvas.right
         anchors.top:    spectrumCanvas.top
         anchors.bottom: waterfallCanvas.bottom
-        // ถ้าอยากเว้นล่าง 100px ให้ใช้บรรทัดนี้ (และอย่าใส่ใน MouseArea)
-        // anchors.bottomMargin: 100
 
         onWidthChanged:  requestPaint()
         onHeightChanged: requestPaint()
@@ -537,8 +580,8 @@ Item {
 
             let startFreq = centerFreq - sampRate / 2;
             let freqRange = sampRate;
-            let canvasWidth = overlayCanvas.width;
-            let canvasHeight = overlayCanvas.height;
+            let canvasWidth = width;
+            let canvasHeight = height;
 
             let offsetFreqAbs = centerFreq + offsetFrequency;
             let freqLeft = offsetFreqAbs + low_cut;
@@ -557,15 +600,13 @@ Item {
             ctx.moveTo(xCenter, 0);
             ctx.lineTo(xCenter, canvasHeight);
             ctx.stroke();
+
             xPos = xCenter;
         }
 
         MouseArea {
             id: mouseArea
-            anchors.fill: parent        // ⬅️ กินเต็มผืน
-            // anchors.bottomMargin: 100 // ⛔️ ไม่ต้องใส่ที่นี่
-            // width: plotWidth          // ⛔️ เอาออก
-
+            anchors.fill: parent
             acceptedButtons: Qt.LeftButton
             property bool dragging: false
             property real dragX: 0
@@ -591,7 +632,7 @@ Item {
                     offsetFrequency = Math.max(-sampRate / 2, Math.min(sampRate / 2, newOffset));
 
                     overlayCanvas.requestPaint();
-                    spectrumCanvas.requestPaint();
+                    root.scheduleSpectrumPaint()
                     waterfallCanvas.requestPaint();
 
                     if (mainWindows.setOffsetFrequency)
@@ -615,7 +656,7 @@ Item {
                 offsetFrequency = Math.max(-sampRate / 2, Math.min(sampRate / 2, newOffset));
 
                 overlayCanvas.requestPaint();
-                spectrumCanvas.requestPaint();
+                root.scheduleSpectrumPaint()
                 waterfallCanvas.requestPaint();
 
                 if (mainWindows.setOffsetFrequency)
@@ -771,10 +812,6 @@ Item {
 
     }
 
-
-
-
-
     RowLayout {
         x: 10
         y: 230
@@ -804,8 +841,6 @@ Item {
         }
     }
 
-
-
     RowLayout {
         y: 380
         anchors.left: parent.left
@@ -834,8 +869,6 @@ Item {
     }
 
     /* === จุดยึดกลาง: ขนาด “เต็มกรอบ” ตามที่ต้องการ === */
-
-
     Item {
         id: memorySlot
         anchors.left: parent.left
@@ -846,17 +879,6 @@ Item {
         z: 50
     }
 
-    /* === MemoryAddEdit ยังคงอยู่ แต่ซ่อนเมื่อเปิด widgetView === */
-    // MemoryAddEdit {
-    //     id: memoryAddEdit
-    //     anchors.fill: memorySlot
-    //     visible: !widgetView
-    //     z: 51
-    // }
-
-    /* === MemoryAddEdit ยังคงอยู่ แต่ซ่อนเมื่อเปิด widgetView === */
-
-
     NewMemoryAddEdit {
         id: newMemoryAddEdit
         anchors.fill: memorySlot
@@ -865,17 +887,12 @@ Item {
         radioMemLists: radioMemList    // ✅ ส่ง ListModel id: radioMemList เข้าไป
     }
 
-    /* === MemoryAddEdit ยังคงอยู่ แต่ซ่อนเมื่อเปิด widgetView === */
-
-
     LogDeviceScanner {
         id: logDeviceScanner
         visible: widgetView
         anchors.fill: memorySlot
         z: 52
     }
-
-
 
     /* ============================================================
        Peak-scan Engine v2 (Per-Window Multi-Mode)
@@ -884,7 +901,6 @@ Item {
        - ต่อคิวได้ (หลายช่วง/หลายเซตโหมด), ไม่ต้องหยุดก่อน
        - ใช้ตัวแปรเดิมของคุณ: centerFreq, sampRate, mainWindows, profileCards, maxHoldKept
        ============================================================ */
-
 
     Item {
         id: peakScan
@@ -931,6 +947,9 @@ Item {
             mainWindows.sendmessage('{"type":"dspcontrol","params":{"offset_freq":0}}')
             updateFrequency()
             mainWindows.updateCurrentOffsetFreq(0, centerFreq)
+
+            // ✅ Fix4: grid depends on center/sampRate
+            if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
         }
 
         /* ===== Analyze a window with a given mode ===== */
@@ -1017,8 +1036,6 @@ Item {
                 const lowCut  = peakScan.lowCutNow
                 const highCut = peakScan.highCutNow
 
-                // console.log("lowCut:",lowCut," highCut:",highCut," peakScan.lowCutNow:",peakScan.lowCutNow," peakScan.highCutNow:",peakScan.highCutNow)
-
                 if(centerMHz >= parseFloat((priStart    / 1e6).toFixed(6)) && centerMHz <= parseFloat((priStop    / 1e6).toFixed(6)) ){
                     console.log("startMHz:",priStart," centerMHz:",centerMHz," endMHz:",priStop)
                     foundCards.append({
@@ -1068,9 +1085,7 @@ Item {
             if (typeof dwellTimer  !== "undefined") dwellTimer.stop()
 
             // ❌ ไม่เคลียร์ foundBands / profileCards
-            //    -> ผลช่องความถี่ที่เจอแล้วจะยังอยู่ให้ user ดู/เลือก
 
-            // ถ้าอยากคืนความถี่กลับต้นทางก็ทำได้ (ตามที่คุณใช้ keptStart อยู่)
             centerFreq = Math.round(keptStart)
             offsetFrequency = 0
             if (spectrumCanvas && spectrumCanvas.clearPeaks)
@@ -1082,7 +1097,9 @@ Item {
             updateFrequency()
             mainWindows.updateCurrentOffsetFreq(0, centerFreq)
 
-            // ถ้าสแกนเจออะไรแล้วก็โชว์ widget ได้เลย
+            // ✅ Fix4: rebuild cached grid
+            if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+
             if (profileCards.count > 0)
                 widgetView = true
 
@@ -1096,7 +1113,6 @@ Item {
             console.log("sHz:",sHz," eHz:",eHz," opts:",opts)
             if (running) {
                 jobQueue.push({ sHz: sHz, eHz: eHz, opt: (opts||{}) })
-                // console.log("[PeakScan] queued:", sHz, "→", eHz, "modes:", (opts && opts.modes) || "[wide]")
                 return
             }
 
@@ -1117,8 +1133,6 @@ Item {
             dwellMs = (opts && opts.dwellMs) || dwellMs
             settleMs= (opts && opts.settleMs)|| settleMs
 
-            // เคลียร์ list เมื่อเป็นงานแรก และมี "wide" อยู่ใน modes
-            // if (modes.indexOf("wide") !== -1) profileCards.clear()
             foundBands = []
 
             // กำหนดหน้าต่าง
@@ -1128,7 +1142,6 @@ Item {
             windowIndex = 0
 
             running = true
-            // console.log("[PeakScan] start:", startHz, "→", stopHz, "win:", totalWindows, "span:", spanHz, "step:", stepHz, "modes:", JSON.stringify(modes))
 
             // หน้าต่างแรก
             const firstLeft  = startHz
@@ -1145,7 +1158,6 @@ Item {
             running = false
             if (jobQueue.length > 0) {
                 const job = jobQueue.shift()
-                // console.log("[PeakScan] dequeue →", job.sHz, "→", job.eHz, "modes:", (job.opt && job.opt.modes) || (job.opt && job.opt.mode) || "[wide]")
                 startRange(job.sHz, job.eHz, job.opt)
             } else {
                 centerFreq = Math.round(keptStart)
@@ -1155,6 +1167,9 @@ Item {
                 mainWindows.sendmessage('{"type":"dspcontrol","params":{"offset_freq":0}}')
                 updateFrequency()
                 mainWindows.updateCurrentOffsetFreq(0, centerFreq)
+
+                // ✅ Fix4: rebuild cached grid
+                if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
 
                 if(profileCards.count > 0){
                     widgetView = true
@@ -1179,7 +1194,6 @@ Item {
             onTriggered: {
                 const data = (root.maxHoldKept && root.maxHoldKept.length) ? root.maxHoldKept.slice() : []
                 if (data.length) {
-                    // วิเคราะห์ทุกรูปแบบโหมดด้วย snapshot เดียว
                     for (var i = 0; i < peakScan.modes.length; ++i) {
                         const m = peakScan.modes[i]
                         const bands = peakScan.analyzeWindow(data, root.centerFreq, root.sampRate, m)
@@ -1212,17 +1226,6 @@ Item {
 
     /* ============================================================
        Handler: เรียกจาก mainWindows.findBandsWithProfile(msg)
-       - งานใหม่จะเข้าคิว ถ้ากำลังก
-       - รองรับ modes หลายค่าในครั้งเดียว (ทำครบทุกโหมดต่อหน้าต่าง)
-       JSON ตัวอย่าง:
-       {
-         "objectName": "Scan",
-         "frequency": { "start": 88e6, "stop": 108e6 },
-         "modes": ["wide","narrow"],     // หรือ "mode": "wide"
-         "overlap": 0.15,
-         "dwellMs": 900,
-         "settleMs": 250
-       }
        ============================================================ */
     function findBandsWithProfile(msg) {
         trigerScan = false
@@ -1271,7 +1274,6 @@ Item {
         } else if (typeof obj.mode === "string") {
             modesOpt = [obj.mode]
         } else {
-            // ถ้าไม่ส่ง mode/modes → ทำครบสองโหมดเป็นดีฟอลต์
             modesOpt = ["wide","narrow"]
         }
 
@@ -1283,18 +1285,16 @@ Item {
         }
 
         console.log("default:",stopPoint,root.sampRate)
-        // ปรับ stopPoint ตาม logic เดิม
         stopPoint = stopPoint + (root.sampRate / 2)
 
-        // เริ่มงานใหม่ → ถ้าต้องการล้างการ์ดเก่าออก ค่อย clear ตรงนี้
-        // profileCards.clear()
         foundCards.clear()
         console.log("[findBandsWithProfile] enqueue:",
                     startPoint, "→", stopPoint,
                     "modes:", JSON.stringify(options.modes))
 
-        peakScan.startRange(startPoint, stopPoint, options)  // ถ้ากำลังรัน → เข้าคิว
+        peakScan.startRange(startPoint, stopPoint, options)
+
+        // ✅ Fix4: rebuild cached grid (range start usually changes center soon)
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
-
-
 }

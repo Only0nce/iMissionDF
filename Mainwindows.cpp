@@ -3,10 +3,23 @@
 #include "qthread.h"
 #include "InputEventReader.h"
 #include <QProcess>
+#include <QNetworkInterface>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QFile>
+#include <QFileInfo>
+#include <QDir>
+#include <QProcess>
+#include <QNetworkInterface>
+#include <QNetworkAddressEntry>
+#include <QHostAddress>
+
 
 Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
 {
-    system("systemctl stop alsarecd.service");
+    #ifdef PLATFORM_JETSON
+        system("systemctl stop alsarecd.service");
+    #endif
     // iPatchServerSocket = new SocketClient;
     socketClientReconnectTimer = new QTimer(this);
     // wsClient = new WebSocketClient;
@@ -14,6 +27,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     qDebug() << "MYDATABASE ONLYONE";
     // wsClient.connectToServer(QUrl("ws://192.168.10.58:8073/ws/"));
     wsClient.connectToServer(QUrl("ws://127.0.0.1:8073/ws/"));
+    // wsClient.connectToServer(QUrl("ws://192.168.10.26:8073/ws/"));
     // สร้าง worker + ย้ายไป thread
     m_setFreqWorker = new SetFreqWorker();
     m_setFreqWorker->moveToThread(&m_setFreqThread);
@@ -94,9 +108,10 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     socketClientReconnectTimer->start(3000);
     system("sh /usr/local/bin/noblank.sh");
     system("pulseaudio --kill ");
-
+    #ifdef PLATFORM_JETSON
     gpioInit();
     codecDSPinit();
+    #endif
     openWebRxConfig.loadFromFile("/var/lib/openwebrx/settings.json");
     QJsonObject updateMsg = openWebRxConfig.generateProfileListMessage();
     QJsonDocument doc(updateMsg);
@@ -113,44 +128,80 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
         }
     });
 
-    int ret = pthread_create(&idThreadSqlWatcher, nullptr, ThreadFuncSqlWatcher, this);
-    if(ret==0){
-        qDebug() <<("Thread created successfully.\n");
+//    int ret = pthread_create(&idThreadSqlWatcher, nullptr, ThreadFuncSqlWatcher, this);
+//    if(ret==0){
+//        qDebug() <<("Thread created successfully.\n");
+//    }
+//    // main thread (Mainwindows ctor/init)
+//    m_lastRecIsRecord = false;
+//    m_lastRecState = "UNKNOWN";
+
+    //    LogWatcher *watcher = new LogWatcher(this);
+    //    connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
+    //         qDebug() << "State update: ID=" << id << "conn=" << conn << "state=" << state;
+    //        this->recRunningCount = 0;
+    //        emit onRecStatusChanged(state == "RECORD");
+    //        if ((state == "RECORD") && (currentSQLValue == false))
+    //        {
+    //            onSQLChanged(currentSQLValue);
+    //        }
+    //        else if ((state == "PAUSE") && (currentSQLValue == true))
+    //        {
+    //            onSQLChanged(currentSQLValue);
+    //        }
+    //    });
+    //    watcher->startWatching("/tmp/alsarecd_production.log");
+//    LogWatcher *watcher = new LogWatcher(this);
+//    connect(watcher, &LogWatcher::stateChanged, this,
+//            [this](const QString &id, const QString &conn, const QString &state)
+//    {
+//        qDebug() << "[LogWatcher] stateChanged id=" << id
+//                 << "conn=" << conn
+//                 << "state=" << state;
+
+//        m_lastRecState = state;
+//        m_lastRecIsRecord = (state == "RECORD");
+//        recRunningCount = 0;
+
+//        qDebug() << "[LogWatcher] emit onRecStatusChanged =" << m_lastRecIsRecord;
+//        emit onRecStatusChanged(m_lastRecIsRecord);
+//    });
+
+//    watcher->startWatching("/tmp/alsarecd_id_1.log");
+    int retFindLog = pthread_create(&idThreadFindRecLog, nullptr, ThreadFuncFindRecLog, this);
+    if (retFindLog == 0) {
+        qDebug() << "Thread find rec log created successfully.";
+    } else {
+        qDebug() << "Thread find rec log not created.";
     }
-    // main thread (Mainwindows ctor/init)
     m_lastRecIsRecord = false;
     m_lastRecState = "UNKNOWN";
 
-//    LogWatcher *watcher = new LogWatcher(this);
-//    connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
-//         qDebug() << "State update: ID=" << id << "conn=" << conn << "state=" << state;
-//        this->recRunningCount = 0;
-//        emit onRecStatusChanged(state == "RECORD");
-//        if ((state == "RECORD") && (currentSQLValue == false))
-//        {
-//            onSQLChanged(currentSQLValue);
-//        }
-//        else if ((state == "PAUSE") && (currentSQLValue == true))
-//        {
-//            onSQLChanged(currentSQLValue);
-//        }
-//    });
-//    watcher->startWatching("/tmp/alsarecd_production.log");
     LogWatcher *watcher = new LogWatcher(this);
-    connect(watcher, &LogWatcher::stateChanged, this,
+    connect(m_logWatcher, &LogWatcher::stateChanged, this,
             [this](const QString &id, const QString &conn, const QString &state)
     {
-        Q_UNUSED(id)
-        Q_UNUSED(conn)
+        const QString cleanState = state.trimmed().toUpper();
 
-        m_lastRecState = state;
-        m_lastRecIsRecord = (state == "RECORD");
+        qDebug() << "[LogWatcher] stateChanged id=" << id
+                 << "conn=" << conn
+                 << "state=" << cleanState;
+
+        m_lastRecState = cleanState;
+        m_lastRecIsRecord = (cleanState == "RECORD");
         recRunningCount = 0;
 
         emit onRecStatusChanged(m_lastRecIsRecord);
 
-        if ((state == "RECORD") && (currentSQLValue == false)) onSQLChanged(currentSQLValue);
-        else if ((state == "PAUSE") && (currentSQLValue == true)) onSQLChanged(currentSQLValue);
+        // 🔹 ส่ง SQL update ไป QML เหมือน logic เดิม
+        if ((cleanState == "RECORD") && (currentSQLValue == false))
+        {
+            onSQLChanged(currentSQLValue);
+        }
+        else if ((cleanState == "PAUSE") && (currentSQLValue == true))
+        {
+            onSQLChanged(currentSQLValue);
+        }
     });
 
     watcher->startWatching("/tmp/alsarecd_id_1.log");
@@ -170,8 +221,9 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     startScanCard->setSingleShot(true);
 
     recRunningCountTimer->start(1000);  // Increment every second
+#ifdef PLATFORM_JETSON
     system("systemctl start alsarecd.service");
-
+#endif
     squelchOffTimer = new QTimer(this);
     squelchOffTimer->setSingleShot(true);
 
@@ -201,9 +253,59 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     // else {
     //     qDebug() << "[profileWeb] Cannot open for write:" << outPath;
     // }
+    // ========================== VPN STATUS TIMER ==========================
+    vpnDesiredEnabled = vpnSystemctlIsActive();  // init ให้ใกล้ความจริงตอนบูต
+
+    vpnStatusTimer = new QTimer(this);
+    vpnStatusTimer->setInterval(1500);
+    vpnStatusTimer->setSingleShot(false);
+
+    connect(vpnStatusTimer, &QTimer::timeout, this, [this]() {
+        if (vpnDesiredEnabled || vpnSystemctlIsActive()) {
+            vpnBroadcastStatus("status", true, "poll", nullptr, true); // เดิม (web)
+            vpnEmitState("poll");                                      // ✅ ใหม่ (qml)
+        }
+    });
+
+    QTimer::singleShot(800, this, [this](){
+        vpnBroadcastStatus("status", true, "boot", nullptr, true);     // เดิม (web)
+        vpnEmitState("boot");                                          // ✅ ใหม่ (qml)
+    });
+    #ifdef PLATFORM_JETSON
+    setTimeHWClock = new QTimer(this);
+    setTimeHWClock->setSingleShot(false);
+
+    connect(setTimeHWClock, &QTimer::timeout,
+            this, &Mainwindows::setTimeHWClockSlot);
+
+    setSystemFromHwclock();
+    setTimeHWClock->start(1000 * 60 * 5);
+    #endif
 
 }
+static QString findBestRecLogPath()
+{
+    QFileInfo f1("/tmp/alsarecd_id_1.log");
+    if (f1.exists() && f1.isFile())
+        return f1.absoluteFilePath();
 
+    // 2) fallback production
+    QFileInfo fProd("/tmp/alsarecd_production.log");
+    if (fProd.exists() && fProd.isFile())
+        return fProd.absoluteFilePath();
+
+    QDir dir("/tmp");
+    QFileInfoList list = dir.entryInfoList(
+        QStringList() << "alsarecd_id_*.log",
+        QDir::Files | QDir::Readable,
+        QDir::Time // ใหม่สุดก่อน
+    );
+
+    if (!list.isEmpty())
+        return list.first().absoluteFilePath();
+
+    return QString();
+}
 static bool splitIpCidrV4(const QString &cidr, QString &ip, QString &netmask, int &prefix)
 {
     ip.clear();
@@ -347,7 +449,6 @@ void Mainwindows::onSetFreqDone(quint64 freqHz, bool ok)
 {
     qWarning() << "[UI] setFreq done freqHz=" << freqHz << "ok=" << ok;
 
-    // ถ้าจะ update UI ทำที่นี่ได้เลย ปลอดภัย (กลับมา UI thread แล้ว)
 }
 
 void Mainwindows::onRecorderConfigSaved()
@@ -465,6 +566,7 @@ void Mainwindows::fileUpdated(const QString &path)
 
 Q_INVOKABLE void Mainwindows::shutdownRequested()
 {
+#ifdef PLATFORM_JETSON
     backlightOff();
 
     //resetHW
@@ -474,9 +576,11 @@ Q_INVOKABLE void Mainwindows::shutdownRequested()
     led3->setValue(LED_OFF);
     led4->setValue(LED_OFF);
     QProcess::execute("sudo shutdown now");
+#endif
 }
 Q_INVOKABLE void Mainwindows::rebootRequested()
 {
+#ifdef PLATFORM_JETSON
     backlightOff();
 
     //resetHW
@@ -486,25 +590,32 @@ Q_INVOKABLE void Mainwindows::rebootRequested()
     led3->setValue(LED_OFF);
     led4->setValue(LED_OFF);
     QProcess::execute("sudo reboot"); // or "shutdown now"
+#endif
 }
 Q_INVOKABLE void Mainwindows::offScreenRequested()
 {
+#ifdef PLATFORM_JETSON
     backlightOff();
     qDebug() << "Mainwindows::offScreenRequested()";
+#endif
 }
 Q_INVOKABLE void Mainwindows::backlightRequested()
 {
+#ifdef PLATFORM_JETSON
     backlight->setValue(true);
     QThread::msleep(100);
     backlight->setValue(false);
     QThread::msleep(100);
     backlight->setValue(true);
     qDebug() << "Mainwindows::backlightRequested()";
+#endif
 }
 Q_INVOKABLE void Mainwindows::onScreenRequested()
 {
+#ifdef PLATFORM_JETSON
     backlightOn();
     qDebug() << "Mainwindows::onScreenRequested()";
+#endif
 }
 
 Q_INVOKABLE void Mainwindows::refreshProfiles() {
@@ -529,6 +640,7 @@ void Mainwindows::onSQLChanged(bool sqlVal)
     }
 
     bool current;
+#ifdef PLATFORM_JETSON
     if (shd_amp->getValue(current) == 0) {
 
     }
@@ -563,6 +675,7 @@ void Mainwindows::onSQLChanged(bool sqlVal)
             qDebug() << "Scheduled squelch OFF in 100 msec";
         }
     }
+#endif
 }
 //void Mainwindows::sendSquelchStatus(bool sqlVal)
 //{
@@ -614,12 +727,12 @@ void Mainwindows::sendSquelchStatus(bool sqlVal)
     bool callState = this->recEnable;   // ✅ ใช้ตัวจริง
     qint64 freqHz = qRound64(this->currentCenterFreq + this->currentOffsetFreq);
     double freqMHz = (freqHz > 0) ? (double)freqHz / 1e6 : 0.0;
-//    qint64 freqHz = static_cast<qint64>(qRound64(this->currentCenterFreq + this->currentOffsetFreq));
+    //    qint64 freqHz = static_cast<qint64>(qRound64(this->currentCenterFreq + this->currentOffsetFreq));
     qDebug() << "onSendSquelchStatus_to_Alsarecd:" << softPhoneID
              << pttOn << sqlOn << callState << freqHz << freqMHz;
     emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, freqMHz);
     emit frequencyChangedToQml(freqHz, freqMHz);
-//    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, (double)freqHz);
+    //    emit onSendSquelchStatus(softPhoneID, pttOn, sqlOn, callState, (double)freqHz);
 }
 
 
@@ -663,7 +776,7 @@ void Mainwindows::openwebrxConnected()
     sendmessage(QJsonDocument(json).toJson(QJsonDocument::Compact));
     emit onOpenwebrxConnected();
 }
-
+#ifdef PLATFORM_JETSON
 void Mainwindows::codecDSPinit()
 {
     system("speaker-test -Dhw:APE,0 -r8000 -c8 -S0 --nloops 3 -s 1 -tsine -f1000");
@@ -725,11 +838,12 @@ void Mainwindows::codecDSPinit()
     updateDSPRecOutputGain(VolumeRecOutDSPCH2,CODECCH2_I2S1);
     updateDSPRecOutputGain(VolumeRecOutDSPCH3,CODECCH3_I2S1);
     updateDSPRecOutputGain(VolumeRecOutDSPCH4,CODECCH4_I2S1);
-
     headphoneGpioOn->setValue(HEADPHONE_STANDBY);
     ampGpioMute->setValue(SPK_UNMUTE);
     ampGpioStandby->setValue(AMP_STANDBY);
+
 }
+#endif
 Q_INVOKABLE void Mainwindows::setSqlLevel(const unsigned char value)
 {
     scanSqlLevel = value;
@@ -752,7 +866,9 @@ Q_INVOKABLE void Mainwindows::setSpeakerVolume(const unsigned char volume)
     // updateDSPOutputGain(255-VolumeOutCH1,CODECCH1_I2S1);
     // updateDSPOutputGain(255-VolumeOutCH2,CODECCH2_I2S1);
     // updateDSPSpeakerOutputGain(255-VolumeOutCH1,CODECCH1_I2S1);
+#ifdef PLATFORM_JETSON
     updateDSPSpeakerOutputGain(255-VolumeOutCH4,CODECCH4_I2S1);
+#endif
 }
 
 // Q_INVOKABLE void Mainwindows::setSpeakerVolumeMute(bool active)
@@ -775,7 +891,9 @@ Q_INVOKABLE void Mainwindows::setHeadphoneVolume(const unsigned char volume)
     // updateDSPSpeakerOutputGain(255-VolumeOutCH4,CODECCH4_I2S1);
     // updateDSPOutputGain(255-VolumeOutCH3,CODECCH3_I2S1);
     // updateDSPOutputGain(255-VolumeOutCH4,CODECCH4_I2S1);
+#ifdef PLATFORM_JETSON
     updateDSPSpeakerOutputGain(255-VolumeOutCH2,CODECCH2_I2S1);
+#endif
 }
 
 
@@ -800,59 +918,84 @@ Q_INVOKABLE void Mainwindows::sCanfreq(){
 
     qDebug() << "sCanfreq done";
 }
-
+#ifdef PLATFORM_JETSON
 void Mainwindows::gpioInit()
 {
-    codecReset->requestOutput();
-    dspReset->requestOutput();
-    dspBootSelect->requestOutput();
-    led3->requestOutput();
-    led4->requestOutput();
-    headphoneGpioOn->requestOutput();
-    ampGpioMute->requestOutput();
-    ampGpioStandby->requestOutput();
-    backlight->requestOutput();
-    lna_1_enable->requestOutput();
-    lna_2_enable->requestOutput();
+    // codecReset->requestOutput();
+    // dspReset->requestOutput();
+    // dspBootSelect->requestOutput();
+    // led3->requestOutput();
+    // led4->requestOutput();
+    // headphoneGpioOn->requestOutput();
+    // ampGpioMute->requestOutput();
+    // ampGpioStandby->requestOutput();
+    // backlight->requestOutput();
+    // lna_1_enable->requestOutput();
+    // lna_2_enable->requestOutput();
 
     rotary_led->requestOutput();
     rst_amp->requestOutput();
     shd_amp->requestOutput();
     hs_mute->requestOutput();
 
-    backlightOn();
-    set_lna_1_enable();
-    set_lna_2_disable(); // Distortion
+    bt_en->requestOutput();
+    wl_en->requestOutput();
+    full_card_power_off->requestOutput();
+    rst_5g->requestOutput();
+    w_disable1->requestOutput();
+    w_disable2->requestOutput();
+    // config_0;
+    // config_1;
+    // config_2;
+    // config_3;
+    // wake_on_wan;
+    // xtrx_rst;
+    // rf_io8;
+    // rf_io9;
+    // rf_i10;
+
+    // backlightOn();
+    // set_lna_1_enable();
+    // set_lna_2_disable(); // Distortion
 
     //resetHW
-    dspBootSelect->setValue(QSPIFLASH);
-    codecReset->setValue(RESET_ACTIVE);
-    dspReset->setValue(RESET_ACTIVE);
+    // dspBootSelect->setValue(QSPIFLASH);
+    // codecReset->setValue(RESET_ACTIVE);
+    // dspReset->setValue(RESET_ACTIVE);
     QThread::msleep(200);
 
-    codecReset->setValue(RESET_INACTIVE);
-    dspReset->setValue(RESET_INACTIVE);
+    // codecReset->setValue(RESET_INACTIVE);
+    // dspReset->setValue(RESET_INACTIVE);
 
 
-    led3->setValue(LED_ON);
-    led4->setValue(LED_ON);
-    headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
-    ampGpioMute->setValue(SPK_MUTE);
-    ampGpioStandby->setValue(AMP_SHUTDOWN);
+    // led3->setValue(LED_ON);
+    // led4->setValue(LED_ON);
+    // headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
+    // ampGpioMute->setValue(SPK_MUTE);
+    // ampGpioStandby->setValue(AMP_SHUTDOWN);
 
     rotary_led->setValue(1);
     rst_amp->setValue(1);
     shd_amp->setValue(0);
     hs_mute->setValue(0);
 
+    bt_en->setValue(1);
+    wl_en->setValue(1);
+    full_card_power_off->setValue(1);
+    rst_5g->setValue(0);
+    w_disable1->setValue(1);
+    w_disable2->setValue(1);
+    qDebug() << "init val gpio to high";
     QThread::msleep(200);
 
 }
+#endif
+#ifdef PLATFORM_JETSON
 void Mainwindows::DSPBootSelect(const bool qspiflash)
 {
     dspBootSelect->setValue(qspiflash);
 }
-
+#endif
 void Mainwindows::profiles(){
     qDebug() << "emit profiles::";
     emit updateCardProfile();
@@ -1023,7 +1166,7 @@ void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSend
     {
         QJsonObject systemInfo;
         systemInfo["menuID"] = "system";
-        systemInfo["SwVersion"] = "1.0";
+        systemInfo["SwVersion"] = "26022026_1.2";
 
         QJsonDocument doc(systemInfo);
         QString jsonString = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
@@ -1066,6 +1209,7 @@ void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSend
     }
     else if (getCommand == "rebootSystem")
     {
+#ifdef PLATFORM_JETSON
         backlightOff();
 
         //resetHW
@@ -1075,11 +1219,443 @@ void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSend
         led3->setValue(LED_OFF);
         led4->setValue(LED_OFF);
         QProcess::execute("sudo reboot"); // or "shutdown now"
+#endif
+    }
+    else if (menuID == "vpnControl")
+    {
+        const QString action = command.value("action").toString().trimmed();
+
+        // ensure persist dir
+        vpnEnsureDir(vpnPersistDir);
+
+        // ============================================================
+        // ACTION: status
+        // ============================================================
+        if (action == "status") {
+            vpnBroadcastStatus(action, true, "ok", pSender, false);
+            vpnEmitState("web:status");
+            return;
+        }
+
+        // ============================================================
+        // ACTION: publicip  (ในระบบคุณใช้ tun0 ip)
+        // ============================================================
+        if (action == "publicip") {
+            vpnBroadcastStatus(action, true, "ok", pSender, false);
+            vpnEmitState("web:publicip");
+            return;
+        }
+
+        // ============================================================
+        // ACTION: stop
+        // ============================================================
+        if (action == "stop")
+        {
+            vpnDesiredEnabled = false;
+
+            QString err;
+            const int ec = vpnRunCmd("sudo", {"systemctl", "stop", vpnServiceName}, 8000, &err);
+
+            vpnBroadcastStatus(action, (ec == 0),
+                               QString("stop_ec=%1 err=%2").arg(ec).arg(err),
+                               pSender, true);
+
+            vpnEmitState("web:stop");
+            return;
+        }
+
+        // ============================================================
+        // ACTION: start
+        // ============================================================
+        if (action == "start")
+        {
+            vpnDesiredEnabled = true;
+
+            // ถ้า activeConf ไม่มี ลองใช้ remembered ก่อน
+            QFileInfo ac(vpnActiveConfPath);
+            if (!ac.exists()) {
+                const QString remembered = vpnLoadRememberedPath();
+                if (!remembered.isEmpty()) {
+                    QString err2;
+                    vpnCopyPersistedToActive(remembered, &err2); // best-effort
+                }
+            }
+
+            QString err;
+            const int ec = vpnRunCmd("sudo", {"systemctl", "start", vpnServiceName}, 8000, &err);
+
+            vpnBroadcastStatus(action, (ec == 0),
+                               QString("start_ec=%1 err=%2").arg(ec).arg(err),
+                               pSender, true);
+
+            vpnEmitState("web:start");
+            return;
+        }
+
+        // ============================================================
+        // ACTION: useRemembered  (ไม่ต้อง upload ใหม่)
+        // ============================================================
+        if (action == "useRemembered")
+        {
+            const QString remembered = vpnLoadRememberedPath();
+            if (remembered.isEmpty()) {
+                vpnBroadcastStatus(action, false, "no remembered ovpn on disk", pSender, false);
+                vpnEmitState("web:useRemembered:nofile");
+                return;
+            }
+
+            QString err2;
+            if (!vpnCopyPersistedToActive(remembered, &err2)) {
+                vpnBroadcastStatus(action, false, "copy to active conf failed: " + err2, pSender, false);
+                vpnEmitState("web:useRemembered:copyfail");
+                return;
+            }
+
+            vpnDesiredEnabled = true;
+
+            QString err;
+            const int ec = vpnRunCmd("sudo", {"systemctl", "restart", vpnServiceName}, 8000, &err);
+
+            vpnBroadcastStatus(action, (ec == 0),
+                               QString("used=%1 active=%2 restart_ec=%3 err=%4")
+                                   .arg(remembered).arg(vpnActiveConfPath).arg(ec).arg(err),
+                               pSender, true);
+
+            vpnEmitState("web:useRemembered");
+            return;
+        }
+
+        // ============================================================
+        // ACTION: uploadOvpn  (base64) => persist + copy active + restart
+        // ============================================================
+        if (action == "uploadOvpn")
+        {
+            const QString filename = command.value("filename").toString().trimmed();
+            const QString b64      = command.value("content_b64").toString().trimmed();
+
+            if (!filename.toLower().endsWith(".ovpn") || b64.isEmpty()) {
+                vpnBroadcastStatus(action, false, "invalid file", pSender, false);
+                vpnEmitState("web:uploadOvpn:invalid");
+                return;
+            }
+
+            const QByteArray raw = QByteArray::fromBase64(b64.toUtf8());
+            if (!vpnLooksLikeOvpn(raw)) {
+                vpnBroadcastStatus(action, false, "base64 decode failed or ovpn invalid/too large", pSender, false);
+                vpnEmitState("web:uploadOvpn:badcontent");
+                return;
+            }
+
+            // 1) persist file
+            const QString safeName      = vpnSanitizeFileName(filename);
+            const QString persistedPath = vpnPersistDir + "/" + safeName;
+
+            QString err;
+            if (!vpnAtomicWrite(persistedPath, raw, &err)) {
+                vpnBroadcastStatus(action, false, "persist write failed: " + err, pSender, false);
+                vpnEmitState("web:uploadOvpn:writefail");
+                return;
+            }
+
+            // remember
+            vpnRememberPersistedPath(persistedPath);
+
+            // 2) copy to active
+            QString err2;
+            if (!vpnCopyPersistedToActive(persistedPath, &err2)) {
+                vpnBroadcastStatus(action, false, "copy to active conf failed: " + err2, pSender, false);
+                vpnEmitState("web:uploadOvpn:copyfail");
+                return;
+            }
+
+            vpnDesiredEnabled = true;
+
+            // 3) restart service
+            QString serr;
+            const int ec = vpnRunCmd("sudo", {"systemctl", "restart", vpnServiceName}, 8000, &serr);
+
+            vpnBroadcastStatus(action, (ec == 0),
+                               QString("persisted=%1 active=%2 restart_ec=%3 err=%4")
+                                   .arg(persistedPath).arg(vpnActiveConfPath).arg(ec).arg(serr),
+                               pSender, true);
+
+            vpnEmitState("web:uploadOvpn");
+            return;
+        }
+
+        // unknown
+        vpnBroadcastStatus(action, false, "unknown action", pSender, false);
+        vpnEmitState("web:unknown");
+        return;
     }
     else {
         // qDebug() << "newCommandProcess" << message;
     }
 }
+// ========================== VPN HELPERS (FULL) ==========================
+
+int Mainwindows::vpnRunCmd(const QString &program,
+                           const QStringList &args,
+                           int timeoutMs,
+                           QString *stdErrOut) const
+{
+    QProcess p;
+    p.start(program, args);
+
+    if (!p.waitForStarted(timeoutMs)) {
+        if (stdErrOut) *stdErrOut = "waitForStarted timeout";
+        return -1;
+    }
+    if (!p.waitForFinished(timeoutMs)) {
+        p.kill();
+        p.waitForFinished(200);
+        if (stdErrOut) *stdErrOut = "waitForFinished timeout";
+        return -2;
+    }
+
+    if (stdErrOut) *stdErrOut = QString::fromUtf8(p.readAllStandardError()).trimmed();
+    return p.exitCode();
+}
+
+bool Mainwindows::vpnSystemctlIsActive() const
+{
+    QProcess p;
+    p.start("systemctl", {"is-active", vpnServiceName});
+    p.waitForFinished(1500);
+    const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+    return (out == "active");
+}
+
+QString Mainwindows::vpnGetTun0Ip() const
+{
+    const auto ifaces = QNetworkInterface::allInterfaces();
+    for (const QNetworkInterface &iface : ifaces) {
+        if (iface.name() != "tun0")
+            continue;
+
+        if (!iface.flags().testFlag(QNetworkInterface::IsUp) ||
+            !iface.flags().testFlag(QNetworkInterface::IsRunning))
+            continue;
+
+        const auto entries = iface.addressEntries();
+        for (const QNetworkAddressEntry &e : entries) {
+            const QHostAddress ip = e.ip();
+            if (ip.protocol() == QAbstractSocket::IPv4Protocol)
+                return ip.toString();
+        }
+    }
+    return "--";
+}
+
+bool Mainwindows::vpnEnsureDir(const QString &dir) const
+{
+    QDir d(dir);
+    if (d.exists()) return true;
+    return QDir().mkpath(dir);
+}
+
+QString Mainwindows::vpnReadTextTrim(const QString &path) const
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly)) return "";
+    return QString::fromUtf8(f.readAll()).trimmed();
+}
+
+bool Mainwindows::vpnAtomicWrite(const QString &path, const QByteArray &data, QString *errOut) const
+{
+    QFileInfo fi(path);
+    if (!vpnEnsureDir(fi.absolutePath())) {
+        if (errOut) *errOut = "mkpath failed: " + fi.absolutePath();
+        return false;
+    }
+
+    const QString tmpPath = path + ".tmp";
+    QFile f(tmpPath);
+    if (!f.open(QIODevice::WriteOnly)) {
+        if (errOut) *errOut = "open tmp failed: " + f.errorString();
+        return false;
+    }
+
+    const qint64 written = f.write(data);
+    if (written != data.size()) {
+        if (errOut) *errOut = "write tmp failed";
+        f.close();
+        f.remove();
+        return false;
+    }
+
+    f.flush();
+    f.close();
+
+    QFile::remove(path);
+    if (!QFile::rename(tmpPath, path)) {
+        if (errOut) *errOut = "rename tmp failed";
+        QFile::remove(tmpPath);
+        return false;
+    }
+    return true;
+}
+
+QString Mainwindows::vpnSanitizeFileName(QString name) const
+{
+    name = name.trimmed();
+    name.replace("\\", "_");
+    name.replace("/", "_");
+    name.replace("..", "_");
+
+    QString out;
+    out.reserve(name.size());
+    for (const QChar &c : name) {
+        const ushort u = c.unicode();
+        const bool ok =
+            (u >= 'a' && u <= 'z') ||
+            (u >= 'A' && u <= 'Z') ||
+            (u >= '0' && u <= '9') ||
+            (c == '.') || (c == '_') || (c == '-');
+        out.append(ok ? c : QChar('_'));
+    }
+    if (out.isEmpty()) out = "client.ovpn";
+    if (!out.toLower().endsWith(".ovpn")) out += ".ovpn";
+    return out;
+}
+
+bool Mainwindows::vpnLooksLikeOvpn(const QByteArray &raw) const
+{
+    if (raw.isEmpty()) return false;
+    if (raw.size() > 512 * 1024) return false; // 512KB max
+    const QByteArray lower = raw.toLower();
+    // เช็คแบบง่าย ๆ กันไฟล์มั่ว
+    return (lower.contains("client") && lower.contains("remote"));
+}
+
+void Mainwindows::vpnRememberPersistedPath(const QString &persistedPath)
+{
+    QString err;
+    vpnAtomicWrite(vpnRememberedPathDB, persistedPath.toUtf8(), &err);
+    Q_UNUSED(err);
+}
+
+QString Mainwindows::vpnLoadRememberedPath() const
+{
+    const QString p = vpnReadTextTrim(vpnRememberedPathDB);
+    if (p.isEmpty()) return "";
+    QFileInfo fi(p);
+    if (!fi.exists() || !fi.isFile()) return "";
+    return p;
+}
+
+bool Mainwindows::vpnCopyPersistedToActive(const QString &persistedPath, QString *errOut) const
+{
+    QFile f(persistedPath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        if (errOut) *errOut = "open persisted failed: " + f.errorString();
+        return false;
+    }
+    const QByteArray raw = f.readAll();
+    f.close();
+
+    if (!vpnLooksLikeOvpn(raw)) {
+        if (errOut) *errOut = "persisted ovpn invalid";
+        return false;
+    }
+
+    return vpnAtomicWrite(vpnActiveConfPath, raw, errOut);
+}
+
+QJsonObject Mainwindows::vpnBuildStatusObject(const QString &action,
+                                              bool ok,
+                                              const QString &detail) const
+{
+    const bool activeSvc = vpnSystemctlIsActive();
+    const QString tunIp  = vpnGetTun0Ip();
+
+    QJsonObject resp;
+    resp["menuID"] = "vpnControl";
+    resp["action"] = action;
+    resp["ok"] = ok;
+
+    // ✅ ค่า "enabled" = switch state ที่ผู้ใช้เลือก (ไม่ใช่แค่ active)
+    resp["enabled"] = vpnDesiredEnabled;
+
+    // ✅ active = service + tun0 (จริง ๆ)
+    resp["active"] = (activeSvc && tunIp != "--");
+
+    resp["public_ip"] = tunIp; // UI ของคุณใช้ tun0 ip เป็นหลักอยู่แล้ว
+    resp["detail"] = detail;
+
+    const QString remembered = vpnLoadRememberedPath();
+    resp["remembered_file"] = remembered.isEmpty() ? "" : QFileInfo(remembered).fileName();
+    resp["config_loaded"]   = resp["remembered_file"];
+
+    return resp;
+}
+
+void Mainwindows::vpnBroadcastStatus(const QString &action,
+                                     bool ok,
+                                     const QString &detail,
+                                     QWebSocket *replyTo,
+                                     bool alsoBroadcast)
+{
+    const QString out = QString::fromUtf8(
+        QJsonDocument(vpnBuildStatusObject(action, ok, detail))
+            .toJson(QJsonDocument::Compact)
+        );
+
+    if (replyTo) replyTo->sendTextMessage(out);
+
+    if (alsoBroadcast) {
+        if (wsServer)  wsServer->broadcastMessage(out);
+        if (webServer) webServer->broadcastMessage(out);
+    }
+}
+void Mainwindows::vpnEmitState(const QString &detail)
+{
+    const bool activeSvc = vpnSystemctlIsActive();
+    const QString tunIp  = vpnGetTun0Ip();
+
+    const bool connected = (activeSvc && tunIp != "--");
+    const QString statusText = connected ? "CONNECTED" : "DISCONNECTED";
+
+    emit vpnStateChanged(connected, statusText, tunIp, detail);
+}
+
+void Mainwindows::vpnRefresh()
+{
+    vpnEmitState("refresh");
+}
+
+void Mainwindows::vpnConnect()
+{
+    vpnEnsureDir(vpnPersistDir);
+    vpnDesiredEnabled = true;
+
+    // ถ้า activeConf ไม่มี ลองใช้ remembered ก่อน
+    QFileInfo ac(vpnActiveConfPath);
+    if (!ac.exists()) {
+        const QString remembered = vpnLoadRememberedPath();
+        if (!remembered.isEmpty()) {
+            QString err2;
+            vpnCopyPersistedToActive(remembered, &err2); // best-effort
+        }
+    }
+
+    QString err;
+    const int ec = vpnRunCmd("sudo", {"systemctl", "start", vpnServiceName}, 8000, &err);
+
+    vpnEmitState(QString("start_ec=%1 err=%2").arg(ec).arg(err));
+}
+
+void Mainwindows::vpnDisconnect()
+{
+    vpnEnsureDir(vpnPersistDir);
+    vpnDesiredEnabled = false;
+
+    QString err;
+    const int ec = vpnRunCmd("sudo", {"systemctl", "stop", vpnServiceName}, 8000, &err);
+
+    vpnEmitState(QString("stop_ec=%1 err=%2").arg(ec).arg(err));
+}
+
 
 void Mainwindows::socketClientReconnect()
 {
@@ -1133,6 +1709,7 @@ void Mainwindows::cppSubmitTextFiled(const QString &qmlJson)
 
     qDebug() << "Parsed menuID:" << getCommand;
 }
+#ifdef PLATFORM_JETSON
 void Mainwindows::updateDSPOutputGain(const uint8_t value, const uint8_t outputChannel)
 {
     double setValue = 1.0;
@@ -1163,7 +1740,7 @@ void Mainwindows::updateDSPOutputGain(const uint8_t value, const uint8_t outputC
         break;
     }
 }
-
+#endif
 void Mainwindows::updateDSPRecInputGain(int value, uint8_t softPhoneID)
 {
     value = value - 12;
@@ -1230,58 +1807,117 @@ void Mainwindows::updateDSPRecOutputGain(int value, uint8_t softPhoneID)
     }
 }
 
+// void Mainwindows::updateDSPSpeakerOutputGain(int value, uint8_t softPhoneID)
+// {
+//     qDebug() << "value:" << value;
+//     // value = value - 12;
+//     double setValue = 1.0;
+//     // double dbValue = 0;
+//     // if (value == 0) dbValue = 0;
+//     // else dbValue =  double(value/(-2));
+//     // if (value == 0) setValue = 1;
+//     // else {
+//     //     setValue = pow(10,dbValue/20.0);
+//     // }
+
+//     // if (value < 0.0)   value = 0.0;
+//     // if (value > 205.0) value = 205.0;
+
+//     // setValue =static_cast<int>((205.0 - value) * 255.0 / 205.0);
+
+//     // CODEC_PCM3168A->setOutputGain(CODECCH1_I2S1,CODECVolumeOutCH1);
+//     // CODEC_PCM3168A->setOutputGain(CODECCH2_I2S1,CODECVolumeOutCH2);
+//     // CODEC_PCM3168A->setOutputGain(CODECCH3_I2S1,CODECVolumeOutCH3);
+//     // CODEC_PCM3168A->setOutputGain(CODECCH4_I2S1,CODECVolumeOutCH4);
+
+//     if (value < 0.0)   value = 0.0;
+//     if (value > 205.0) value = 205.0;
+
+//     setValue = static_cast<double>((205.0 - value) * 255.0 / 205.0);
+
+//     qDebug() << "updateDSPSpeakerOutputGain" << setValue << " default:" << value << " softPhoneID::" << softPhoneID;
+//     switch (softPhoneID)
+//     {
+//     case 1:
+//         VolumeRecOutDSPCH1 = setValue;
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH1_I2S1,setValue);
+//         // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH1_ADDR+1,setValue);
+//         break;
+//     case 2:
+//         VolumeRecOutDSPCH2 = setValue;
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH2_I2S1,setValue);
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1,setValue);
+//         // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH2_ADDR+1,setValue);
+//         break;
+//     case 3:
+//         VolumeRecOutDSPCH3 = setValue;
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1,setValue);
+//         // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH3_ADDR+1,setValue);
+//         break;
+//     case 4:
+//         VolumeRecOutDSPCH4 = setValue;
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH4_I2S1,setValue);
+//         CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH5_I2S1,setValue);
+//         // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH4_ADDR+1,setValue);
+//         break;
+//     }
+// }
+
 void Mainwindows::updateDSPSpeakerOutputGain(int value, uint8_t softPhoneID)
 {
     qDebug() << "value:" << value;
-    // value = value - 12;
-    double setValue = 1.0;
-    // double dbValue = 0;
-    // if (value == 0) dbValue = 0;
-    // else dbValue =  double(value/(-2));
-    // if (value == 0) setValue = 1;
-    // else {
-    //     setValue = pow(10,dbValue/20.0);
-    // }
 
-    // if (value < 0.0)   value = 0.0;
-    // if (value > 205.0) value = 205.0;
+    if (value < 0)   value = 0;
+    if (value > 205) value = 205;
 
-    // setValue =static_cast<int>((205.0 - value) * 255.0 / 205.0);
+    const double setValue = (205.0 - double(value)) * 255.0 / 205.0;
 
-    // CODEC_PCM3168A->setOutputGain(CODECCH1_I2S1,CODECVolumeOutCH1);
-    // CODEC_PCM3168A->setOutputGain(CODECCH2_I2S1,CODECVolumeOutCH2);
-    // CODEC_PCM3168A->setOutputGain(CODECCH3_I2S1,CODECVolumeOutCH3);
-    // CODEC_PCM3168A->setOutputGain(CODECCH4_I2S1,CODECVolumeOutCH4);
+    qDebug() << "updateDSPSpeakerOutputGain" << setValue
+             << " default:" << value
+             << " softPhoneID::" << softPhoneID;
 
-    if (value < 0.0)   value = 0.0;
-    if (value > 205.0) value = 205.0;
+    // ✅ กัน crash: codec ยังไม่พร้อม
+    if (!CODEC_PCM3168A) {
+        qWarning() << "[DSP] CODEC_PCM3168A is NULL (codecDSPinit not ready?)"
+                   << " -> cache pending gain, skip apply now";
 
-    setValue = static_cast<double>((205.0 - value) * 255.0 / 205.0);
+        // เก็บค่าล่าสุดไว้ รอ codec พร้อมค่อย apply
+        switch (softPhoneID) {
+        case 1: VolumeRecOutDSPCH1 = setValue; break;
+        case 2: VolumeRecOutDSPCH2 = setValue; break;
+        case 3: VolumeRecOutDSPCH3 = setValue; break;
+        case 4: VolumeRecOutDSPCH4 = setValue; break;
+        default: break;
+        }
+        return;
+    }
 
-    qDebug() << "updateDSPSpeakerOutputGain" << setValue << " default:" << value << " softPhoneID::" << softPhoneID;
     switch (softPhoneID)
     {
     case 1:
         VolumeRecOutDSPCH1 = setValue;
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH1_I2S1,setValue);
-        // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH1_ADDR+1,setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH1_I2S1, setValue);
         break;
+
     case 2:
         VolumeRecOutDSPCH2 = setValue;
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH2_I2S1,setValue);
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1,setValue);
-        // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH2_ADDR+1,setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH2_I2S1, setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1, setValue);
         break;
+
     case 3:
         VolumeRecOutDSPCH3 = setValue;
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1,setValue);
-        // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH3_ADDR+1,setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH3_I2S1, setValue);
         break;
+
     case 4:
         VolumeRecOutDSPCH4 = setValue;
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH4_I2S1,setValue);
-        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH5_I2S1,setValue);
-        // SigmaFirmWareDownLoad->setDSPSplitVolume(REC_OUT_LEVEL_CH4_ADDR+1,setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH4_I2S1, setValue);
+        CODEC_PCM3168A->setOutputGainWithoutDSP(CODECCH5_I2S1, setValue);
+        break;
+
+    default:
+        qWarning() << "[DSP] unknown softPhoneID:" << softPhoneID;
         break;
     }
 }
@@ -1849,7 +2485,37 @@ void Mainwindows::setLocation(QString location){
         timeLocation = location;
     }
 }
+void* Mainwindows::ThreadFuncFindRecLog(void* pTr)
+{
+    Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
 
+    while (pThis->m_threadRunning) {
+        const QString bestPath = findBestRecLogPath();
+
+        if (!bestPath.isEmpty()) {
+            if (pThis->m_currentWatchLogPath != bestPath || !pThis->m_logWatcherStarted) {
+                qDebug() << "[FindRecLog] found log path =" << bestPath;
+
+                pThis->m_currentWatchLogPath = bestPath;
+
+                QMetaObject::invokeMethod(pThis, [pThis, bestPath]() {
+                    if (!pThis->m_logWatcher)
+                        return;
+
+                    qDebug() << "[FindRecLog] startWatching =" << bestPath;
+                    pThis->m_logWatcher->startWatching(bestPath);
+                    pThis->m_logWatcherStarted = true;
+                }, Qt::QueuedConnection);
+            }
+        } else {
+            qDebug() << "[FindRecLog] no alsarecd log found in /tmp";
+        }
+
+        QThread::sleep(1);
+    }
+
+    return nullptr;
+}
 void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
 {
     Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
@@ -1872,3 +2538,79 @@ void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
     return nullptr;
 }
 
+bool Mainwindows::setHwclockFromSystem()
+{
+    int result = QProcess::execute("sudo",
+                                   {"hwclock", "-w", "-f", "/dev/rtc1"});
+
+    if (result == 0) {
+        qDebug() << "System -> RTC OK";
+        return true;
+    } else {
+        qWarning() << "System -> RTC FAILED";
+        return false;
+    }
+}
+
+// RTC -> System  (อ่านเวลา RTC มาตั้ง system)
+bool Mainwindows::setSystemFromHwclock()
+{
+    const QDate currentDate = QDate::currentDate();
+    const QDate cutoffDate  = QDate::fromString("2026-02-24", "yyyy-MM-dd"); // ✅ MM = month
+
+    // if (currentDate >= cutoffDate) {
+    //     qDebug() << "[HWCLK] Skip hctosys: system date already >= cutoff" << currentDate;
+    //     return false;
+    // }
+
+    const int result = QProcess::execute("sudo", {"hwclock", "-s", "-f", "/dev/rtc1"});
+    if (result == 0) {
+        qDebug() << "RTC -> System OK";
+        return true;
+    } else {
+        qWarning() << "RTC -> System FAILED";
+        return false;
+    }
+}
+
+QStringList Mainwindows::existingRtcDevs() const
+{
+    QStringList devs;
+    if (QFile::exists("/dev/rtc0")) devs << "/dev/rtc0";
+    if (QFile::exists("/dev/rtc1")) devs << "/dev/rtc1";
+    if (devs.isEmpty() && QFile::exists("/dev/rtc")) devs << "/dev/rtc";
+    return devs;
+}
+
+// เรียก hwclock แบบ async (ไม่ค้าง UI/Thread)
+void Mainwindows::runHwclockAsync(const QStringList &args, const QString &tag)
+{
+    auto *p = new QProcess(this);
+
+    connect(p, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, p, tag](int code, QProcess::ExitStatus st) {
+                const QString out = QString::fromUtf8(p->readAllStandardOutput()).trimmed();
+                const QString err = QString::fromUtf8(p->readAllStandardError()).trimmed();
+
+                if (st == QProcess::NormalExit && code == 0) {
+                    qDebug().noquote() << "[HWCLK]" << tag << "OK"
+                                       << (out.isEmpty() ? "" : ("\nOUT: " + out));
+                } else {
+                    qWarning().noquote() << "[HWCLK]" << tag << "FAIL code=" << code
+                                         << (err.isEmpty() ? "" : ("\nERR: " + err));
+                }
+                p->deleteLater();
+            });
+
+    // ใช้ sudo: ต้องตั้ง sudoers ให้ไม่ถามรหัสผ่าน ไม่งั้น QProcess จะค้างรอ password
+    p->start("sudo", QStringList() << "hwclock" << args);
+}
+
+void Mainwindows::setTimeHWClockSlot()
+{
+    // คุณอยาก “setSystemFromHwclock()” ทุก 5 นาทีใช่ไหม:
+    // setSystemFromHwclock();
+
+    // ถ้าอยาก sync system -> rtc หลังจาก NTP/ตั้งเวลาแล้ว ก็ใช้:
+    setHwclockFromSystem();
+}

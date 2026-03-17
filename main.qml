@@ -1,4 +1,4 @@
-// main.qml
+// main.qml  (FULL FILE)
 
 import QtQuick 2.12
 import QtQuick.Window 2.12
@@ -20,24 +20,34 @@ import QtMultimedia 5.12
 import "iScreenDFqml/pages"
 import "iRecordManage"
 import "./"
+
 Window {
     id: window
     visible: true
-    width: 400
-    height: 1280
-    flags: Qt.FramelessWindowHint | Qt.Window
+    width: 1280
+    height: 720
+    title: "Map Test"
+    minimumWidth: 800
+    minimumHeight: 600
+
+    // flags: Qt.FramelessWindowHint | Qt.Window
+    flags: Qt.Window
+    visibility: Window.Windowed
+
     signal profilesLoaded()
     signal getScreenshot()
     signal qmlCommand(string msg)
     signal sCan(string mode)
     signal signalProfileCards()   // ประกาศ signal
     signal profileWeb(string msg)
+
     property real screenrotation: 0
     property real frequencyUnitValue: -1
     property bool screenOff: false
     property bool widgetView: false
     property bool trigerScan: true
     property bool updateListProfiles: false
+
     // //--------------Recoder-----------------------------------
     signal deviceListUpdated()
     property string serverAddress: "127.0.0.1"
@@ -46,12 +56,12 @@ Window {
     property bool sockStart: false
     property var objectName: []
     property var socketConnectToCpp:""
-//    signal qmlCommand(string msg)
+
     property var currentDate:""
     property var currentTime:""
     property var currentPage:""
     property var totalPages:""
-//    property real screenrotation: 0
+
     property var rowById: ({})
     property var selectedRows: []
     property var selectedItems: []
@@ -87,6 +97,7 @@ Window {
     property bool deviceFound: false
     property string targetFrequencyHz: ""
     property real   targetFrequencyMHz: 0
+
     // main.qml (ส่วนบน ๆ ของไฟล์ หรือใน root item)
     property real monitorCpuPct:   0
     property real monitorCpuMHz:   0
@@ -119,844 +130,824 @@ Window {
     //---------------------------------------------------------------------
     // signal getScreenshot()
     //---------------------Recoder function-------------------------------
-        ListModel {
-            id: listFileRecord
-            property string idDevice: ""
-            property string device: ""
-            property string filename : ""
-            property string created_at: ""
-            property string continuous_count: ""
-            property string file_path: ""
-            property string name: ""
-            property string size: ""
-            property string duration_sec: ""
-            property string parsed_date: ""
-            property bool selected: false
-        }
-        ListModel {
-            id: listoFDevice
-            property string ambient: ""
-            property string chunk: ""
-            property string file_path : ""
-            property string freq: ""
-            property string group: ""
-            property string idDevice: ""
-            property string ip: ""
-            property string last_access: ""
-            property string name: ""
-            property string payload_size: ""
-            property string sid: ""
-            property string terminal_type: ""
-            property string updated_at: ""
-            property string uri: ""
-            property string visible: ""
-            property bool selected: false
-        }
-        Timer {
-            id: timerConnectSocket
-            interval: 2000
-            running: false
-            repeat: false
-            onTriggered: {
-                qmlCommand(socketConnectToCpp)
-                console.log("connect_to_cpp:");
-                var getRecordFiles = '{"menuID":"getRecordFiles"}'
-                console.log("getRecordFiles:",getRecordFiles)
-                qmlCommand(getRecordFiles);
+    ListModel {
+        id: listFileRecord
+        property string idDevice: ""
+        property string device: ""
+        property string filename : ""
+        property string created_at: ""
+        property string continuous_count: ""
+        property string file_path: ""
+        property string name: ""
+        property string size: ""
+        property string duration_sec: ""
+        property string parsed_date: ""
+        property bool selected: false
+    }
 
-                var getRegisterDevicePage = '{"menuID":"getRegisterDevicePage"}'
-                qmlCommand(getRegisterDevicePage)
+    ListModel {
+        id: listoFDevice
+        property string ambient: ""
+        property string chunk: ""
+        property string file_path : ""
+        property string freq: ""
+        property string group: ""
+        property string idDevice: ""
+        property string ip: ""
+        property string last_access: ""
+        property string name: ""
+        property string payload_size: ""
+        property string sid: ""
+        property string terminal_type: ""
+        property string updated_at: ""
+        property string uri: ""
+        property string visible: ""
+        property bool selected: false
+    }
+
+    Timer {
+        id: timerConnectSocket
+        interval: 2000
+        running: false
+        repeat: false
+        onTriggered: {
+            qmlCommand(socketConnectToCpp)
+            console.log("connect_to_cpp:");
+            var getRecordFiles = '{"menuID":"getRecordFiles"}'
+            console.log("getRecordFiles:",getRecordFiles)
+            qmlCommand(getRecordFiles);
+
+            var getRegisterDevicePage = '{"menuID":"getRegisterDevicePage"}'
+            qmlCommand(getRegisterDevicePage)
+        }
+    }
+
+    WebSocket {
+        id: socketCPP
+        url: "ws://127.0.0.1:"+socketPort+""
+        property bool checkuser: true
+
+        onTextMessageReceived: {
+            qmlSubmitTextFiled(message)
+            if (message != ""){
+                console.log("onTextMessageReceived",message);
             }
         }
-        WebSocket {
-            id: socketCPP
-            url: "ws://127.0.0.1:"+socketPort+""
-            property bool checkuser: true
-
-            onTextMessageReceived: {
-                qmlSubmitTextFiled(message)
-                if (message != ""){
-                    console.log("onTextMessageReceived",message);
-                }
-            }
-            onStatusChanged: if (socketCPP.status == WebSocket.Error) {
-                                 console.log("socketCPP Error: " + socketCPP.errorString)
-                                 WebSocket.Open
+        onStatusChanged: if (socketCPP.status == WebSocket.Error) {
+                             console.log("socketCPP Error: " + socketCPP.errorString)
+                             WebSocket.Open
+                         }
+                         else if (socketCPP.status == WebSocket.Open)
+                         {
+                             let hasSentTaggingCommands = false;
+                             console.log("socketCPP Hello World")
+                             if (socketCPP.status == WebSocket.Open && !hasSentTaggingCommands) {
                              }
-                             else if (socketCPP.status == WebSocket.Open)
-                             {
-                                 let hasSentTaggingCommands = false;
-                                 console.log("socketCPP Hello World")
-                                 if (socketCPP.status == WebSocket.Open && !hasSentTaggingCommands) {
-                                 }
 
-                             }
-                             else if (socketCPP.status == WebSocket.Closed)
-                             {
-                                 console.log("Socket closed")
+                         }
+                         else if (socketCPP.status == WebSocket.Closed)
+                         {
+                             console.log("Socket closed")
 
-                             }
-            active: false
-        }
-//======================================================================================================
-        TapBarRecordFiles {
-            id: tabBarRecord
-            anchors.fill: parent
+                         }
+        active: false
+    }
 
-            // RecordFiles → TapBarRecordFiles → main
-            onWavePlayToggleRequested: {
-                console.log("[main] wavePlayToggleRequested wantPlay=", wantPlay,
-                            "concatMode=", concatMode,
-                            "filesArray.length=", filesArray ? filesArray.length : 0)
+    //======================================================================================================
+    TapBarRecordFiles {
+        id: tabBarRecord
+        anchors.fill: parent
 
-                window.waveEditorConcatMode = concatMode
-                window.waveEditorFiles      = filesArray || []
+        // RecordFiles → TapBarRecordFiles → main
+        onWavePlayToggleRequested: {
+            console.log("[main] wavePlayToggleRequested wantPlay=", wantPlay,
+                        "concatMode=", concatMode,
+                        "filesArray.length=", filesArray ? filesArray.length : 0)
 
-                if (wantPlay) {
-                    if (window.waveEditorFiles.length > 0) {
-                        window.waveEditorIndex = 0
+            window.waveEditorConcatMode = concatMode
+            window.waveEditorFiles      = filesArray || []
 
-                        var p = window.waveEditorFiles[0]
-                        var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
+            if (wantPlay) {
+                if (window.waveEditorFiles.length > 0) {
+                    window.waveEditorIndex = 0
 
-                        console.log("[main] start playlist, index=0 url=", url)
+                    var p = window.waveEditorFiles[0]
+                    var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
 
-                        playerlog.stop()
-                        playerlog.source = url
-                        playerlog.play()
-                    } else {
-                        console.warn("[main] wantPlay but filesArray is empty")
-                    }
+                    console.log("[main] start playlist, index=0 url=", url)
+
+                    playerlog.stop()
+                    playerlog.source = url
+                    playerlog.play()
                 } else {
-                    console.log("[main] pause request from WaveEditor")
-                    playerlog.pause()
+                    console.warn("[main] wantPlay but filesArray is empty")
                 }
+            } else {
+                console.log("[main] pause request from WaveEditor")
+                playerlog.pause()
             }
         }
-        function handleRecordFilesUpdate(msg) {
-            console.log("handleRecordFilesUpdate:", msg)
+    }
 
-            if (freezeRecordFilesUpdate) {
-                console.log("handleRecordFilesUpdate: FREEZED (skip update while selecting files)")
-                return
-            }
-            // ถ้าอยู่ในโหมด freeze (กำลังดูผล filter) → ไม่ให้รายการเลื่อน
-            if (recordListFrozen) {
-                console.log("[handleRecordFilesUpdate] ignored because recordListFrozen = true")
-                return
-            }
+    function handleRecordFilesUpdate(msg) {
+        console.log("handleRecordFilesUpdate:", msg)
 
-            var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
-
-            // รองรับทั้ง objectName / menuID = "recordFilesUpdate"
-            if (!obj ||
-                (obj.objectName !== "recordFilesUpdate" && obj.menuID !== "recordFilesUpdate") ||
-                !obj.records)
-                return
-
-            function findIndexByKey(key) {
-                for (var i = 0; i < listFileRecord.count; ++i) {
-                    var item = listFileRecord.get(i)
-                    var itemKey = recordKeyFromData(
-                                      String(item.device),
-                                      String(item.filename),
-                                      String(item.created_at),
-                                      String(item.full_path)
-                                  )
-                    if (itemKey === key)
-                        return i
-                }
-                return -1
-            }
-
-            // records ใหม่ (ส่วนใหญ่จะเป็นชุดไฟล์ล่าสุด)
-            for (var i = obj.records.length - 1; i >= 0; --i) {
-                var r = obj.records[i]
-
-                var created_at  = (r.created_at || "").toString()
-                var parsed_date = (created_at.indexOf("T") !== -1)
-                                  ? created_at.split("T")[0]
-                                  : ""
-
-                var dev   = String(r.device || r.id || "")
-                var fname = String(r.filename || "")
-                var fullp = String(r.full_path || r.file_path || "")
-
-                var key = recordKeyFromData(dev, fname, created_at, fullp)
-
-                var wasSelected = !!selectedMap[key]
-                var idx = findIndexByKey(key)
-
-                // ==== ขนาดไฟล์ ====
-                var sizeBytes = Number(r.size_bytes !== undefined ? r.size_bytes : 0)
-                if (!isFinite(sizeBytes) || sizeBytes < 0)
-                    sizeBytes = 0
-
-
-                var sizeKB = (sizeBytes / 1024)
-                sizeKB = parseFloat(sizeKB.toFixed(2))
-                // เวลา (วินาที)
-                var durSec = Number(r.duration_sec !== undefined ? r.duration_sec : 0)
-                if (!isFinite(durSec) || durSec < 0)
-                    durSec = 0
-
-                var rowData = {
-                    idDevice:          String(r.id || ""),
-                    device:            dev,
-                    filename:          fname,
-                    created_at:        created_at,
-                    continuous_count:  String(r.continuous_count || ""),
-                    file_path:         String(r.file_path || ""),
-                    full_path:         fullp,
-                    name:              String(r.name || ""),
-                    parsed_date:       String(parsed_date),
-
-                    size_bytes:        sizeBytes,              // bytes (numeric)
-                    sizeKB:            sizeKB,                 // KB (numeric)
-                    size:              sizeKB,
-                    size_str:          String(r.size_human || ""),
-                    duration_sec:      durSec,
-
-                    selected:          wasSelected
-                }
-
-                if (idx >= 0) {
-                    // อัปเดตแถวเดิม
-                    listFileRecord.set(idx, rowData)
-                } else {
-                    // แทรกแถวใหม่ด้านบนสุด (ไฟล์ใหม่สุดขึ้นบน)
-                    listFileRecord.insert(0, rowData)
-                }
-            }
+        if (freezeRecordFilesUpdate) {
+            console.log("handleRecordFilesUpdate: FREEZED (skip update while selecting files)")
+            return
         }
-        function clearSelections() {
-            console.log("clearSelections before -> rows:", selectedRows.length,
-                        "items:", selectedItems.length)
-
-            // ล้าง array ฝั่ง selection
-            selectedRows  = []
-            selectedItems = []
-            selectedMap   = {}    // ล้าง map ด้วย เวลาอยากเริ่มใหม่จริง ๆ
-
-            // เคลียร์ role "selected" ใน model
-            if (listFileRecord && listFileRecord.count > 0) {
-                for (var i = 0; i < listFileRecord.count; ++i) {
-                    if (listFileRecord.get(i).selected)
-                        listFileRecord.setProperty(i, "selected", false)
-                }
-            }
-
-            console.log("[select] cleared; rows=", JSON.stringify(selectedRows),
-                        "items=", JSON.stringify(selectedItems),
-                        "mapSize=", Object.keys(selectedMap).length)
+        // ถ้าอยู่ในโหมด freeze (กำลังดูผล filter) → ไม่ให้รายการเลื่อน
+        if (recordListFrozen) {
+            console.log("[handleRecordFilesUpdate] ignored because recordListFrozen = true")
+            return
         }
-        //======update======
-        function handleRecordFilesChunk(msg) {
-            console.log("handleRecordFilesChunk:", msg)
 
-            var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
-            if (!obj || obj.objectName !== "recordFilesChunk" || !obj.records)
-                return
+        var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
 
-            if (typeof obj.page === "number")
-                currentPage = obj.page
-            if (typeof obj.totalPages === "number")
-                totalPages  = obj.totalPages
+        // รองรับทั้ง objectName / menuID = "recordFilesUpdate"
+        if (!obj ||
+            (obj.objectName !== "recordFilesUpdate" && obj.menuID !== "recordFilesUpdate") ||
+            !obj.records)
+            return
 
-            // ล้างแล้วเติมใหม่ (page แรก/เปลี่ยนหน้า)
-            listFileRecord.clear()
-
-            for (var i = 0; i < obj.records.length; ++i) {
-                var r = obj.records[i]
-
-                var created_at  = (r.created_at || "").toString()
-                var parsed_date = (created_at.indexOf("T") !== -1)
-                                  ? created_at.split("T")[0]
-                                  : ""
-
-                var dev   = String(r.device || r.id || "")
-                var fname = String(r.filename || "")
-                var fullp = String(r.full_path || r.file_path || "")
-
-                // key เดียวกับ toggleSelection
-                var key = recordKeyFromData(dev, fname, created_at, fullp)
-                var wasSelected = !!selectedMap[key]
-
-                // ==== ขนาดไฟล์ ====
-                var sizeBytes = Number(r.size_bytes !== undefined ? r.size_bytes : 0)
-                if (!isFinite(sizeBytes) || sizeBytes < 0)
-                    sizeBytes = 0
-
-
-                var sizeKB = (sizeBytes / 1024)
-                sizeKB = parseFloat(sizeKB.toFixed(2))
-
-                // เวลา (วินาที)
-                var durSec = Number(r.duration_sec !== undefined ? r.duration_sec : 0)
-                if (!isFinite(durSec) || durSec < 0)
-                    durSec = 0
-
-                listFileRecord.append({
-                    idDevice:          String(r.id || ""),
-                    device:            dev,
-                    filename:          fname,
-                    created_at:        created_at,
-                    continuous_count:  String(r.continuous_count || ""),
-                    file_path:         String(r.file_path || ""),
-                    full_path:         fullp,
-                    name:              String(r.name || ""),
-                    parsed_date:       String(parsed_date),
-
-                    // --- size / duration เก็บแบบ numeric + string ---
-                    size_bytes:        sizeBytes,                 // bytes
-                    sizeKB:            sizeKB,                    // KB (numeric)
-                    size:              sizeKB,                    // role หลัก (numeric KB)
-                    size_str:          String(r.size_human || ""),// ข้อความสวย ๆ เช่น "52.9 KB"
-                    duration_sec:      durSec,                    // วินาที (numeric)
-
-                    selected:          wasSelected
-                })
+        function findIndexByKey(key) {
+            for (var i = 0; i < listFileRecord.count; ++i) {
+                var item = listFileRecord.get(i)
+                var itemKey = recordKeyFromData(
+                                  String(item.device),
+                                  String(item.filename),
+                                  String(item.created_at),
+                                  String(item.full_path)
+                              )
+                if (itemKey === key)
+                    return i
             }
-            pageReady = true
+            return -1
         }
-        // ===== Entry point =====
-        function handleDeviceUpdated(msg) {
-            var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
-            if (!obj) return
 
-            // 1) snapshot ทั้งชุด
-            if (obj.devices && obj.devices.length !== undefined) {
-                applyDeviceSnapshot(obj.devices)
-                return
+        // records ใหม่ (ส่วนใหญ่จะเป็นชุดไฟล์ล่าสุด)
+        for (var i = obj.records.length - 1; i >= 0; --i) {
+            var r = obj.records[i]
+
+            var created_at  = (r.created_at || "").toString()
+            var parsed_date = (created_at.indexOf("T") !== -1)
+                              ? created_at.split("T")[0]
+                              : ""
+
+            var dev   = String(r.device || r.id || "")
+            var fname = String(r.filename || "")
+            var fullp = String(r.full_path || r.file_path || "")
+
+            var key = recordKeyFromData(dev, fname, created_at, fullp)
+
+            var wasSelected = !!selectedMap[key]
+            var idx = findIndexByKey(key)
+
+            // ==== ขนาดไฟล์ ====
+            var sizeBytes = Number(r.size_bytes !== undefined ? r.size_bytes : 0)
+            if (!isFinite(sizeBytes) || sizeBytes < 0)
+                sizeBytes = 0
+
+            var sizeKB = (sizeBytes / 1024)
+            sizeKB = parseFloat(sizeKB.toFixed(2))
+
+            // เวลา (วินาที)
+            var durSec = Number(r.duration_sec !== undefined ? r.duration_sec : 0)
+            if (!isFinite(durSec) || durSec < 0)
+                durSec = 0
+
+            var rowData = {
+                idDevice:          String(r.id || ""),
+                device:            dev,
+                filename:          fname,
+                created_at:        created_at,
+                continuous_count:  String(r.continuous_count || ""),
+                file_path:         String(r.file_path || ""),
+                full_path:         fullp,
+                name:              String(r.name || ""),
+                parsed_date:       String(parsed_date),
+
+                size_bytes:        sizeBytes,              // bytes (numeric)
+                sizeKB:            sizeKB,                 // KB (numeric)
+                size:              sizeKB,
+                size_str:          String(r.size_human || ""),
+                duration_sec:      durSec,
+
+                selected:          wasSelected
             }
-
-            // 2) update ทีละตัว
-            if (obj.device) {
-                upsertDevice(obj.device)
-                rebuildRowIndex()
-                return
-            }
-
-            console.warn("handleDeviceUpdated: no device/devices field")
-        }
-        // ===== Snapshot mode: replace/update + remove stale =====
-        function applyDeviceSnapshot(devicesArray) {
-            rebuildRowIndex()
-
-            var seen = {}
-
-            // upsert ทุกตัวใน snapshot
-            for (var i = 0; i < devicesArray.length; ++i) {
-                var d = devicesArray[i]
-                if (!d || d.id === undefined) continue
-                upsertDevice(d)
-                seen[String(d.id)] = true
-            }
-
-            // ลบตัวที่ไม่มีใน snapshot แล้ว (stale)
-            for (var r = listoFDevice.count - 1; r >= 0; --r) {
-                var it = listoFDevice.get(r)
-                var key = (it && it.idDevice !== undefined) ? String(it.idDevice) : ""
-                if (key && !seen.hasOwnProperty(key)) {
-                    listoFDevice.remove(r)
-                }
-            }
-
-            rebuildRowIndex()
-        }
-        // ===== Build index: idDevice -> row =====
-        function rebuildRowIndex() {
-            rowById = {}
-            for (var i = 0; i < listoFDevice.count; ++i) {
-                var it = listoFDevice.get(i)
-                if (it && it.idDevice !== undefined) {
-                    rowById[String(it.idDevice)] = i
-                }
-            }
-        }
-        // ===== Convert server device (id, ...) -> model record (idDevice, ...) =====
-        function normalizeDevice(d) {
-            if (!d) return null
-
-            return {
-                idDevice:      (d.id !== undefined ? Number(d.id) : 0),
-                sid:           (d.sid !== undefined ? Number(d.sid) : 0),
-                name:          (d.name !== undefined ? String(d.name) : ""),
-                payload_size:  (d.payload_size !== undefined ? Number(d.payload_size) : 0),
-                terminal_type: (d.terminal_type !== undefined ? Number(d.terminal_type) : 0),
-                ip:            (d.ip !== undefined ? String(d.ip) : ""),
-                uri:           (d.uri !== undefined ? String(d.uri) : ""),
-                freq:          (d.freq !== undefined ? String(d.freq) : ""),     // เก็บเป็น string ชัวร์สุด
-                ambient:       (d.ambient !== undefined ? String(d.ambient) : ""),
-                group:         (d.group !== undefined ? Number(d.group) : 0),
-                visible:       (d.visible !== undefined ? Number(d.visible) : 0),
-                last_access:   (d.last_access !== undefined ? String(d.last_access) : ""),
-                file_path:     (d.file_path !== undefined ? String(d.file_path) : ""),
-                storage_path:  (d.storage_path !== undefined ? String(d.storage_path) : ""),
-                chunk:         (d.chunk !== undefined ? String(d.chunk) : ""),
-                updated_at:    (d.updated_at !== undefined ? String(d.updated_at) : "")
-                // selected จะจัดการใน upsertDevice เพื่อ "รักษาค่าเดิม"
-            }
-        }
-        // ===== Upsert: update existing row or append new row =====
-        function upsertDevice(d) {
-            if (!d || d.id === undefined) return
-
-            var key = String(d.id)
-            var idx = rowById.hasOwnProperty(key) ? rowById[key] : -1
-
-            var rec = normalizeDevice(d)
-            if (!rec) return
 
             if (idx >= 0) {
-                // รักษา selected เดิม
-                var keepSelected = (listoFDevice.get(idx).selected === true)
-
-                // setProperty ทีละ role เพื่อไม่กระทบ role อื่น ๆ
-                listoFDevice.setProperty(idx, "idDevice",      rec.idDevice)
-                listoFDevice.setProperty(idx, "sid",           rec.sid)
-                listoFDevice.setProperty(idx, "name",          rec.name)
-                listoFDevice.setProperty(idx, "payload_size",  rec.payload_size)
-                listoFDevice.setProperty(idx, "terminal_type", rec.terminal_type)
-                listoFDevice.setProperty(idx, "ip",            rec.ip)
-                listoFDevice.setProperty(idx, "uri",           rec.uri)
-                listoFDevice.setProperty(idx, "freq",          rec.freq)
-                listoFDevice.setProperty(idx, "ambient",       rec.ambient)
-                listoFDevice.setProperty(idx, "group",         rec.group)
-                listoFDevice.setProperty(idx, "visible",       rec.visible)
-                listoFDevice.setProperty(idx, "last_access",   rec.last_access)
-                listoFDevice.setProperty(idx, "file_path",     rec.file_path)
-                listoFDevice.setProperty(idx, "storage_path",  rec.storage_path)
-                listoFDevice.setProperty(idx, "chunk",         rec.chunk)
-                listoFDevice.setProperty(idx, "updated_at",    rec.updated_at)
-
-                // selected ไม่ไปยุ่ง (คงเดิม)
-                listoFDevice.setProperty(idx, "selected", keepSelected)
+                // อัปเดตแถวเดิม
+                listFileRecord.set(idx, rowData)
             } else {
-                // append ใหม่: selected = false
-                rec.selected = false
-                listoFDevice.append(rec)
-            }
-
-            // update index ให้ทันที (สำคัญเวลามี upsert ต่อเนื่อง)
-            rebuildRowIndex()
-        }
-
-//======================================================================================================
-        function handleRegisterDevice(msg) {
-            var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
-            var arr = obj && obj.devices ? obj.devices : []
-            console.log("handleRegisterDevice: got", arr.length, "items")
-
-            rebuildRowIndex()
-
-            var seen = {}
-
-            for (var i = 0; i < arr.length; ++i) {
-                var d = arr[i]
-                var idStr = String(d.id)
-                upsertDevice(d)         // ❗ ไม่แตะ selected ในแถวเก่า
-                seen[idStr] = true
-            }
-
-            for (var r = listoFDevice.count - 1; r >= 0; --r) {
-                var it = listoFDevice.get(r)
-                var idStr2 = String(it.idDevice)
-                if (!seen.hasOwnProperty(idStr2)) {
-                    listoFDevice.remove(r)
-                }
-            }
-
-            rebuildRowIndex()
-        }
-        function handleScanDeviceResult(message) {
-            var obj = JSON.parse(message)
-            var arr = obj.devices || []
-            var list = []
-            for (var i = 0; i < arr.length; ++i) {
-                var d = arr[i]
-                if (!d) continue
-                if (d.mounted !== true)
-                    continue
-    //            var label = d.name + "  (" + d.sizeGB.toFixed(1) + " GB)  →  " + d.mountPoint
-                label = d.mountPoint
-                list.push({
-                    text: label
-                })
-    //            list.push({
-    //                text: label,
-    //                name: d.name,
-    //                devPath: d.devPath,
-    //                mountPoint: d.mountPoint,
-    //                sizeGB: d.sizeGB
-    //            })
-            }
-            exportDeviceList = list
-
-            console.log("[handleScanDeviceResult] found", list.length, "devices", label)
-        }
-        function socketConnect() {
-            if (socket.status === WebSocket.Open){
-                connectToServer.running = false
-                connectToServer.repeat = false
-                connectToServer.stop()
-            }else{
-                if(socketPort == 0){
-                    sockStart=false
-                }else{
-                    sockStart=true
-                    if (socketCPP.active === true){
-                        if (socketCPP.status === WebSocket.Open) {
-                            socketCPP.sendTextMessage("Test message from QML!");
-                        }
-                    }
-                    console.log("Reconnecting....")
-                    if (socket.status === WebSocket.Error)
-                    {
-                        console.log("Error: " + socket.errorString)
-                    }
-                    else if (socket.status === WebSocket.Open)
-                    {
-                        console.log("Socket opened")
-                    }
-                    else if (socket.status === WebSocket.Closed)
-                    {
-                        console.log("Socket closed")
-                    }
-                }
+                // แทรกแถวใหม่ด้านบนสุด (ไฟล์ใหม่สุดขึ้นบน)
+                listFileRecord.insert(0, rowData)
             }
         }
-        onSockStartChanged: {
-            socketCPP.active = sockStart
-            console.log("socket.active",socket.active)
-        }
-        function selectedRecords() {
-            var out = []
+    }
+
+    function clearSelections() {
+        console.log("clearSelections before -> rows:", selectedRows.length,
+                    "items:", selectedItems.length)
+
+        // ล้าง array ฝั่ง selection
+        selectedRows  = []
+        selectedItems = []
+        selectedMap   = {}    // ล้าง map ด้วย เวลาอยากเริ่มใหม่จริง ๆ
+
+        // เคลียร์ role "selected" ใน model
+        if (listFileRecord && listFileRecord.count > 0) {
             for (var i = 0; i < listFileRecord.count; ++i) {
-                var r = listFileRecord.get(i)
-                if (r && r.selected === true) out.push(r)
+                if (listFileRecord.get(i).selected)
+                    listFileRecord.setProperty(i, "selected", false)
             }
-            return out
         }
-        function recordToPath(rec) {
-            var dir  = String(rec.file_path || "").replace(/\/+$/,"")
-            var file = String(rec.filename  || "").replace(/^\/+/,"")
-            return (dir && file) ? (dir + "/" + file) : ""
-        }
-        function playSelectedInWaveEditor() {
-            var recs = selectedRecords()
-            waveEditor.setFilesFromRecords(recs)
-            waveEditor.playAllFiles(0)
-        }
-        function getSelectedCount() { return selectedRows.length }
-        function getSelectedList() { return selectedItems.slice() }
-        function recordKeyFromData(device, filename, created_at, full_path) {
-            if (full_path && full_path.length)
-                return String(full_path)
 
-            return String(filename) + "|" + String(created_at)
-        }
-        function recordKeyFromModelRow(row) {
-            var it = listFileRecord.get(row)
-            if (!it) return ""
-            return recordKeyFromData(
-                        it.device || it.idDevice || "",
-                        it.filename || "",
-                        it.created_at || "",
-                        it.full_path || it.file_path || ""
-                    )
-        }
-        function toggleSelection(row, checked) {
-            console.log("toggleSelection->", "[select] row=", row, "checked=", checked)
+        console.log("[select] cleared; rows=", JSON.stringify(selectedRows),
+                    "items=", JSON.stringify(selectedItems),
+                    "mapSize=", Object.keys(selectedMap).length)
+    }
 
-            // กัน row ผิดปกติ
-            if (row < 0 || row >= listFileRecord.count) {
-                console.warn("toggleSelection: invalid row", row, "count=", listFileRecord.count)
-                return
+    //======update======
+    function handleRecordFilesChunk(msg) {
+        console.log("handleRecordFilesChunk:", msg)
+
+        var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
+        if (!obj || obj.objectName !== "recordFilesChunk" || !obj.records)
+            return
+
+        if (typeof obj.page === "number")
+            currentPage = obj.page
+        if (typeof obj.totalPages === "number")
+            totalPages  = obj.totalPages
+
+        // ล้างแล้วเติมใหม่ (page แรก/เปลี่ยนหน้า)
+        listFileRecord.clear()
+
+        for (var i = 0; i < obj.records.length; ++i) {
+            var r = obj.records[i]
+
+            var created_at  = (r.created_at || "").toString()
+            var parsed_date = (created_at.indexOf("T") !== -1)
+                              ? created_at.split("T")[0]
+                              : ""
+
+            var dev   = String(r.device || r.id || "")
+            var fname = String(r.filename || "")
+            var fullp = String(r.full_path || r.file_path || "")
+
+            // key เดียวกับ toggleSelection
+            var key = recordKeyFromData(dev, fname, created_at, fullp)
+            var wasSelected = !!selectedMap[key]
+
+            // ==== ขนาดไฟล์ ====
+            var sizeBytes = Number(r.size_bytes !== undefined ? r.size_bytes : 0)
+            if (!isFinite(sizeBytes) || sizeBytes < 0)
+                sizeBytes = 0
+
+            var sizeKB = (sizeBytes / 1024)
+            sizeKB = parseFloat(sizeKB.toFixed(2))
+
+            // เวลา (วินาที)
+            var durSec = Number(r.duration_sec !== undefined ? r.duration_sec : 0)
+            if (!isFinite(durSec) || durSec < 0)
+                durSec = 0
+
+            listFileRecord.append({
+                idDevice:          String(r.id || ""),
+                device:            dev,
+                filename:          fname,
+                created_at:        created_at,
+                continuous_count:  String(r.continuous_count || ""),
+                file_path:         String(r.file_path || ""),
+                full_path:         fullp,
+                name:              String(r.name || ""),
+                parsed_date:       String(parsed_date),
+
+                // --- size / duration เก็บแบบ numeric + string ---
+                size_bytes:        sizeBytes,                 // bytes
+                sizeKB:            sizeKB,                    // KB (numeric)
+                size:              sizeKB,                    // role หลัก (numeric KB)
+                size_str:          String(r.size_human || ""),// ข้อความสวย ๆ เช่น "52.9 KB"
+                duration_sec:      durSec,                    // วินาที (numeric)
+
+                selected:          wasSelected
+            })
+        }
+        pageReady = true
+    }
+
+    // ===== Entry point =====
+    function handleDeviceUpdated(msg) {
+        var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
+        if (!obj) return
+
+        // 1) snapshot ทั้งชุด
+        if (obj.devices && obj.devices.length !== undefined) {
+            applyDeviceSnapshot(obj.devices)
+            return
+        }
+
+        // 2) update ทีละตัว
+        if (obj.device) {
+            upsertDevice(obj.device)
+            rebuildRowIndex()
+            return
+        }
+
+        console.warn("handleDeviceUpdated: no device/devices field")
+    }
+
+    // ===== Snapshot mode: replace/update + remove stale =====
+    function applyDeviceSnapshot(devicesArray) {
+        rebuildRowIndex()
+
+        var seen = {}
+
+        // upsert ทุกตัวใน snapshot
+        for (var i = 0; i < devicesArray.length; ++i) {
+            var d = devicesArray[i]
+            if (!d || d.id === undefined) continue
+            upsertDevice(d)
+            seen[String(d.id)] = true
+        }
+
+        // ลบตัวที่ไม่มีใน snapshot แล้ว (stale)
+        for (var r = listoFDevice.count - 1; r >= 0; --r) {
+            var it = listoFDevice.get(r)
+            var key = (it && it.idDevice !== undefined) ? String(it.idDevice) : ""
+            if (key && !seen.hasOwnProperty(key)) {
+                listoFDevice.remove(r)
             }
+        }
 
-            var it = listFileRecord.get(row)
-            if (!it) {
-                console.warn("toggleSelection: no item at row", row)
-                return
+        rebuildRowIndex()
+    }
+
+    // ===== Build index: idDevice -> row =====
+    function rebuildRowIndex() {
+        rowById = {}
+        for (var i = 0; i < listoFDevice.count; ++i) {
+            var it = listoFDevice.get(i)
+            if (it && it.idDevice !== undefined) {
+                rowById[String(it.idDevice)] = i
             }
+        }
+    }
 
-            // --- ดึง key หลักจาก row ปัจจุบัน ---
-            var idStr  = String(it.idDevice || it.device || "")
-            var fname  = String(it.filename || "")
-            var ctime  = String(it.created_at || "")
-            var fpath  = String(it.full_path || it.file_path || "")
-            var dev    = String(it.device || "")
-            var name   = String(it.name || "")
-            var pdate  = String(it.parsed_date || "")
+    // ===== Convert server device (id, ...) -> model record (idDevice, ...) =====
+    function normalizeDevice(d) {
+        if (!d) return null
 
-            // ขนาดไฟล์ (KB numeric)
-            var sizeKB_local = 0.0
-            if (it.size_bytes !== undefined && it.size_bytes !== null && it.size_bytes !== "") {
-                var bytes = Number(it.size_bytes)
-                if (isFinite(bytes) && bytes > 0)
-                    sizeKB_local = bytes / 1024.0
-            } else if (it.size !== undefined && it.size !== null && it.size !== "") {
-                var maybe = Number(it.size)
-                if (isFinite(maybe) && maybe > 0)
-                    sizeKB_local = maybe
+        return {
+            idDevice:      (d.id !== undefined ? Number(d.id) : 0),
+            sid:           (d.sid !== undefined ? Number(d.sid) : 0),
+            name:          (d.name !== undefined ? String(d.name) : ""),
+            payload_size:  (d.payload_size !== undefined ? Number(d.payload_size) : 0),
+            terminal_type: (d.terminal_type !== undefined ? Number(d.terminal_type) : 0),
+            ip:            (d.ip !== undefined ? String(d.ip) : ""),
+            uri:           (d.uri !== undefined ? String(d.uri) : ""),
+            freq:          (d.freq !== undefined ? String(d.freq) : ""),     // เก็บเป็น string ชัวร์สุด
+            ambient:       (d.ambient !== undefined ? String(d.ambient) : ""),
+            group:         (d.group !== undefined ? Number(d.group) : 0),
+            visible:       (d.visible !== undefined ? Number(d.visible) : 0),
+            last_access:   (d.last_access !== undefined ? String(d.last_access) : ""),
+            file_path:     (d.file_path !== undefined ? String(d.file_path) : ""),
+            storage_path:  (d.storage_path !== undefined ? String(d.storage_path) : ""),
+            chunk:         (d.chunk !== undefined ? String(d.chunk) : ""),
+            updated_at:    (d.updated_at !== undefined ? String(d.updated_at) : "")
+            // selected จะจัดการใน upsertDevice เพื่อ "รักษาค่าเดิม"
+        }
+    }
+
+    // ===== Upsert: update existing row or append new row =====
+    function upsertDevice(d) {
+        if (!d || d.id === undefined) return
+
+        var key = String(d.id)
+        var idx = rowById.hasOwnProperty(key) ? rowById[key] : -1
+
+        var rec = normalizeDevice(d)
+        if (!rec) return
+
+        if (idx >= 0) {
+            // รักษา selected เดิม
+            var keepSelected = (listoFDevice.get(idx).selected === true)
+
+            // setProperty ทีละ role เพื่อไม่กระทบ role อื่น ๆ
+            listoFDevice.setProperty(idx, "idDevice",      rec.idDevice)
+            listoFDevice.setProperty(idx, "sid",           rec.sid)
+            listoFDevice.setProperty(idx, "name",          rec.name)
+            listoFDevice.setProperty(idx, "payload_size",  rec.payload_size)
+            listoFDevice.setProperty(idx, "terminal_type", rec.terminal_type)
+            listoFDevice.setProperty(idx, "ip",            rec.ip)
+            listoFDevice.setProperty(idx, "uri",           rec.uri)
+            listoFDevice.setProperty(idx, "freq",          rec.freq)
+            listoFDevice.setProperty(idx, "ambient",       rec.ambient)
+            listoFDevice.setProperty(idx, "group",         rec.group)
+            listoFDevice.setProperty(idx, "visible",       rec.visible)
+            listoFDevice.setProperty(idx, "last_access",   rec.last_access)
+            listoFDevice.setProperty(idx, "file_path",     rec.file_path)
+            listoFDevice.setProperty(idx, "storage_path",  rec.storage_path)
+            listoFDevice.setProperty(idx, "chunk",         rec.chunk)
+            listoFDevice.setProperty(idx, "updated_at",    rec.updated_at)
+
+            // selected ไม่ไปยุ่ง (คงเดิม)
+            listoFDevice.setProperty(idx, "selected", keepSelected)
+        } else {
+            // append ใหม่: selected = false
+            rec.selected = false
+            listoFDevice.append(rec)
+        }
+
+        // update index ให้ทันที (สำคัญเวลามี upsert ต่อเนื่อง)
+        rebuildRowIndex()
+    }
+
+    //======================================================================================================
+    function handleRegisterDevice(msg) {
+        var obj = (typeof msg === "string") ? JSON.parse(msg) : msg
+        var arr = obj && obj.devices ? obj.devices : []
+        console.log("handleRegisterDevice: got", arr.length, "items")
+
+        rebuildRowIndex()
+
+        var seen = {}
+
+        for (var i = 0; i < arr.length; ++i) {
+            var d = arr[i]
+            var idStr = String(d.id)
+            upsertDevice(d)         // ❗ ไม่แตะ selected ในแถวเก่า
+            seen[idStr] = true
+        }
+
+        for (var r = listoFDevice.count - 1; r >= 0; --r) {
+            var it = listoFDevice.get(r)
+            var idStr2 = String(it.idDevice)
+            if (!seen.hasOwnProperty(idStr2)) {
+                listoFDevice.remove(r)
             }
+        }
 
-            // duration จาก row (sec)
-            var durSec = 0.0
-            if (it.duration_sec !== undefined && it.duration_sec !== null && it.duration_sec !== "") {
-                var d = Number(it.duration_sec)
-                if (isFinite(d) && d > 0)
-                    durSec = d
-            }
+        rebuildRowIndex()
+    }
 
-            var key = recordKeyFromData(idStr, fname, ctime, fpath)
+    function handleScanDeviceResult(message) {
+        var obj = JSON.parse(message)
+        var arr = obj.devices || []
+        var list = []
+        for (var i = 0; i < arr.length; ++i) {
+            var d = arr[i]
+            if (!d) continue
+            if (d.mounted !== true)
+                continue
+            label = d.mountPoint
+            list.push({
+                text: label
+            })
+        }
+        exportDeviceList = list
+        console.log("[handleScanDeviceResult] found", list.length, "devices", label)
+    }
 
-            if (checked) {
-                // sync กับ model ด้วย (เผื่อที่อื่นอ่าน role "selected")
-                listFileRecord.setProperty(row, "selected", true)
-
-                // --- selectedRows: เก็บ index ของแถวที่ถูกเลือก ---
-                if (selectedRows.indexOf(row) === -1)
-                    selectedRows.push(row)
-
-                // --- selectedItems: เก็บ object ไฟล์ไว้ใช้กับ WaveEditor ---
-                var existIndex = -1
-                for (var i = 0; i < selectedItems.length; ++i) {
-                    if ((selectedItems[i].key || "") === key) {
-                        existIndex = i
-                        break
+    function socketConnect() {
+        if (socket.status === WebSocket.Open){
+            connectToServer.running = false
+            connectToServer.repeat = false
+            connectToServer.stop()
+        }else{
+            if(socketPort == 0){
+                sockStart=false
+            }else{
+                sockStart=true
+                if (socketCPP.active === true){
+                    if (socketCPP.status === WebSocket.Open) {
+                        socketCPP.sendTextMessage("Test message from QML!");
                     }
                 }
-
-                var entry = {
-                    key:          key,
-                    row:          row,
-                    idDevice:     idStr,
-                    device:       dev,
-                    filename:     fname,
-                    created_at:   ctime,
-                    parsed_date:  pdate,
-                    file_path:    String(it.file_path || ""),
-                    full_path:    fpath,
-
-                    // สำคัญ: ต้องมี size / duration_sec ให้ WaveEditor ใช้
-                    size:         sizeKB_local,   // numeric (KB)
-                    size_bytes:   (it.size_bytes !== undefined && it.size_bytes !== null && it.size_bytes !== "")
-                                  ? it.size_bytes
-                                  : Math.round(sizeKB_local * 1024.0),
-                    duration_sec: durSec,
-
-                    name:         name
+                console.log("Reconnecting....")
+                if (socket.status === WebSocket.Error)
+                {
+                    console.log("Error: " + socket.errorString)
                 }
-
-                if (existIndex >= 0)
-                    selectedItems[existIndex] = entry
-                else
-                    selectedItems.push(entry)
-
-                // --- selectedMap: ใช้จำข้าม page / ข้าม refresh ---
-                selectedMap[key] = true
-
-            } else {
-                // sync กับ model
-                listFileRecord.setProperty(row, "selected", false)
-
-                // เอา row ออกจาก selectedRows
-                var idx = selectedRows.indexOf(row)
-                if (idx !== -1)
-                    selectedRows.splice(idx, 1)
-
-                // เอาออกจาก selectedItems ตาม key
-                for (var j = selectedItems.length - 1; j >= 0; --j) {
-                    if ((selectedItems[j].key || "") === key)
-                        selectedItems.splice(j, 1)
+                else if (socket.status === WebSocket.Open)
+                {
+                    console.log("Socket opened")
                 }
-
-                // ลบ flag ใน map
-                if (selectedMap[key])
-                    delete selectedMap[key]
-            }
-
-            // ===== Recompute totalsizeKB + totalDurationSecSelected =====
-            var sumKB = 0.0
-            var sumSec = 0.0
-            for (var kk = 0; kk < selectedItems.length; ++kk) {
-                var si = selectedItems[kk]
-                var kb = Number(si.size)
-                if (isFinite(kb) && kb > 0) sumKB += kb
-
-                var ds = Number(si.duration_sec)
-                if (isFinite(ds) && ds > 0) sumSec += ds
-            }
-
-            // ⚠️ totalsizeKB / totalDurationSecSelected ต้องประกาศเป็น property ที่ scope นี้เห็นได้
-            totalsizeKB = sumKB
-            totalDurationSecSelected = sumSec
-
-            console.log("[TOTAL] totalsizeKB=", totalsizeKB.toFixed(3),
-                        "totalDurationSecSelected=", totalDurationSecSelected.toFixed(3))
-
-            console.log("[select] row=", row,
-                        "checked=", checked,
-                        "selectedRows.count=", selectedRows.length,
-                        "selectedItems.count=", selectedItems.length,
-                        "selectedMap.size=", Object.keys(selectedMap).length)
-
-            // debug ดูว่าตอนนี้ selectedItems มี size/dur หรือยัง
-            for (var k = 0; k < selectedItems.length; ++k) {
-                var s = selectedItems[k]
-                console.log("   [Sel]", k, s.full_path,
-                            "sizeKB=", s.size,
-                            "dur_sec=", s.duration_sec)
+                else if (socket.status === WebSocket.Closed)
+                {
+                    console.log("Socket closed")
+                }
             }
         }
-        function toNumberSafe(v, def) {
-            var n = Number(v)
-            return (isFinite(n) ? n : (def !== undefined ? def : 0))
-        }
-        function recomputeTotalsFromSelectedItems() {
-            var sumKB = 0.0
-            var sumSec = 0.0
+    }
 
+    onSockStartChanged: {
+        socketCPP.active = sockStart
+        console.log("socket.active",socket.active)
+    }
+
+    function selectedRecords() {
+        var out = []
+        for (var i = 0; i < listFileRecord.count; ++i) {
+            var r = listFileRecord.get(i)
+            if (r && r.selected === true) out.push(r)
+        }
+        return out
+    }
+
+    function recordToPath(rec) {
+        var dir  = String(rec.file_path || "").replace(/\/+$/,"")
+        var file = String(rec.filename  || "").replace(/^\/+/,"")
+        return (dir && file) ? (dir + "/" + file) : ""
+    }
+
+    function playSelectedInWaveEditor() {
+        var recs = selectedRecords()
+        waveEditor.setFilesFromRecords(recs)
+        waveEditor.playAllFiles(0)
+    }
+
+    function getSelectedCount() { return selectedRows.length }
+    function getSelectedList() { return selectedItems.slice() }
+
+    function recordKeyFromData(device, filename, created_at, full_path) {
+        if (full_path && full_path.length)
+            return String(full_path)
+
+        return String(filename) + "|" + String(created_at)
+    }
+
+    function recordKeyFromModelRow(row) {
+        var it = listFileRecord.get(row)
+        if (!it) return ""
+        return recordKeyFromData(
+                    it.device || it.idDevice || "",
+                    it.filename || "",
+                    it.created_at || "",
+                    it.full_path || it.file_path || ""
+                )
+    }
+
+    function toggleSelection(row, checked) {
+        console.log("toggleSelection->", "[select] row=", row, "checked=", checked)
+
+        if (row < 0 || row >= listFileRecord.count) {
+            console.warn("toggleSelection: invalid row", row, "count=", listFileRecord.count)
+            return
+        }
+
+        var it = listFileRecord.get(row)
+        if (!it) {
+            console.warn("toggleSelection: no item at row", row)
+            return
+        }
+
+        var idStr  = String(it.idDevice || it.device || "")
+        var fname  = String(it.filename || "")
+        var ctime  = String(it.created_at || "")
+        var fpath  = String(it.full_path || it.file_path || "")
+        var dev    = String(it.device || "")
+        var name   = String(it.name || "")
+        var pdate  = String(it.parsed_date || "")
+
+        var sizeKB_local = 0.0
+        if (it.size_bytes !== undefined && it.size_bytes !== null && it.size_bytes !== "") {
+            var bytes = Number(it.size_bytes)
+            if (isFinite(bytes) && bytes > 0)
+                sizeKB_local = bytes / 1024.0
+        } else if (it.size !== undefined && it.size !== null && it.size !== "") {
+            var maybe = Number(it.size)
+            if (isFinite(maybe) && maybe > 0)
+                sizeKB_local = maybe
+        }
+
+        var durSec = 0.0
+        if (it.duration_sec !== undefined && it.duration_sec !== null && it.duration_sec !== "") {
+            var d = Number(it.duration_sec)
+            if (isFinite(d) && d > 0)
+                durSec = d
+        }
+
+        var key = recordKeyFromData(idStr, fname, ctime, fpath)
+
+        if (checked) {
+            listFileRecord.setProperty(row, "selected", true)
+
+            if (selectedRows.indexOf(row) === -1)
+                selectedRows.push(row)
+
+            var existIndex = -1
             for (var i = 0; i < selectedItems.length; ++i) {
-                var s = selectedItems[i] || {}
-
-                // sizeKB
-                var kb = 0.0
-                if (s.size_bytes !== undefined && s.size_bytes !== null && s.size_bytes !== "") {
-                    kb = toNumberSafe(s.size_bytes, 0) / 1024.0
-                } else if (s.size !== undefined && s.size !== null && s.size !== "") {
-                    kb = toNumberSafe(s.size, 0) // assume already KB
-                }
-                sumKB += kb
-
-                // duration_sec
-                var ds = toNumberSafe(s.duration_sec, 0)
-                sumSec += ds
-            }
-
-            totalsizeKB = sumKB
-            totalDurationSecSelected = sumSec
-
-            console.log("[TOTAL] totalsizeKB=", totalsizeKB.toFixed(3),
-                        "totalDurationSecSelected=", totalDurationSecSelected.toFixed(3))
-        }
-        function restoreSelectionFromTxtAndSyncModel() {
-            console.log("[RESTORE] start restoreSelectionFromTxtAndSyncModel()")
-
-            if (!freezeRecordFilesUpdate) {
-                console.log("[RESTORE] skip เพราะ freezeRecordFilesUpdate=false")
-                return
-            }
-
-            if (!fileReader || !fileReader.loadWaveSelectionState) {
-                console.log("[RESTORE] fileReader not ready")
-                return
-            }
-
-            var st = fileReader.loadWaveSelectionState()
-            if (!st || !st.ok || !st.files || st.files.length === 0) {
-                console.log("[RESTORE] no saved selection -> do nothing")
-                return
-            }
-
-            console.log("[RESTORE] loaded files =", st.files.length, "summary =", JSON.stringify(st.summary))
-
-            // ทำ set สำหรับ lookup เร็ว
-            var setMap = {}
-            for (var i = 0; i < st.files.length; ++i) {
-                setMap[String(st.files[i])] = true
-            }
-
-            // 1) sync model.selected ให้ตรงกับ txt
-            var hit = 0
-            for (var r = 0; r < listFileRecord.count; ++r) {
-                var it = listFileRecord.get(r)
-                var fp = (it && it.full_path) ? String(it.full_path) : ""
-                var want = !!setMap[fp]
-                if (!!it.selected !== want) {
-                    listFileRecord.setProperty(r, "selected", want)
-                }
-                if (want) hit++
-            }
-            console.log("[RESTORE] synced model.selected hit =", hit)
-
-            // 2) วาด waveform จากไฟล์ใน txt (ส่งเป็น string list ได้เลย)
-            if (editor && editor.setFiles) {
-                editor.setFiles(st.files)
-                console.log("[RESTORE] editor.setFiles(files) called")
-            }
-        }
-        function getSelectedIds() {
-            var ids = []
-            for (var i=0;i<selectedItems.length;i++)
-                ids.push(selectedItems[i].idDevice)
-            return ids
-        }
-        MediaPlayer {
-            id: playerlog
-            volume: playerVolume
-            autoPlay: false
-
-            onStatusChanged: {
-                console.log("[playerlog] status =", status, "position =", position)
-
-                // ไฟล์จบ (EndOfMedia) → ถ้า concatMode = true ให้เล่นไฟล์ถัดไป
-                if (status === MediaPlayer.EndOfMedia && window.waveEditorConcatMode) {
-                    if (!window.waveEditorFiles || window.waveEditorFiles.length === 0)
-                        return;
-
-                    var nextIndex = window.waveEditorIndex + 1
-                    if (nextIndex < window.waveEditorFiles.length) {
-                        window.waveEditorIndex = nextIndex
-
-                        var p = window.waveEditorFiles[nextIndex]
-                        var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
-
-                        console.log("[playerlog] play next:", nextIndex, url)
-                        playerlog.stop()
-                        playerlog.source = url
-                        playerlog.play()
-                    } else {
-                        console.log("[playerlog] playlist finished")
-                        // อยาก reset index ก็ได้
-                        // window.waveEditorIndex = -1
-                    }
-                }
-            }
-
-            onError: {
-                console.log("[playerlog] error =", error, "errorString =", errorString)
-            }
-        }
-
-//======================================================================================================
-        function findChildByProperty(parent, propertyName, propertyValue, compareCb) {
-            var obj = null
-            if (parent === null)
-                return null
-            var children = parent.children
-
-            for (var i = 0; i < children.length; i++) {
-                obj = children[i]
-                if (obj.hasOwnProperty(propertyName)) {
-                    if (compareCb !== null) {
-                        if (compareCb(obj[propertyName], propertyValue))
-                            break
-                    } else if (obj[propertyName] === propertyValue)
-                    {
-                        break
-                    }
-                }
-                obj = findChildByProperty(obj, propertyName, propertyValue, compareCb)
-                if (obj)
+                if ((selectedItems[i].key || "") === key) {
+                    existIndex = i
                     break
+                }
             }
-            return obj
+
+            var entry = {
+                key:          key,
+                row:          row,
+                idDevice:     idStr,
+                device:       dev,
+                filename:     fname,
+                created_at:   ctime,
+                parsed_date:  pdate,
+                file_path:    String(it.file_path || ""),
+                full_path:    fpath,
+
+                size:         sizeKB_local,
+                size_bytes:   (it.size_bytes !== undefined && it.size_bytes !== null && it.size_bytes !== "")
+                              ? it.size_bytes
+                              : Math.round(sizeKB_local * 1024.0),
+                duration_sec: durSec,
+
+                name:         name
+            }
+
+            if (existIndex >= 0)
+                selectedItems[existIndex] = entry
+            else
+                selectedItems.push(entry)
+
+            selectedMap[key] = true
+
+        } else {
+            listFileRecord.setProperty(row, "selected", false)
+
+            var idx = selectedRows.indexOf(row)
+            if (idx !== -1)
+                selectedRows.splice(idx, 1)
+
+            for (var j = selectedItems.length - 1; j >= 0; --j) {
+                if ((selectedItems[j].key || "") === key)
+                    selectedItems.splice(j, 1)
+            }
+
+            if (selectedMap[key])
+                delete selectedMap[key]
         }
 
-//==================================== qmlSubmitTextFiled ====================================================
+        var sumKB = 0.0
+        var sumSec = 0.0
+        for (var kk = 0; kk < selectedItems.length; ++kk) {
+            var si = selectedItems[kk]
+            var kb = Number(si.size)
+            if (isFinite(kb) && kb > 0) sumKB += kb
+
+            var ds = Number(si.duration_sec)
+            if (isFinite(ds) && ds > 0) sumSec += ds
+        }
+
+        totalsizeKB = sumKB
+        totalDurationSecSelected = sumSec
+
+        console.log("[TOTAL] totalsizeKB=", totalsizeKB.toFixed(3),
+                    "totalDurationSecSelected=", totalDurationSecSelected.toFixed(3))
+    }
+
+    function toNumberSafe(v, def) {
+        var n = Number(v)
+        return (isFinite(n) ? n : (def !== undefined ? def : 0))
+    }
+
+    function recomputeTotalsFromSelectedItems() {
+        var sumKB = 0.0
+        var sumSec = 0.0
+
+        for (var i = 0; i < selectedItems.length; ++i) {
+            var s = selectedItems[i] || {}
+
+            var kb = 0.0
+            if (s.size_bytes !== undefined && s.size_bytes !== null && s.size_bytes !== "") {
+                kb = toNumberSafe(s.size_bytes, 0) / 1024.0
+            } else if (s.size !== undefined && s.size !== null && s.size !== "") {
+                kb = toNumberSafe(s.size, 0)
+            }
+            sumKB += kb
+
+            var ds = toNumberSafe(s.duration_sec, 0)
+            sumSec += ds
+        }
+
+        totalsizeKB = sumKB
+        totalDurationSecSelected = sumSec
+
+        console.log("[TOTAL] totalsizeKB=", totalsizeKB.toFixed(3),
+                    "totalDurationSecSelected=", totalDurationSecSelected.toFixed(3))
+    }
+
+    function restoreSelectionFromTxtAndSyncModel() {
+        console.log("[RESTORE] start restoreSelectionFromTxtAndSyncModel()")
+
+        if (!freezeRecordFilesUpdate) {
+            console.log("[RESTORE] skip เพราะ freezeRecordFilesUpdate=false")
+            return
+        }
+
+        if (!fileReader || !fileReader.loadWaveSelectionState) {
+            console.log("[RESTORE] fileReader not ready")
+            return
+        }
+
+        var st = fileReader.loadWaveSelectionState()
+        if (!st || !st.ok || !st.files || st.files.length === 0) {
+            console.log("[RESTORE] no saved selection -> do nothing")
+            return
+        }
+
+        console.log("[RESTORE] loaded files =", st.files.length, "summary =", JSON.stringify(st.summary))
+
+        var setMap = {}
+        for (var i = 0; i < st.files.length; ++i) {
+            setMap[String(st.files[i])] = true
+        }
+
+        var hit = 0
+        for (var r = 0; r < listFileRecord.count; ++r) {
+            var it = listFileRecord.get(r)
+            var fp = (it && it.full_path) ? String(it.full_path) : ""
+            var want = !!setMap[fp]
+            if (!!it.selected !== want) {
+                listFileRecord.setProperty(r, "selected", want)
+            }
+            if (want) hit++
+        }
+        console.log("[RESTORE] synced model.selected hit =", hit)
+
+        if (editor && editor.setFiles) {
+            editor.setFiles(st.files)
+            console.log("[RESTORE] editor.setFiles(files) called")
+        }
+    }
+
+    function getSelectedIds() {
+        var ids = []
+        for (var i=0;i<selectedItems.length;i++)
+            ids.push(selectedItems[i].idDevice)
+        return ids
+    }
+
+    MediaPlayer {
+        id: playerlog
+        volume: playerVolume
+        autoPlay: false
+
+        onStatusChanged: {
+            console.log("[playerlog] status =", status, "position =", position)
+
+            if (status === MediaPlayer.EndOfMedia && window.waveEditorConcatMode) {
+                if (!window.waveEditorFiles || window.waveEditorFiles.length === 0)
+                    return;
+
+                var nextIndex = window.waveEditorIndex + 1
+                if (nextIndex < window.waveEditorFiles.length) {
+                    window.waveEditorIndex = nextIndex
+
+                    var p = window.waveEditorFiles[nextIndex]
+                    var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
+
+                    console.log("[playerlog] play next:", nextIndex, url)
+                    playerlog.stop()
+                    playerlog.source = url
+                    playerlog.play()
+                } else {
+                    console.log("[playerlog] playlist finished")
+                }
+            }
+        }
+
+        onError: {
+            console.log("[playerlog] error =", error, "errorString =", errorString)
+        }
+    }
+
+    //======================================================================================================
+    function findChildByProperty(parent, propertyName, propertyValue, compareCb) {
+        var obj = null
+        if (parent === null)
+            return null
+        var children = parent.children
+
+        for (var i = 0; i < children.length; i++) {
+            obj = children[i]
+            if (obj.hasOwnProperty(propertyName)) {
+                if (compareCb !== null) {
+                    if (compareCb(obj[propertyName], propertyValue))
+                        break
+                } else if (obj[propertyName] === propertyValue)
+                {
+                    break
+                }
+            }
+            obj = findChildByProperty(obj, propertyName, propertyValue, compareCb)
+            if (obj)
+                break
+        }
+        return obj
+    }
+
+    //==================================== qmlSubmitTextFiled ====================================================
     function qmlSubmitTextFiled(message){
         console.log("qmlSubmitTextFiled",message)
         var JsonObject = JSON.parse(message);
@@ -971,7 +962,6 @@ Window {
             var JsonObject;
             try {
                 JsonObject = JSON.parse(message);
-//                console.log(JsonObject.menuID)
             }
             catch(error)
             {
@@ -1012,7 +1002,6 @@ Window {
             console.log("QML_recordFilesChunk:", message)
             handleRecordFilesChunk(message)
             return
-//            handleRecordFilesChunk(message)
         }else if(objectName === "searchRecordFilesResult"){
             console.log("QML_searchRecordFilesResult:", message);
             handleRecordFilesChunk(message)
@@ -1027,24 +1016,16 @@ Window {
         }else if (menuID === "deviceList") {
             console.log("deviceList:", message)
             handleDeviceUpdated(message)
-        }/*else if (menuID === "statusScanDevice" || menuID === "scanDeivce") {
-            statusDeviceScan = JsonObject.status
-            console.log("statusScanDevice:", message, "-> statusDeviceScan =", statusDeviceScan,JsonObject.status)
-
-        }*/else if (menuID === "statusScanDevice" || menuID === "scanDeivce") {
+        }else if (menuID === "statusScanDevice" || menuID === "scanDeivce") {
             statusDeviceScan = JsonObject.status
             console.log("statusScanDevice:", message,
                         "-> statusDeviceScan =", statusDeviceScan, JsonObject.status)
 
-            // ✅ TRIGGER ปุ่มด้วย status จาก C++
             var s = (statusDeviceScan || "").toString()
 
             if (s.indexOf("Not Found Device") !== -1) {
                 deviceFound = false
-
             } else if (s.indexOf("Found ") === 0) {
-                // "Found %1 Device"
-                // ดึงเลข N ออกมา
                 var m = s.match(/^Found\s+(\d+)\s+Device/i)
                 var n = (m && m[1]) ? parseInt(m[1], 10) : 0
                 deviceFound = (n > 0)
@@ -1057,7 +1038,7 @@ Window {
             console.log("unmountDeivceResult:", message)
             var o = JSON.parse(message)
             if (o.ok === true) {
-                exportDeviceList = []   // เคลียร์ model กลาง
+                exportDeviceList = []
                 console.log("[unmountDeivceResult] cleared exportDeviceList")
             } else {
                 console.warn("[unmountDeivceResult] unmount failed")
@@ -1071,7 +1052,6 @@ Window {
             convertCurrentVolumeLevel = currentVolumeLevel / 100.0
         }else if (menuID === "recordFilesUpdate") {
             console.log("recordFilesUpdate:", message)
-//            handleRecordFilesChunk(message)
             handleRecordFilesUpdate(message)
         }else if (menuID === "receiverFrequency") {
             console.log("receiverFrequency:", message)
@@ -1084,20 +1064,16 @@ Window {
 
             monitorCpuPct = m.cpu_usage_percent || 0
 
-            // RAM
             monitorMemUsed  = m.mem_used_mb || 0
             monitorMemTotal = m.mem_total_mb || 0
             monitorPercentRAM = (monitorMemTotal > 0) ? (monitorMemUsed * 100.0 / monitorMemTotal) : 0
 
-            // SWAP
             monitorSwapUsed  = m.swap_used_mb || 0
             monitorSwapTotal = m.swap_total_mb || 0
 
-            // STORAGE
             monitorStorageUsed  = m.storage_used_gb || 0
             monitorStorageTotal = m.storage_total_gb || 0
 
-            // ✅ UPTIME / LOAD / TASKS
             monitorUptimeText    = m.uptime_text || ""
             monitorLoad1         = m.loadavg_1m || 0
             monitorLoad5         = m.loadavg_5m || 0
@@ -1114,42 +1090,42 @@ Window {
         }
     }
 
-//========================================== load flie ================================================
-        function loadWaveSelectionFromTxt() {
-            var path = "/home/orinnx/saveFileName/filesNameWave.txt"
-            var data = fileReader.readFile(path)
-            if (!data || data.length === 0) {
-                console.log("[WaveEditor] restore: txt empty")
-                return
-            }
-
-            var text = data.toString()
-            var lines = text.split(/\r?\n/)
-            var files = []
-
-            for (var i = 0; i < lines.length; ++i) {
-                var p = lines[i].trim()
-                if (p.length > 0)
-                    files.push(p)
-            }
-
-            console.log("[WaveEditor] restore from txt:", files.length, "file(s)")
-            if (files.length > 0)
-                setFiles(files)
+    //========================================== load flie ================================================
+    function loadWaveSelectionFromTxt() {
+        var path = "/home/orinnx/saveFileName/filesNameWave.txt"
+        var data = fileReader.readFile(path)
+        if (!data || data.length === 0) {
+            console.log("[WaveEditor] restore: txt empty")
+            return
         }
-//====================================================================================================================
+
+        var text = data.toString()
+        var lines = text.split(/\r?\n/)
+        var files = []
+
+        for (var i = 0; i < lines.length; ++i) {
+            var p = lines[i].trim()
+            if (p.length > 0)
+                files.push(p)
+        }
+
+        console.log("[WaveEditor] restore from txt:", files.length, "file(s)")
+        if (files.length > 0)
+            setFiles(files)
+    }
+
+    //====================================================================================================================
     Component.onCompleted: {
         console.log(window.width,window.height)
+
+        // ✅ FIX: ไม่บังคับ window เป็น 1920/1020 อีกแล้ว (ทำให้ responsive พัง)
+        // เลือก rotation ตามสัดส่วนได้เหมือนเดิม
         if(window.width < window.height){
             screenrotation = 270
-            window.width = 400
-            window.height = 1280
-        }
-        else{
+        } else {
             screenrotation = 0
-            window.width = 1920
-            window.height = 1020
         }
+
         console.log("Testing WebSocket connection...");
         socketCPP.active = true;
         console.log("status of socket",socketCPP.active);
@@ -1159,7 +1135,9 @@ Window {
         freezeRecordFilesUpdate = false
         restoringSelection = false
         console.log("[BOOT] reset flags ->freezeRecordFilesUpdate:", freezeRecordFilesUpdate, "[BOOT] reset flags ->restoringSelection:", restoringSelection)
-        playerlog.play()
+
+        // ⚠️ ถ้าไม่ได้ set source ไว้ อย่า play ตอนบูต (เดิมคุณ play ทันที)
+        // playerlog.play()
     }
 
     function checkcammeraList (ipaddress)
@@ -1178,7 +1156,6 @@ Window {
         id:notificationList
     }
 
-
     ListModel {
         id: sqlMode
         ListElement { index: 0;  name : "NSQ (A)" }
@@ -1187,12 +1164,12 @@ Window {
         ListElement { index: 3;  name : "LSQ" }
     }
 
-
     ListModel {
         id: adMode
         ListElement { index: 0;  name: "Analog"; shotName: "A"}
         ListElement { index: 1;  name: "Digital"; shotName: "D"}
     }
+
     ListModel {
         id: fmIFBW
         ListElement { index: 0;  low_cut: -15000;  high_cut: 15000;  name: "30kHz" }
@@ -1268,19 +1245,15 @@ Window {
     }
     ListModel {
         id: profileCards
-        // ListElement { index: 0;  freq : 30; unit : "MHz"; bw:"200kHz"; startHz:0; endHz:0; mode:"default"; low_cut : -6250;  high_cut : 6250; }
     }
     ListModel {
         id: profileScan
-        // ListElement { index: 0;  freq : 30; unit : "MHz"; bw:"200kHz"; startHz:0; endHz:0; mode:"default"; low_cut : -6250;  high_cut : 6250; }
     }
     ListModel {
         id: groupedScanModel
-        // ListElement { index: 0;  freq : 30; unit : "MHz"; bw:"200kHz"; startHz:0; endHz:0; mode:"default"; low_cut : -6250;  high_cut : 6250; }
     }
     ListModel {
         id: foundCards
-        // ListElement { index: 0;  freq : 30; unit : "MHz"; bw:"200kHz"; startHz:0; endHz:0; mode:"default"; low_cut : -6250;  high_cut : 6250; }
     }
     ListModel {
         id: receiverMode
@@ -1296,7 +1269,7 @@ Window {
         ListElement { index: 9;  name : "D-Star";   text: "dstar";  mode: "Digital" ; modeID: 1; bw:"dstarIFBW" }
         ListElement { index: 10; name : "NXDN";     text: "nxdn";   mode: "Digital" ; modeID: 1; bw:"nxdnIFBW" }
     }
-    // Analog Modes
+
     ListModel {
         id: receiverAnalogMode
         ListElement { index: 0;  name : "FM";       text: "nfm";    mode: "Analog" ; modeID: 0; bw:"fmIFBW"  }
@@ -1308,7 +1281,6 @@ Window {
         ListElement { index: 6;  name : "SAM";      text: "sam";    mode: "Analog" ; modeID: 0; bw:"amIFBW" }
     }
 
-    // Digital Modes
     ListModel {
         id: receiverDigitalMode
         ListElement { index: 7;  name : "DATA";     text: "usbd";   mode: "Digital" ; modeID: 1; bw:"usbdIFBW" }
@@ -1324,17 +1296,6 @@ Window {
         ListElement { index: 2;  name : "MHz" }
         ListElement { index: 3;  name : "GHz" }
     }
-    // ListModel {
-    //     id: receiverDigitalMode
-    //     ListElement { index: 0;  name : "ALIN" }
-    //     ListElement { index: 1;  name : "P-25" }
-    //     ListElement { index: 2;  name : "dPMR" }
-    //     ListElement { index: 3;  name : "D-CR" }
-    //     ListElement { index: 4;  name : "DMR" }
-    //     ListElement { index: 5;  name : "YAES" }
-    //     ListElement { index: 6;  name : "DSTR" }
-    // }
-
 
     ListModel {
         id: memoriesModel
@@ -1355,92 +1316,42 @@ Window {
         ListElement {index:14; name:"Radio 15"; mod:"AM"; modMode:"A"; freq:133600000; unit:"MHz"; bw:"200kHz"}
     }
 
-    ListModel
-    {
+    ListModel {
         id: listmodel
         ListElement {index:0; source: "" }
         ListElement {index:1; source: "qrc:/MemoryAddEdit.qml"; name:"MemoryAddEdit" }
         ListElement {index:2; source: "qrc:/RecConfigPage.qml"; name:"OpenWebRXProfiles" }
         ListElement {index:3; source: "qrc:/Setting.qml"; name:"Setting" }
     }
-    Page
-    {
+
+    // =========================
+    // ✅ RESPONSIVE PAGE FIX
+    // =========================
+    Page {
         id: page
-        x: 0
-        y: 0
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.horizontalCenter: parent.horizontalCenter
-        width: screenrotation==270 ? 1280 : 1920
-        height: screenrotation==270 ? 400 : 1080
+        anchors.fill: parent
         rotation: screenrotation
         anchors.centerIn: parent
 
-        states: [
-            State {
-                name: "landscape"
-                when: page.rotation === 0
-                PropertyChanges {
-                    target: window
-                    contentOrientation: Qt.PrimaryOrientation
-                }
-            },
-            State {
-                name: "portrait"
-                when: page.rotation === 90
-                PropertyChanges {
-                    target: page
-                    width: window.height
-                    height: window.width
-                }
-                PropertyChanges {
-                    target: window
-                    contentOrientation: Qt.LandscapeOrientation
-                }
-            },
-            State {
-                name: "invertedlandscape"
-                when: page.rotation === 180
-                PropertyChanges {
-                    target: window
-                    contentOrientation: Qt.InvertedPortraitOrientation
-                }
-            },
-            State {
-                name: "invertedportrait"
-                when: page.rotation === 270
-                PropertyChanges {
-                    target: page
-                    width: window.height
-                    height: window.width
-                }
-                PropertyChanges {
-                    target: window
-                    contentOrientation: Qt.InvertedLandscapeOrientation
-                }
-            }
-        ]
+        // ✅ ให้ center ถูกแม้หมุน
+        transformOrigin: Item.Center
+
         Rectangle {
             id: rectangleHome
             color: "#509fef"
             anchors.fill: parent
-            // HomeDisplay {
-            //     id: homeDisplay
-            //     anchors.fill: parent
-            // }
+
             MainPage {
                 id: mainPage
                 anchors.fill: parent
             }
         }
     }
-
     KeyboardInput {
         id: inputKey
         anchors.fill: parent
         y: rotation==270 ? 400+height : 1080+height
     }
-
-
     Rectangle{
         id: rectangleScreen
         visible: screenOff
@@ -1459,4 +1370,3 @@ Window {
         }
     }
 }
-

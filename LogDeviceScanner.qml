@@ -86,7 +86,7 @@ Item {
         height: 170
 
         x: (parent.width - width) / 2
-        y: (parent.height - height) / 2   // ✅ FIX
+        y: (parent.height / 2) * -1
 
         property string generatedPresetId: ""
         property var pendingPresetObject: ({})

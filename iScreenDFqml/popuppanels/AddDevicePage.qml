@@ -1,4 +1,3 @@
-// /popuppanels/AddDevicePage.qml
 import QtQuick 2.15
 import QtGraphicalEffects 1.12
 import QtQuick.Controls 2.15
@@ -601,84 +600,84 @@ Item {
                         Item { height: 6; Layout.fillWidth: true }
 
                         // -------- Add button row --------
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            Item { Layout.fillWidth: true }
+                        // RowLayout {
+                        //     Layout.fillWidth: true
+                        //     spacing: 8
+                        //     Item { Layout.fillWidth: true }
 
-                            Button {
-                                id: addManualBtn
-                                text: "Add"
-                                enabled: {
-                                    var name = nameField.text.trim()
-                                    var ip   = ipField.text.trim()
-                                    if (!name.length || !isValidIp(ip)) return false
+                        //     Button {
+                        //         id: addManualBtn
+                        //         text: "Add"
+                        //         enabled: {
+                        //             var name = nameField.text.trim()
+                        //             var ip   = ipField.text.trim()
+                        //             if (!name.length || !isValidIp(ip)) return false
 
-                                    if (!editing) {
-                                        return !isDupName(name) && !isDupIp(ip)
-                                    } else {
-                                        if (name !== editOrigName && isDupName(name)) return false
-                                        if (ip   !== editOrigIp   && isDupIp(ip))     return false
-                                        return true
-                                    }
-                                }
-                                padding: 10
-                                background: Rectangle {
-                                    radius: 10
-                                    color: addManualBtn.enabled ? colAccent : "#2a3342"
-                                }
-                                contentItem: Text {
-                                    text: addManualBtn.text
-                                    color: addManualBtn.enabled ? "#0b1118" : "#6b7280"
-                                    font.bold: true
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                onClicked: {
-                                    var newName = nameField.text.trim()
-                                    var newIp   = ipField.text.trim()
-                                    var newUid  = serialField.text.trim()
-                                    var wasEditing = editing
+                        //             if (!editing) {
+                        //                 return !isDupName(name) && !isDupIp(ip)
+                        //             } else {
+                        //                 if (name !== editOrigName && isDupName(name)) return false
+                        //                 if (ip   !== editOrigIp   && isDupIp(ip))     return false
+                        //                 return true
+                        //             }
+                        //         }
+                        //         padding: 10
+                        //         background: Rectangle {
+                        //             radius: 10
+                        //             color: addManualBtn.enabled ? colAccent : "#2a3342"
+                        //         }
+                        //         contentItem: Text {
+                        //             text: addManualBtn.text
+                        //             color: addManualBtn.enabled ? "#0b1118" : "#6b7280"
+                        //             font.bold: true
+                        //             horizontalAlignment: Text.AlignHCenter
+                        //             verticalAlignment: Text.AlignVCenter
+                        //         }
+                        //         onClicked: {
+                        //             var newName = nameField.text.trim()
+                        //             var newIp   = ipField.text.trim()
+                        //             var newUid  = serialField.text.trim()
+                        //             var wasEditing = editing
 
-                                    if (editing) {
-                                        if (!newUid.length)
-                                            newUid = editDeviceUid
+                        //             if (editing) {
+                        //                 if (!newUid.length)
+                        //                     newUid = editDeviceUid
 
-                                        var updatePayload = [{
-                                            id:   editId,
-                                            Name: newName,
-                                            ip:   newIp,
-                                            oldDeviceUniqueId: editDeviceUid,
-                                            deviceUniqueId:    newUid
-                                        }]
-                                        var jsonUpdate = JSON.stringify({ payload: updatePayload })
+                        //                 var updatePayload = [{
+                        //                     id:   editId,
+                        //                     Name: newName,
+                        //                     ip:   newIp,
+                        //                     oldDeviceUniqueId: editDeviceUid,
+                        //                     deviceUniqueId:    newUid
+                        //                 }]
+                        //                 var jsonUpdate = JSON.stringify({ payload: updatePayload })
 
-                                        if (krakenmapval)
-                                            krakenmapval.groupSetting("UpdateDevice", 0, jsonUpdate)
-                                    } else {
-                                        var payloadObj = { Name: newName, ip: newIp }
-                                        if (newUid.length > 0)
-                                            payloadObj.deviceUniqueId = newUid
+                        //                 if (krakenmapval)
+                        //                     krakenmapval.groupSetting("UpdateDevice", 0, jsonUpdate)
+                        //             } else {
+                        //                 var payloadObj = { Name: newName, ip: newIp }
+                        //                 if (newUid.length > 0)
+                        //                     payloadObj.deviceUniqueId = newUid
 
-                                        var payload = [ payloadObj ]
-                                        var json = JSON.stringify({ payload })
-                                        if (krakenmapval)
-                                            krakenmapval.groupSetting("AddDevice", 0, json)
-                                    }
+                        //                 var payload = [ payloadObj ]
+                        //                 var json = JSON.stringify({ payload })
+                        //                 if (krakenmapval)
+                        //                     krakenmapval.groupSetting("AddDevice", 0, json)
+                        //             }
 
-                                    nameField.text   = ""
-                                    ipField.text     = ""
-                                    serialField.text = ""
-                                    editing        = false
-                                    editOrigName   = ""
-                                    editOrigIp     = ""
-                                    editId         = -1
-                                    editDeviceUid  = ""
+                        //             nameField.text   = ""
+                        //             ipField.text     = ""
+                        //             serialField.text = ""
+                        //             editing        = false
+                        //             editOrigName   = ""
+                        //             editOrigIp     = ""
+                        //             editId         = -1
+                        //             editDeviceUid  = ""
 
-                                    toast.show(wasEditing ? "Updated." : "Added (manual).")
-                                }
-                            }
-                        }
+                        //             toast.show(wasEditing ? "Updated." : "Added (manual).")
+                        //         }
+                        //     }
+                        // }
                     }
                 }
 
@@ -1043,11 +1042,96 @@ Item {
         id: applyBtn
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.rightMargin: 0
+        anchors.rightMargin: 5
         anchors.bottomMargin: 0
         onClicked: {
             if (typeof popuppanel !== "undefined" && popuppanel)
                 popuppanel.close()
+        }
+    }
+    Rectangle {
+        id: addManualFloating
+        width: 120
+        height: 44
+        radius: 12
+        color: addManualBtnEnabled ? colAccent : "#2a3342"
+        visible: stack.currentIndex === 0   // เฉพาะ manual mode
+
+        property bool addManualBtnEnabled: {
+            var name = nameField.text.trim()
+            var ip   = ipField.text.trim()
+            if (!name.length || !isValidIp(ip)) return false
+
+            if (!editing) {
+                return !isDupName(name) && !isDupIp(ip)
+            } else {
+                if (name !== editOrigName && isDupName(name)) return false
+                if (ip   !== editOrigIp   && isDupIp(ip))     return false
+                return true
+            }
+        }
+
+        anchors.right: applyBtn.left
+        anchors.rightMargin: 10
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: -5
+
+
+        Text {
+            anchors.centerIn: parent
+            text: "Add"
+            color: addManualFloating.addManualBtnEnabled ? "#0b1118" : "#6b7280"
+            font.bold: true
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            enabled: addManualFloating.addManualBtnEnabled
+
+            onClicked: {
+                var newName = nameField.text.trim()
+                var newIp   = ipField.text.trim()
+                var newUid  = serialField.text.trim()
+                var wasEditing = editing
+
+                if (editing) {
+                    if (!newUid.length)
+                        newUid = editDeviceUid
+
+                    var updatePayload = [{
+                        id:   editId,
+                        Name: newName,
+                        ip:   newIp,
+                        oldDeviceUniqueId: editDeviceUid,
+                        deviceUniqueId:    newUid
+                    }]
+                    var jsonUpdate = JSON.stringify({ payload: updatePayload })
+
+                    if (krakenmapval)
+                        krakenmapval.groupSetting("UpdateDevice", 0, jsonUpdate)
+                } else {
+                    var payloadObj = { Name: newName, ip: newIp }
+                    if (newUid.length > 0)
+                        payloadObj.deviceUniqueId = newUid
+
+                    var payload = [ payloadObj ]
+                    var json = JSON.stringify({ payload })
+
+                    if (krakenmapval)
+                        krakenmapval.groupSetting("AddDevice", 0, json)
+                }
+
+                nameField.text   = ""
+                ipField.text     = ""
+                serialField.text = ""
+                editing        = false
+                editOrigName   = ""
+                editOrigIp     = ""
+                editId         = -1
+                editDeviceUid  = ""
+
+                toast.show(wasEditing ? "Updated." : "Added (manual).")
+            }
         }
     }
 
@@ -1082,3 +1166,4 @@ Item {
         }
     }
 }
+

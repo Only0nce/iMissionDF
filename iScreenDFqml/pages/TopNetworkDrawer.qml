@@ -1,4 +1,21 @@
-/// TopNetworkDrawer.qml
+/// TopNetworkDrawer.qml  (FULL FILE)
+// ✅ BASIC: เพิ่มสวิชเล็ก "Network / VPN" อยู่ใน Card Network
+// ✅ BASIC: เพิ่มสวิชเล็ก "Network / VPN" อยู่ใน Card VPN ด้วย
+// ✅ เลือก VPN => ซ่อน Card Network, โชว์ Card VPN
+// ✅ เลือก Network => โชว์ Card Network กลับมา, ซ่อน Card VPN
+// ✅ ADVANCED: คงเดิม (ไม่โชว์สวิชนี้)
+//
+// ✅ CHANGE: VPN คุยกับ C++ ด้วย slots/signal เท่านั้น
+// - ไม่มี sendJson / ไม่มี upload file ผ่าน QML
+// - ทำได้แค่ connect / disconnect / refresh / show ip
+//
+// ✅ FIX: ห้ามประกาศ property ชื่อซ้ำ (vpnConnected/vpnStatus/...)
+// ✅ FIX: VPN state update ผ่าน signal mainWindows.vpnStateChanged(...) เท่านั้น
+// ✅ FIX: ห้ามไป set vpnSwitch.checked ตรง ๆ (จะทำลาย binding)
+//
+// ✅ FIX: Network IP ไม่แสดง -> บังคับ requestNetworkRefresh() ตอนเปิด Drawer
+// ✅ FIX: refillFields() ห้ามทับค่าด้วย "" (กันเคสยังไม่โหลด rows)
+
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
@@ -38,10 +55,7 @@ Drawer {
     /* ===== Local cache from JSON ===== */
     property var netRows: []   // array ของ object: [{id,DHCP,IP_ADDRESS,...}, ...]
 
-    /* ===== Mode: Basic / Advanced =====
-       - Basic: ให้โชว์ Network 2 (index=1) เป็นหลัก (ยังคงมี nicCount=2 เพื่อให้ index 1 มีจริง)
-       - Advanced: 4 adapters + ต้องใส่รหัสก่อนเข้า
-    */
+    /* ===== Mode: Basic / Advanced ===== */
     property bool advancedMode: false
     property int  nicCount: advancedMode ? 4 : 2
     property int  selectedNic: 0
@@ -50,13 +64,28 @@ Drawer {
     property bool _blockServerFieldSignal: false
 
     /* ===== Advanced password ===== */
-    property string advancedPassword: "ifz8zean6969**"  // เปลี่ยนได้ตามต้องการ
-    property bool _isSwitchingMode: false     // กัน loop ตอน set modeCombo เอง
+    property string advancedPassword: "ifz8zean6969**"
+    property bool _isSwitchingMode: false
+
+    // ==========================
+    // ✅ VPN UI STATE (local; updated by C++ signal only)
+    // ==========================
+    property bool   vpnConnected: false
+    property string vpnStatus: "DISCONNECTED"
+    property string vpnIp: "--"
+    property string vpnDetail: ""
+
+    // ==========================
+    // ✅ BASIC: Switch page (Network/VPN)
+    // 0 = Network, 1 = VPN
+    // ==========================
+    property int basicTab: 0
 
     onAdvancedModeChanged: {
         nicCount = advancedMode ? 4 : 2
 
-        // Basic: บังคับไป Network 2 (index=1) ถ้ามี
+        if (!advancedMode) basicTab = 0
+
         if (!advancedMode) {
             selectedNic = (nicCount >= 2) ? 1 : 0
         } else {
@@ -74,20 +103,14 @@ Drawer {
                 && typeof krakenmapval.netSet === "function"
     }
 
-    // อ่านค่าจาก netRows (JSON) เป็นหลัก
     function g(i, k) {
         if (netRows && netRows.length > 0) {
             var rec = null
             var wantId = i + 1 // id 1..4
-
             for (var idx = 0; idx < netRows.length; ++idx) {
-                if (netRows[idx].id === wantId) {
-                    rec = netRows[idx]
-                    break
-                }
+                if (netRows[idx].id === wantId) { rec = netRows[idx]; break }
             }
-            if (!rec && i < netRows.length)
-                rec = netRows[i]
+            if (!rec && i < netRows.length) rec = netRows[i]
 
             if (rec) {
                 switch (k) {
@@ -103,10 +126,8 @@ Drawer {
             }
         }
 
-        // fallback: krakenmapval arrays
         if (!krakenmapval) return ""
-        if (hasFns())
-            return krakenmapval.netGet(i, k)
+        if (hasFns()) return krakenmapval.netGet(i, k)
 
         switch (k) {
         case "useDHCP": return (krakenmapval.useDHCPs && krakenmapval.useDHCPs[i]) || "on"
@@ -120,19 +141,14 @@ Drawer {
         }
     }
 
-    // เขียนค่าลง netRows + ส่งต่อไป backend เดิม
     function s(i, k, v) {
         if (netRows && netRows.length > 0) {
             var rec = null
             var wantId = i + 1
             for (var idx = 0; idx < netRows.length; ++idx) {
-                if (netRows[idx].id === wantId) {
-                    rec = netRows[idx]
-                    break
-                }
+                if (netRows[idx].id === wantId) { rec = netRows[idx]; break }
             }
-            if (!rec && i < netRows.length)
-                rec = netRows[i]
+            if (!rec && i < netRows.length) rec = netRows[i]
 
             if (rec) {
                 switch (k) {
@@ -149,10 +165,7 @@ Drawer {
         }
 
         if (!krakenmapval) return
-        if (hasFns()) {
-            krakenmapval.netSet(i, k, v)
-            return
-        }
+        if (hasFns()) { krakenmapval.netSet(i, k, v); return }
 
         function ensureArr(name) {
             if (!krakenmapval[name])
@@ -160,13 +173,13 @@ Drawer {
         }
 
         switch (k) {
-        case "useDHCP": ensureArr("useDHCPs");      krakenmapval.useDHCPs[i]      = v; break
-        case "ip":      ensureArr("ipAddresses");   krakenmapval.ipAddresses[i]   = v; break
-        case "mask":    ensureArr("subnetMasks");   krakenmapval.subnetMasks[i]   = v; break
-        case "gw":      ensureArr("gateways");      krakenmapval.gateways[i]      = v; break
-        case "dns1":    ensureArr("dns1s");         krakenmapval.dns1s[i]         = v; break
-        case "dns2":    ensureArr("dns2s");         krakenmapval.dns2s[i]         = v; break
-        case "server":  ensureArr("serverKrakens"); krakenmapval.serverKrakens[i] = v; break
+        case "useDHCP": ensureArr("useDHCPs");       krakenmapval.useDHCPs[i]       = v; break
+        case "ip":      ensureArr("ipAddresses");    krakenmapval.ipAddresses[i]    = v; break
+        case "mask":    ensureArr("subnetMasks");    krakenmapval.subnetMasks[i]    = v; break
+        case "gw":      ensureArr("gateways");       krakenmapval.gateways[i]       = v; break
+        case "dns1":    ensureArr("dns1s");          krakenmapval.dns1s[i]          = v; break
+        case "dns2":    ensureArr("dns2s");          krakenmapval.dns2s[i]          = v; break
+        case "server":  ensureArr("serverKrakens");  krakenmapval.serverKrakens[i]  = v; break
         default: break
         }
     }
@@ -190,39 +203,121 @@ Drawer {
             console.log("Restart NIC", i, "not implemented")
     }
 
+    // ==========================
+    // ✅ FORCE refresh network rows from C++
+    // - แก้เคส: เปิด drawer แล้ว ipField ว่าง เพราะ C++ ยังไม่ push rows
+    // - จะลองเรียกหลายชื่อ เพื่อเข้ากับ backend ที่คุณมีอยู่แล้ว
+    // ==========================
+    function requestNetworkRefresh() {
+        if (!krakenmapval) return
+
+        // 1) ถ้ามี API แบบรวมทุกแถว
+        if (typeof krakenmapval.requestNetworkRows === "function") {
+            krakenmapval.requestNetworkRows()
+            return
+        }
+        if (typeof krakenmapval.refreshNetworkRows === "function") {
+            krakenmapval.refreshNetworkRows()
+            return
+        }
+        if (typeof krakenmapval.getNetworkAll === "function") {
+            krakenmapval.getNetworkAll()
+            return
+        }
+
+        // 2) ถ้ามี API แบบดึงทีละ NIC จาก DB
+        if (typeof krakenmapval.getNetworkfromDb === "function") {
+            var wantId = (selectedNic + 1) // 1..4
+            krakenmapval.getNetworkfromDb(wantId)
+
+            // เผื่ออยากให้ครบ 2 NIC ใน Basic
+            if (!advancedMode) {
+                krakenmapval.getNetworkfromDb(1)
+                krakenmapval.getNetworkfromDb(2)
+            }
+            return
+        }
+
+        // 3) fallback: ถ้ามี netGet/netSet อย่างเดียว -> อย่างน้อย refill UI อีกครั้ง
+        if (hasFns()) {
+            refillFields()
+        }
+    }
+
+    // ==========================
+    // ✅ refillFields() แบบกัน "ทับค่าดีด้วยค่าว่าง"
+    // ==========================
     function refillFields() {
         var i = selectedNic
 
         _dhcpChanging = true
-        dhcpCombo.currentIndex = (g(i, "useDHCP") === "off") ? 1 : 0
+        var dh = g(i, "useDHCP")
+        dhcpCombo.currentIndex = (dh === "off") ? 1 : 0
         _dhcpChanging = false
 
-        ipField.text   = ipField.originalValue   = g(i, "ip")
-        maskField.text = maskField.originalValue = g(i, "mask")
-        gwField.text   = gwField.originalValue   = g(i, "gw")
-        dns1Field.text = dns1Field.originalValue = g(i, "dns1")
-        dns2Field.text = dns2Field.originalValue = g(i, "dns2")
+        function setIfNotEmpty(field, key) {
+            var v = g(i, key)
+            if (v !== undefined && v !== null && String(v).length > 0) {
+                field.text = field.originalValue = String(v)
+            }
+            // ถ้า v ว่าง -> อย่าทับ (กันเคสยังไม่โหลดข้อมูล)
+        }
+
+        setIfNotEmpty(ipField,   "ip")
+        setIfNotEmpty(maskField, "mask")
+        setIfNotEmpty(gwField,   "gw")
+        setIfNotEmpty(dns1Field, "dns1")
+        setIfNotEmpty(dns2Field, "dns2")
     }
 
     onSelectedNicChanged: {
         console.log("[TopNetworkDrawer] selectedNic changed ->", selectedNic)
         refillFields()
+        requestNetworkRefresh()
+    }
+
+    // ==========================
+    // ✅ VPN Calls (slots on C++)
+    // ==========================
+    function vpnConnect() {
+        if (!mainWindows) return
+        if (typeof mainWindows.vpnConnect === "function")
+            mainWindows.vpnConnect()
+        else
+            console.log("[VPN] mainWindows.vpnConnect() not found")
+    }
+
+    function vpnDisconnect() {
+        if (!mainWindows) return
+        if (typeof mainWindows.vpnDisconnect === "function")
+            mainWindows.vpnDisconnect()
+        else
+            console.log("[VPN] mainWindows.vpnDisconnect() not found")
+    }
+
+    function vpnRefresh() {
+        if (!mainWindows) return
+        if (typeof mainWindows.vpnRefresh === "function")
+            mainWindows.vpnRefresh()
+        else
+            console.log("[VPN] mainWindows.vpnRefresh() not found")
     }
 
     onVisibleChanged: {
-        if (visible && krakenmapval) {
-            // เปิด drawer แล้ว Basic ให้โชว์ NIC2 ก่อน
-            if (!advancedMode) {
-                selectedNic = (nicCount >= 2) ? 1 : 0
-            }
-            krakenmapval.getNetworkfromDb(selectedNic + 1)
+        if (visible) {
+            vpnRefresh()
+            requestNetworkRefresh()
         }
     }
 
     Component.onCompleted: {
-        // ถ้าอยากให้ Basic เสมอ
         advancedMode = false
         selectedNic = 1
+        basicTab = 0
+
+        // ขอ network ตั้งแต่เริ่ม
+        requestNetworkRefresh()
+        vpnRefresh()
 
         if (mainWindows && mainWindows.updateNetworkToDisplay) {
             mainWindows.updateNetworkToDisplay.connect(function(str) {
@@ -386,12 +481,12 @@ Drawer {
                         advPassField.text = ""
                         advPassPopup.close()
 
-                        // กลับ Basic
                         _isSwitchingMode = true
                         modeCombo.currentIndex = 1
                         _isSwitchingMode = false
 
                         advancedMode = false
+                        basicTab = 0
                     }
                 }
 
@@ -416,10 +511,13 @@ Drawer {
                             advPassPopup.close()
 
                             advancedMode = true
+                            basicTab = 0
 
                             _isSwitchingMode = true
                             modeCombo.currentIndex = 0
                             _isSwitchingMode = false
+
+                            requestNetworkRefresh()
                         } else {
                             advError.text = "Wrong password"
                         }
@@ -436,6 +534,20 @@ Drawer {
         }
     }
 
+    // ==========================
+    // ✅ Receive VPN state from C++ via signal only
+    //    C++ must emit: vpnStateChanged(bool connected, QString statusText, QString publicIp, QString detail)
+    // ==========================
+    Connections {
+        target: mainWindows
+        function onVpnStateChanged(connected, statusText, publicIp, detail) {
+            topDrawer.vpnConnected = connected
+            topDrawer.vpnStatus    = statusText
+            topDrawer.vpnIp        = publicIp
+            topDrawer.vpnDetail    = detail
+        }
+    }
+
     Connections {
         target: krakenmapval
 
@@ -444,10 +556,8 @@ Drawer {
                 var obj = JSON.parse(row.all)
                 netRows = obj.rows || []
 
-                // nicCount ตามโหมด
                 nicCount = advancedMode ? netRows.length : Math.max(2, Math.min(2, netRows.length))
 
-                // Basic: ล็อคไป NIC2 (index=1) ถ้ามี
                 if (!advancedMode) {
                     selectedNic = (netRows.length >= 2) ? 1 : 0
                 } else {
@@ -456,25 +566,23 @@ Drawer {
                 }
 
                 refillFields()
-            } else {
-                // legacy
-                if ((selectedNic + 1) !== row.id) return
-
-                ipField.text   = row.IP_ADDRESS
-                maskField.text = row.SUBNETMASK
-                gwField.text   = row.GATEWAY
-                dns1Field.text = row.PRIMARY_DNS
-                dns2Field.text = row.SECONDARY_DNS
-                dhcpCombo.currentIndex = (row.DHCP === "off") ? 1 : 0
+                return
             }
+
+            // single row update
+            if ((selectedNic + 1) !== row.id) return
+
+            ipField.text   = row.IP_ADDRESS
+            maskField.text = row.SUBNETMASK
+            gwField.text   = row.GATEWAY
+            dns1Field.text = row.PRIMARY_DNS
+            dns2Field.text = row.SECONDARY_DNS
+            dhcpCombo.currentIndex = (row.DHCP === "off") ? 1 : 0
         }
 
-        function onUpdateServeripDfserver(ip) {
-            serverField.text = ip
-        }
+        function onUpdateServeripDfserver(ip) { serverField.text = ip }
 
         function onUpdateGlobalOffsets(offsetValue, compassOffset) {
-            // ✅ ทศนิยม 6 ตำแหน่ง
             compassField.text = Number(compassOffset).toFixed(6)
             compassField.originalValue = compassField.text
         }
@@ -522,7 +630,6 @@ Drawer {
                 anchors.margins: 16
                 spacing: 16
 
-                /* === Left section: Title + Mode === */
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 10
@@ -546,22 +653,21 @@ Drawer {
                             currentIndex = 1
                             _isSwitchingMode = false
                             advancedMode = false
+                            basicTab = 0
                         }
 
-                        // ✅ Advanced ต้องถามรหัสก่อน
                         onCurrentIndexChanged: {
                             if (_isSwitchingMode) return
 
                             if (currentIndex === 0) {
-                                // ผู้ใช้เลือก Advanced -> เปิด popup แล้ว "ยังไม่เปลี่ยน advancedMode"
                                 _isSwitchingMode = true
                                 modeCombo.currentIndex = 1
                                 _isSwitchingMode = false
-
                                 advPassPopup.open()
                             } else {
-                                // Basic
                                 advancedMode = false
+                                basicTab = 0
+                                requestNetworkRefresh()
                             }
                         }
 
@@ -587,9 +693,7 @@ Drawer {
                                 leftPadding: 10
                                 anchors.fill: parent
                             }
-                            background: Rectangle {
-                                color: control.highlighted ? "#cccccc" : "#e0e0e0"
-                            }
+                            background: Rectangle { color: control.highlighted ? "#cccccc" : "#e0e0e0" }
                         }
 
                         background: Rectangle {
@@ -625,12 +729,10 @@ Drawer {
                     }
                 }
 
-                /* === Right section: Adapter Pills (Advanced only) === */
                 RowLayout {
                     spacing: 12
                     visible: advancedMode
 
-                    /* ===== Group 1: Display (Adapter 0,1) ===== */
                     Rectangle {
                         radius: 12
                         color: colCard
@@ -693,7 +795,6 @@ Drawer {
                         }
                     }
 
-                    /* ===== Group 2: DF Device (Adapter 2,3) ===== */
                     Rectangle {
                         radius: 12
                         color: colCard
@@ -775,13 +876,13 @@ Drawer {
                 width: Math.min(1200, scroller.width - 48)
                 x: Math.max(0, (scroller.width - width) / 2)
 
-                /* --- Card 1: Adapter Settings (Network only) --- */
                 Rectangle {
                     id: adapterCard
                     width: parent.width
                     radius: 14
                     color: colCard
                     border.color: colBorder
+                    visible: advancedMode || (!advancedMode && basicTab === 0)
                     implicitHeight: adapterCol.implicitHeight + 32
 
                     ColumnLayout {
@@ -802,11 +903,61 @@ Drawer {
 
                             Item { Layout.fillWidth: true }
 
+                            Rectangle {
+                                visible: !advancedMode
+                                radius: 10
+                                color: colField
+                                border.color: colBorder
+                                border.width: 1
+                                implicitHeight: 28
+                                implicitWidth: 150
+                                clip: true
+
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+
+                                    MouseArea {
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { basicTab = 0; requestNetworkRefresh() }
+                                        Rectangle { anchors.fill: parent; color: (basicTab === 0) ? colHi : "transparent" }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "NET"
+                                            color: (basicTab === 0) ? colText : colSub
+                                            font.pixelSize: 12
+                                            font.bold: (basicTab === 0)
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            basicTab = 1
+                                            vpnRefresh()
+                                        }
+                                        Rectangle { anchors.fill: parent; color: (basicTab === 1) ? colHi : "transparent" }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "VPN"
+                                            color: (basicTab === 1) ? colText : colSub
+                                            font.pixelSize: 12
+                                            font.bold: (basicTab === 1)
+                                        }
+                                    }
+                                }
+                            }
+
                             Text {
                                 visible: !advancedMode
                                 text: "Using: Adapter 1 (Network 2)"
                                 color: colSub
                                 font.pixelSize: 13
+                                leftPadding: 10
                             }
                         }
 
@@ -1075,6 +1226,8 @@ Drawer {
                                         gwField.originalValue   = gwField.text
                                         dns1Field.originalValue = dns1Field.text
                                         dns2Field.originalValue = dns2Field.text
+
+                                        requestNetworkRefresh()
                                     }
                                 }
 
@@ -1092,9 +1245,242 @@ Drawer {
                                         anchors.centerIn: parent
                                         font.bold: true
                                     }
-                                    onClicked: restartOne(selectedNic)
+                                    onClicked: {
+                                        restartOne(selectedNic)
+                                        requestNetworkRefresh()
+                                    }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // ==========================================================
+                // ✅ Card: VPN (OpenVPN) - BASIC MODE ONLY (slots/signal)
+                // ==========================================================
+                Rectangle {
+                    id: vpnCard
+                    width: parent.width
+                    radius: 14
+                    color: colCard
+                    border.color: colBorder
+                    visible: (!advancedMode && basicTab === 1)
+                    implicitHeight: vpnCol.implicitHeight + 32
+
+                    ColumnLayout {
+                        id: vpnCol
+                        anchors.fill: parent
+                        anchors.margins: 16
+                        spacing: 12
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "OpenVPN"
+                                color: colText
+                                font.pixelSize: 16
+                                font.bold: true
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Rectangle {
+                                radius: 10
+                                color: colField
+                                border.color: colBorder
+                                border.width: 1
+                                implicitHeight: 28
+                                implicitWidth: 150
+                                clip: true
+
+                                Row {
+                                    anchors.fill: parent
+                                    spacing: 0
+
+                                    MouseArea {
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { basicTab = 0; requestNetworkRefresh() }
+                                        Rectangle { anchors.fill: parent; color: (basicTab === 0) ? colHi : "transparent" }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "NET"
+                                            color: (basicTab === 0) ? colText : colSub
+                                            font.pixelSize: 12
+                                            font.bold: (basicTab === 0)
+                                        }
+                                    }
+
+                                    MouseArea {
+                                        width: parent.width / 2
+                                        height: parent.height
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: { basicTab = 1; vpnRefresh() }
+                                        Rectangle { anchors.fill: parent; color: (basicTab === 1) ? colHi : "transparent" }
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "VPN"
+                                            color: (basicTab === 1) ? colText : colSub
+                                            font.pixelSize: 12
+                                            font.bold: (basicTab === 1)
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                radius: 10
+                                color: (topDrawer.vpnStatus === "CONNECTED") ? "#143a2a" : "#3a1b1b"
+                                border.color: (topDrawer.vpnStatus === "CONNECTED") ? colOk : "#e06767"
+                                border.width: 1
+                                implicitHeight: 28
+                                implicitWidth: Math.max(140, stText.implicitWidth + 24)
+
+                                Text {
+                                    id: stText
+                                    anchors.centerIn: parent
+                                    text: topDrawer.vpnStatus
+                                    color: colText
+                                    font.pixelSize: 13
+                                    font.bold: true
+                                }
+                            }
+                        }
+
+                        Rectangle { Layout.fillWidth: true; height: 1; color: colBorder }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            rowSpacing: 10
+                            columnSpacing: 20
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Loader { sourceComponent: fieldText; onLoaded: { item.text = "Public IP" } }
+                                TextField {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 34
+                                    text: topDrawer.vpnIp
+                                    readOnly: true
+                                    background: fieldBox.createObject(this, { "control": this })
+                                    color: colText
+                                    leftPadding: 10
+                                    rightPadding: 10
+                                    topPadding: 6
+                                    bottomPadding: 0
+                                    font.pixelSize: 15
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 4
+                                Loader { sourceComponent: fieldText; onLoaded: { item.text = "Status" } }
+                                TextField {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 34
+                                    text: topDrawer.vpnStatus
+                                    readOnly: true
+                                    background: fieldBox.createObject(this, { "control": this })
+                                    color: colText
+                                    leftPadding: 10
+                                    rightPadding: 10
+                                    topPadding: 6
+                                    bottomPadding: 0
+                                    font.pixelSize: 15
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            RowLayout {
+                                spacing: 10
+                                Text { text: "Enable VPN"; color: colText; font.pixelSize: 14 }
+
+                                Switch {
+                                    id: vpnSwitch
+                                    checked: topDrawer.vpnConnected
+                                    onClicked: {
+                                        if (checked) topDrawer.vpnConnect()
+                                        else topDrawer.vpnDisconnect()
+                                    }
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Button {
+                                id: vpnRefreshBtn
+                                text: "Refresh"
+                                Layout.preferredWidth: 120
+                                Layout.preferredHeight: 44
+                                background: Rectangle {
+                                    radius: 10
+                                    color: vpnRefreshBtn.pressed ? Qt.darker(colInfo, 1.2) : colInfo
+                                }
+                                contentItem: Text {
+                                    text: vpnRefreshBtn.text
+                                    color: "white"
+                                    anchors.centerIn: parent
+                                    font.bold: true
+                                }
+                                onClicked: topDrawer.vpnRefresh()
+                            }
+
+                            Button {
+                                id: vpnConnectBtn
+                                text: "Connect"
+                                Layout.preferredWidth: 120
+                                Layout.preferredHeight: 44
+                                enabled: !topDrawer.vpnConnected
+                                background: Rectangle {
+                                    radius: 10
+                                    color: vpnConnectBtn.pressed ? Qt.darker(colAccent, 1.2) : colAccent
+                                    opacity: vpnConnectBtn.enabled ? 1.0 : 0.5
+                                }
+                                contentItem: Text {
+                                    text: vpnConnectBtn.text
+                                    color: "white"
+                                    anchors.centerIn: parent
+                                    font.bold: true
+                                }
+                                onClicked: topDrawer.vpnConnect()
+                            }
+
+                            Button {
+                                id: vpnStopBtn
+                                text: "Disconnect"
+                                Layout.preferredWidth: 140
+                                Layout.preferredHeight: 44
+                                enabled: topDrawer.vpnConnected
+                                background: Rectangle {
+                                    radius: 10
+                                    color: vpnStopBtn.pressed ? Qt.darker(colWarn, 1.2) : colWarn
+                                    opacity: vpnStopBtn.enabled ? 1.0 : 0.5
+                                }
+                                contentItem: Text {
+                                    text: vpnStopBtn.text
+                                    color: "white"
+                                    anchors.centerIn: parent
+                                    font.bold: true
+                                }
+                                onClicked: topDrawer.vpnDisconnect()
+                            }
+                        }
+
+                        Text {
+                            text: topDrawer.vpnDetail
+                            color: colSub
+                            font.pixelSize: 12
+                            wrapMode: Text.Wrap
+                            visible: topDrawer.vpnDetail && topDrawer.vpnDetail.length > 0
                         }
                     }
                 }
@@ -1115,12 +1501,7 @@ Drawer {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
-                                text: "Service Endpoints"
-                                color: colText
-                                font.pixelSize: 16
-                                font.bold: true
-                            }
+                            Text { text: "Service Endpoints"; color: colText; font.pixelSize: 16; font.bold: true }
                             Item { Layout.fillWidth: true }
                         }
                         Rectangle { height: 1; Layout.fillWidth: true; color: colBorder }
@@ -1176,10 +1557,7 @@ Drawer {
                                 Layout.topMargin: 16
                                 text: "Apply"
 
-                                background: Rectangle {
-                                    radius: 8
-                                    color: applySvcBtn.pressed ? Qt.darker(colWarn, 1.2) : colWarn
-                                }
+                                background: Rectangle { radius: 8; color: applySvcBtn.pressed ? Qt.darker(colWarn, 1.2) : colWarn }
                                 contentItem: Text {
                                     text: applySvcBtn.text
                                     color: "white"
@@ -1196,9 +1574,7 @@ Drawer {
 
                                         if (typeof krakenmapval.connectToDFserver === "function")
                                             krakenmapval.connectToDFserver(serverField.text)
-                                    } catch(e) {
-                                        console.log("[APPLY] call FAILED:", e)
-                                    }
+                                    } catch(e) { console.log("[APPLY] call FAILED:", e) }
                                 }
                             }
 
@@ -1212,11 +1588,7 @@ Drawer {
                                 Layout.topMargin: 16
                                 text: "Reconnect"
 
-                                background: Rectangle {
-                                    radius: 8
-                                    color: reconnectBtn.pressed ? Qt.darker(colOk, 1.2) : colOk
-                                }
-
+                                background: Rectangle { radius: 8; color: reconnectBtn.pressed ? Qt.darker(colOk, 1.2) : colOk }
                                 contentItem: Text {
                                     text: reconnectBtn.text
                                     color: "white"
@@ -1236,12 +1608,7 @@ Drawer {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text {
-                                text: "Global Offsets"
-                                color: colText
-                                font.pixelSize: 16
-                                font.bold: true
-                            }
+                            Text { text: "Global Offsets"; color: colText; font.pixelSize: 16; font.bold: true }
                             Item { Layout.fillWidth: true }
                         }
 
@@ -1256,7 +1623,6 @@ Drawer {
                                 TextField {
                                     id: compassField
                                     property string originalValue: ""
-                                    // ✅ ทศนิยม 6 ตำแหน่ง
                                     text: (krakenmapval && krakenmapval.compassOffset !== undefined)
                                           ? Number(krakenmapval.compassOffset).toFixed(6) : ""
                                     Layout.fillWidth: true
@@ -1285,10 +1651,7 @@ Drawer {
                                 Layout.topMargin: 16
                                 Layout.alignment: Qt.AlignVCenter
 
-                                background: Rectangle {
-                                    radius: 10
-                                    color: setCompassBtn.pressed ? Qt.darker(colPurple, 1.2) : colPurple
-                                }
+                                background: Rectangle { radius: 10; color: setCompassBtn.pressed ? Qt.darker(colPurple, 1.2) : colPurple }
                                 contentItem: Text {
                                     text: setCompassBtn.text
                                     color: "white"

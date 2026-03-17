@@ -24,7 +24,9 @@
 #include <QVariantList>
 #include <QJsonArray>
 #include <QProcess>
+#ifdef PLATFORM_JETSON
 #include "newGPIOClassDF.h"
+#endif
 #include <QUrl>
 
 #include <QMainWindow>
@@ -490,7 +492,9 @@ private:
     int ClientActiveIDCheck(const QString &uniqueIdInGroup, groupActive *group);
 
     void gpioInit();
-    newGPIOClassDF *displaysetting = nullptr;
+    #ifdef PLATFORM_JETSON
+        newGPIOClassDF *displaysetting = nullptr;
+    #endif
     ImageProviderDF *capture;
 
     QVector<ChatClientDF*> m_groupClients;
@@ -560,6 +564,37 @@ private:
     bool deleteRel(const QString &rel, QString *reasonOut);
     void cleanupEmptyDirs(const QString &absFilePath);
     void sendResult(const QJsonObject &o);
+    struct LastGpsFix {
+        bool valid = false;
+        double lat = 0.0;
+        double lon = 0.0;
+        double alt = 0.0;
+        QString date;
+        QString time;
+        QString utm;
+        QString mgrs;
+    };
+
+    LastGpsFix m_lastGps1;
+    LastGpsFix m_lastGps2;
+
+    static bool isGoodFix(const GPSInfo &info) {
+        if (info.locked != 1) return false;
+        if (!std::isfinite(info.lat) || !std::isfinite(info.lon)) return false;
+        if (qFuzzyIsNull(info.lat) && qFuzzyIsNull(info.lon)) return false;
+        if (info.lat < -90.0 || info.lat > 90.0) return false;
+        if (info.lon < -180.0 || info.lon > 180.0) return false;
+        return true;
+    }
+
+    static QDateTime parseGpsDateTimeLocalSafe(const QString &date, const QString &time) {
+        QDateTime t = QDateTime::fromString(date + " " + time, "yyyy-MM-dd HH:mm:ss.zzz");
+        if (!t.isValid())
+            t = QDateTime::fromString(date + " " + time, "yyyy-MM-dd HH:mm:ss");
+        if (!t.isValid())
+            return QDateTime();
+        return t.toLocalTime();
+    }
 
 private slots:
     void newCommandProcess(const QJsonObject &command, QWebSocket *pSender,const QString &message);

@@ -463,7 +463,7 @@ Item {
 
 
                     // ===================== DistanceM (m) -> sendDistance(meters) =====================
-                    Label { text: "DistanceM (m):"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Distance (m):"; font.pixelSize: 16; color: "#ffffff" }
 
                     ComboBox {
                         id: doaDistanceMCombo

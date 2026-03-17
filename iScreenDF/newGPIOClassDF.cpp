@@ -1,4 +1,4 @@
-#include "newGPIOClassDF.h"
+#include "iScreenDF/newGPIOClassDF.h"
 #include <iostream>
 
 newGPIOClassDF::newGPIOClassDF(const std::string &chipName, unsigned int lineNum, const std::string &consumer)

@@ -62,6 +62,7 @@
 #include <QFileInfo>
 #include <QThread>
 #include <QPointer>
+#include <QSet>
 QT_FORWARD_DECLARE_CLASS(QWebSocketServer)
 QT_FORWARD_DECLARE_CLASS(QWebSocket)
 
@@ -124,7 +125,8 @@ private:
     QList<SoftPhoneSocketClient *> recSocketClient;
     QList<SoftPhoneSocketClient *> igateGroupMngSocketClient;
     quint16 m_listenPort = 0;
-
+    QSet<QWebSocket*> m_bootInitSent;   // ✅ กันยิงซ้ำต่อ client
+    void sendInitCommandsOnce(QWebSocket *pSocket);
 };
 
 #endif //CHATSERVER_H

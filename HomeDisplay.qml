@@ -12,8 +12,8 @@ import QtQuick.Layouts 1.0
 import App1 1.0
 Item {
     id: homeDisplay
-    width: 1195
-    height: 400
+    // width: 1920
+    // height: 1080
     anchors.fill: parent
     property int currentMemIdEdit: -1
 
@@ -694,8 +694,10 @@ Item {
 
 
         mainWindows.onOpenwebrxConnected.connect(onOpenwebrxConnected)
-        homeDisplay.width = screenrotation == 270 ? 1280 : 1920
-        homeDisplay.height = screenrotation == 270 ? 400 : 1080
+        // homeDisplay.width = screenrotation == 270 ? 1280 : 1920
+        // homeDisplay.height = screenrotation == 270 ? 400 : 1080
+        homeDisplay.width = 1920
+        homeDisplay.height = 1080
     }
 
 

@@ -90,19 +90,19 @@ bool isFfmpegInstalled()
 
 void mainwindowsiRec::installFfmpegIfNeeded()
 {
-    if (isFfmpegInstalled()) {
-        qDebug() << "ffmpeg already installed";
-        return;
-    }
+    // if (isFfmpegInstalled()) {
+    //     qDebug() << "ffmpeg already installed";
+    //     return;
+    // }
 
-    qDebug() << "ffmpeg not found, installing...";
+    // qDebug() << "ffmpeg not found, installing...";
 
-    QProcess p;
-    p.start("bash", QStringList() << "-c"
-             << "apt update && apt install -y ffmpeg");
-    p.waitForFinished(-1);
+    // QProcess p;
+    // p.start("bash", QStringList() << "-c"
+    //                               << "apt update && apt install -y ffmpeg");
+    // p.waitForFinished(-1);
 
-    qDebug() << "ffmpeg install finished, exitCode =" << p.exitCode();
+    // qDebug() << "ffmpeg install finished, exitCode =" << p.exitCode();
 }
 
 mainwindowsiRec::~mainwindowsiRec()
@@ -216,129 +216,158 @@ void mainwindowsiRec::ensureVoicexSymlinkAndFix()
     const QString realDir = "/var/ivoicex";
     const QString linkDir = "/var/voicex";
 
-    auto canonicalOrAbs = [](const QString &path) -> QString {
-        QFileInfo fi(path);
-        const QString canon = fi.canonicalFilePath();
-        return canon.isEmpty() ? fi.absoluteFilePath() : canon;
-    };
-
-    auto hasIvoicexLoop = [&](const QString &path) -> bool {
-        QFileInfo fi(path);
-        if (!fi.exists())
-            return false;
-
-        const QString p = canonicalOrAbs(path);
-        // loop: /ivoicex ซ้ำ >= 2 เช่น /var/ivoicex/ivoicex/ivoicex
-        return (p.count("/ivoicex") >= 2);
-    };
-
-    auto removeBad = [&]() {
+    // run bash script ผ่าน QProcess แบบ arguments ตรงๆ
+    // ลดปัญหา quoting/escaping และไม่ต้องใช้ QString::replace()
+    auto runBash = [](const QString &script, bool useSudo = false, int timeoutMs = 60000) -> bool {
         QProcess p;
-        p.start("/bin/bash", QStringList() << "-lc" << "rm -rf /var/ivoicex /var/voicex");
-        p.waitForFinished(30000);
 
+        if (useSudo) {
+            // sudo bash -lc "<script>"
+            p.start("sudo", QStringList() << "bash" << "-lc" << script);
+        } else {
+            // bash -lc "<script>"
+            p.start("bash", QStringList() << "-lc" << script);
+        }
+
+        if (!p.waitForFinished(timeoutMs)) {
+            qWarning() << "[voicex] timeout";
+            p.kill();
+            return false;
+        }
+
+        const int ec = p.exitCode();
+        const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
         const QString err = QString::fromUtf8(p.readAllStandardError()).trimmed();
-        if (!err.isEmpty())
-            qWarning() << "[voicex] rm err:" << err;
-    };
 
-    auto ensureRealDir = [&]() -> bool {
-        if (QFileInfo::exists(realDir)) {
-            // ต้องเป็น directory เท่านั้น
-            if (!QFileInfo(realDir).isDir()) {
-                qWarning() << "[voicex] /var/ivoicex exists but not a directory -> remove";
-                return false;
-            }
-            return true;
-        }
+        if (!out.isEmpty()) qDebug() << "[voicex] out:" << out;
+        if (!err.isEmpty()) qWarning() << "[voicex] err:" << err;
 
-        // ไม่เจอ folder -> สร้าง
-        if (!QDir().mkpath(realDir)) {
-            qCritical() << "[voicex] failed to create directory:" << realDir;
+        if (ec != 0) {
+            qWarning() << "[voicex] failed ec=" << ec;
             return false;
         }
-        qDebug() << "[voicex] created directory:" << realDir;
         return true;
     };
 
-    auto ensureSymlink = [&]() -> bool {
-        QFileInfo linkInfo(linkDir);
+    bool changed = false;
 
-        // ถ้ามีอยู่แล้ว ตรวจว่ามันคือ symlink ที่ชี้ถูกไหม
-        if (linkInfo.exists() || linkInfo.isSymLink()) {
-            if (linkInfo.isSymLink()) {
-                const QString target = linkInfo.symLinkTarget();
-                // symLinkTarget() อาจเป็น relative → เทียบแบบ canonical
-                const QString targetCanon = canonicalOrAbs(target);
-                const QString realCanon   = canonicalOrAbs(realDir);
+    // =========================
+    // STEP 0: realDir ต้องเป็น directory จริงเท่านั้น (ห้ามเป็น symlink/file)
+    // =========================
+    {
+        QFileInfo ri(realDir);
 
-                if (targetCanon == realCanon) {
-                    qDebug() << "[voicex] symlink already OK:" << linkDir << "->" << target;
-                    return true;
+        if (ri.exists() && !ri.isDir()) {
+            qWarning() << "[voicex] /var/ivoicex exists but not a directory -> remove";
+
+            if (!runBash("rm -rf /var/ivoicex", false, 30000)) {
+                if (!runBash("rm -rf /var/ivoicex", true, 30000)) {
+                    qCritical() << "[voicex] cannot remove bad /var/ivoicex";
+                    return;
                 }
+            }
+            changed = true;
+        }
 
-                qWarning() << "[voicex] symlink exists but wrong target:" << linkDir << "->" << target;
-            } else {
-                qWarning() << "[voicex] /var/voicex exists but not a symlink -> remove";
+        if (!QFileInfo::exists(realDir)) {
+            if (!QDir().mkpath(realDir)) {
+                qCritical() << "[voicex] failed to create directory:" << realDir;
+                return;
+            }
+            qDebug() << "[voicex] created directory:" << realDir;
+            changed = true;
+        }
+    }
+
+    // =========================
+    // STEP 1: แก้ปัญหา /var/ivoicex/ivoicex/ivoicex/... (โฟลเดอร์ซ้อน)
+    //  - ย้ายของจาก "ปลายสุด" กลับขึ้นมา /var/ivoicex
+    //  - ลบ chain /var/ivoicex/ivoicex ทิ้ง
+    // =========================
+    {
+        QFileInfo nested(realDir + "/ivoicex");
+        if (nested.exists() && nested.isDir()) {
+            qWarning() << "[voicex] nested ivoicex detected -> flatten it";
+
+            // bash: หา deep path สุดท้าย แล้ว rsync กลับขึ้นมา แล้วลบ chain
+            // (rsync -a จะรักษา permission/time และ copy directory contents)
+            const QString flattenCmd =
+                "set -e;"
+                "ROOT=/var/ivoicex;"
+                "P=$ROOT;"
+                "DEPTH=0;"
+                "while [ -d \"$P/ivoicex\" ] && [ $DEPTH -lt 64 ]; do "
+                "  P=\"$P/ivoicex\";"
+                "  DEPTH=$((DEPTH+1));"
+                "done;"
+                "if [ \"$P\" != \"$ROOT\" ]; then "
+                "  echo \"[voicex] deepest=$P depth=$DEPTH\";"
+                "  rsync -a \"$P/\" \"$ROOT/\";"
+                "  rm -rf \"$ROOT/ivoicex\";"
+                "fi";
+
+            if (!runBash(flattenCmd, false, 60000)) {
+                // ถ้า permission ไม่พอ ลอง sudo (ไม่ต้อง escape)
+                if (!runBash(flattenCmd, true, 60000)) {
+                    qCritical() << "[voicex] flatten failed (cannot fix nested ivoicex)";
+                    return;
+                }
             }
 
-            // มีแต่ไม่ถูก ต้องลบทิ้งก่อน
-            QProcess p;
-            p.start("/bin/bash", QStringList() << "-lc" << "rm -rf /var/voicex");
-            p.waitForFinished(30000);
+            changed = true;
         }
-
-        // สร้าง symlink
-        if (!QFile::link(realDir, linkDir)) {
-            qCritical() << "[voicex] failed to create symlink:" << linkDir << "->" << realDir;
-            return false;
-        }
-
-        qDebug() << "[voicex] symlink created:" << linkDir << "->" << realDir;
-        return true;
-    };
-
-    // =========================
-    // STEP 0: ถ้าไม่เจอ /var/ivoicex เลย -> สร้าง + link
-    // =========================
-    if (!QFileInfo::exists(realDir)) {
-        qWarning() << "[voicex] /var/ivoicex not found -> create + link";
-        if (!ensureRealDir())
-            return;
-        if (!ensureSymlink())
-            return;
-
-        RestartSystemServicesAfter30s();
-        return;
     }
 
     // =========================
-    // STEP 1: ถ้าเจอ loop -> ลบทั้งหมด แล้วสร้างใหม่ + link
+    // STEP 2: บังคับให้ /var/voicex เป็น symlink -> /var/ivoicex เสมอ
+    //  - ลบทิ้งก่อน ไม่สนชนิด แล้ว ln -sfn
     // =========================
-    if (hasIvoicexLoop(realDir)) {
-        qWarning() << "[voicex] loop detected -> remove ivoicex/voicex and recreate";
-        removeBad();
+    {
+        QFileInfo li(linkDir);
 
-        if (!ensureRealDir())
-            return;
-        if (!ensureSymlink())
-            return;
+        if (li.exists() || li.isSymLink()) {
+            if (li.isSymLink()) {
+                // symlink: unlink ด้วย QFile::remove ก่อน (เร็ว+ชัวร์)
+                if (!QFile::remove(linkDir)) {
+                    // fallback: rm -f
+                    if (!runBash("rm -f /var/voicex", false, 30000)) {
+                        if (!runBash("rm -f /var/voicex", true, 30000)) {
+                            qCritical() << "[voicex] cannot remove existing symlink:" << linkDir;
+                            return;
+                        }
+                    }
+                }
+            } else {
+                // file/dir: rm -rf
+                if (!runBash("rm -rf /var/voicex", false, 30000)) {
+                    if (!runBash("rm -rf /var/voicex", true, 30000)) {
+                        qCritical() << "[voicex] cannot remove existing path:" << linkDir;
+                        return;
+                    }
+                }
+            }
+            changed = true;
+        }
 
-        RestartSystemServicesAfter30s();
-        return;
+        // สร้างใหม่แบบ force
+        if (!runBash("ln -sfn /var/ivoicex /var/voicex", false, 30000)) {
+            if (!runBash("ln -sfn /var/ivoicex /var/voicex", true, 30000)) {
+                qCritical() << "[voicex] failed to create symlink:" << linkDir << "->" << realDir;
+                return;
+            }
+        }
+
+        qDebug() << "[voicex] symlink OK: /var/voicex -> /var/ivoicex";
     }
 
     // =========================
-    // STEP 2: ปกติ ไม่ loop -> ensure symlink
+    // STEP 3: Restart เฉพาะตอนมีการแก้จริง
     // =========================
-    if (!ensureRealDir())
-        return;
-
-    if (!ensureSymlink())
-        return;
-
-    // ถ้าคุณต้องการให้ restart เฉพาะตอน “แก้/สร้างจริง ๆ” บอกได้
-    RestartSystemServicesAfter30s();
+    if (changed) {
+        RestartSystemServicesAfter30s();
+    } else {
+        qDebug() << "[voicex] no change, skip restart";
+    }
 }
 int mainwindowsiRec::getFsUsedPercent(const QString &path)
 {
@@ -498,7 +527,7 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
             QString socketPort = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
             cppCommand(socketPort);
 
-            InitializingRTCtoSystem();
+            // InitializingRTCtoSystem();
             mysql->updateRecordVolume();
         }
     }else if(menuID ==  "getRecordFiles"){
@@ -820,13 +849,10 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
         mysql->playRecording();
     }else if (obj["menuID"].toString() == "formatdisknow"){
         qDebug() << "formatdisknow:" << qmlJson;
-         mysql->formatDiskandDB();
+        mysql->formatDiskandDB();
     }else if (obj["menuID"].toString() == "RestartSoftware"){
         qDebug() << "RestartSoftware:" << qmlJson;
         system("systemctl restart iScan.service ");
-    }else if (obj["menuID"].toString() == "ShutdownSoftware"){
-        qDebug() << "RestartSoftware:" << qmlJson;
-        system("systemctl shutdown now -f");
     }else {
         qWarning() << "[cppSubmitTextFiledMySQL] unknown menuID:" << menuID << qmlJson;
     }
@@ -868,42 +894,42 @@ void mainwindowsiRec::cppSubmitTextFiledMySQL(QString qmlJson){
 }
 
 
-void mainwindowsiRec::checkAndUpdateRTC()
-{
-    QProcess ntpCheck;
-    ntpCheck.start("timedatectl show -p NTPSynchronized --value");
-    ntpCheck.waitForFinished(1000);
-    QString ntpStatus = ntpCheck.readAllStandardOutput().trimmed();
+// void mainwindowsiRec::checkAndUpdateRTC()
+// {
+//     QProcess ntpCheck;
+//     ntpCheck.start("timedatectl show -p NTPSynchronized --value");
+//     ntpCheck.waitForFinished(1000);
+//     QString ntpStatus = ntpCheck.readAllStandardOutput().trimmed();
 
-    if (ntpStatus == "yes") {
-        qDebug() << "NTP is active → Updating hwclock from system time";
-        system("hwclock -w");
-    } else {
-        qDebug() << "NTP not active → Will retry in 15 minutes";
-    }
-}
-void mainwindowsiRec::InitializingRTCtoSystem()
-{
-    qDebug() << "[InitializingRTCtoSystem]";
+//     if (ntpStatus == "yes") {
+//         qDebug() << "NTP is active → Updating hwclock from system time";
+//         system("hwclock -w");
+//     } else {
+//         qDebug() << "NTP not active → Will retry in 15 minutes";
+//     }
+// }
+// void mainwindowsiRec::InitializingRTCtoSystem()
+// {
+//     qDebug() << "[InitializingRTCtoSystem]";
 
-    static bool initialized = false;
-    if (!initialized) {
-        qDebug() << "Initializing: set system time from RTC";
-        system("hwclock -s");
+//     static bool initialized = false;
+//     if (!initialized) {
+//         qDebug() << "Initializing: set system time from RTC";
+//         system("hwclock -s");
 
-        // เริ่ม QTimer เพื่อเช็กทุก 15 นาที
-        rtcUpdateTimer = new QTimer(this);
-        connect(rtcUpdateTimer, &QTimer::timeout, this, &mainwindowsiRec::checkAndUpdateRTC);
-        rtcUpdateTimer->start(15 * 60 * 1000);  // 15 นาที
-        checkAndUpdateRTC();  // เรียกทันทีตอนเริ่มแรก
-        initialized = true;
-    }
-//    QTimer::singleShot(15000, this, [=]() {
-//        qDebug() << "Restarting irecd.service after 20s delay...";
-//        system("systemctl restart irecd.service");
-//        system("systemctl restart iplayd.service");
-//    });
-}
+//         // เริ่ม QTimer เพื่อเช็กทุก 15 นาที
+//         rtcUpdateTimer = new QTimer(this);
+//         connect(rtcUpdateTimer, &QTimer::timeout, this, &mainwindowsiRec::checkAndUpdateRTC);
+//         rtcUpdateTimer->start(15 * 60 * 1000);  // 15 นาที
+//         checkAndUpdateRTC();  // เรียกทันทีตอนเริ่มแรก
+//         initialized = true;
+//     }
+// //    QTimer::singleShot(15000, this, [=]() {
+// //        qDebug() << "Restarting irecd.service after 20s delay...";
+// //        system("systemctl restart irecd.service");
+// //        system("systemctl restart iplayd.service");
+// //    });
+// }
 
 
 // ===== helper แปลง size จาก lsblk =====
@@ -1850,7 +1876,7 @@ void mainwindowsiRec::getMonitorParemeter()
     if (storage.isValid() && storage.isReady()) {
         storageTotalGB = storage.bytesTotal() / (1024.0 * 1024.0 * 1024.0);
         storageUsedGB  = (storage.bytesTotal() - storage.bytesAvailable())
-                       / (1024.0 * 1024.0 * 1024.0);
+                        / (1024.0 * 1024.0 * 1024.0);
     }
 
     qDebug() << "[Monitor][STORAGE] usedGB =" << storageUsedGB
@@ -1954,7 +1980,7 @@ void* mainwindowsiRec::ThreadFuncDateTime(void* pTr)
     qDebug() << "ThreadFuncDateTime start";
     while (pThis->m_threadRunning) {
         if (pThis->m_qmlConnected.load(std::memory_order_relaxed)) {
-//            pThis->calendar();
+            //            pThis->calendar();
         }
         QThread::msleep(1000);
     }

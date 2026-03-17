@@ -7,6 +7,7 @@
 #include <cstring>
 #include <QFileInfo>
 
+// -------------------- helpers --------------------
 static inline QString toUtcDate(double tsec) {
     if (!(tsec > 0)) return {};
     const qint64 ms = static_cast<qint64>(tsec * 1000.0);
@@ -18,6 +19,16 @@ static inline QString toUtcTime(double tsec) {
     return QDateTime::fromMSecsSinceEpoch(ms, Qt::UTC).time().toString("HH:mm:ss.zzz");
 }
 
+// helper: แปลงเวลาจาก libgps รุ่นใหม่/เก่า
+static inline double fixTimeToSec(const gps_fix_t& fix) {
+#if defined(GPSD_API_MAJOR_VERSION) && (GPSD_API_MAJOR_VERSION >= 9)
+    return (double)fix.time.tv_sec + (double)fix.time.tv_nsec * 1e-9;
+#else
+    return fix.time;
+#endif
+}
+
+// -------------------- GpsdReader --------------------
 GpsdReader::GpsdReader(QObject* parent) : QObject(parent) {}
 GpsdReader::~GpsdReader() { stop(); }
 
@@ -27,13 +38,10 @@ void GpsdReader::setGpsdEndpoint(const QString& host, quint16 port) {
         gpsdHost_ = host.trimmed();
         gpsdPort_ = port;
     }
-
-    // ถ้ากำลังรันอยู่ ให้สั่ง reconnect ทันที
     if (worker_) {
         reconnectRequested_.store(true);
     }
 }
-
 
 void GpsdReader::setDeviceMap(const QString& dev1, const QString& dev2) {
     QMutexLocker lk(&m_);
@@ -58,7 +66,7 @@ void GpsdReader::stop() {
     worker_ = nullptr;
 }
 
-
+// -------------------- Worker --------------------
 void GpsdReader::Worker::run() {
     signal(SIGPIPE, SIG_IGN);
 
@@ -85,7 +93,6 @@ void GpsdReader::Worker::run() {
         // 1) connect (with backoff)
         while (outer_->running_.load()) {
 
-            // ✅ ถ้ามีคำสั่ง reconnect ระหว่างกำลังพยายาม connect ก็รีเฟรช endpoint
             if (outer_->reconnectRequested_.exchange(false)) {
                 QMutexLocker lk(&outer_->m_);
                 host = outer_->gpsdHost_;
@@ -118,7 +125,6 @@ void GpsdReader::Worker::run() {
 
         while (outer_->running_.load() && !need_reconnect) {
 
-            // ✅ ถ้ามีคำสั่ง reconnect จากภายนอก (เปลี่ยน IP) ให้หลุดออกไป reconnect
             if (outer_->reconnectRequested_.exchange(false)) {
                 need_reconnect = true;
                 break;
@@ -167,45 +173,37 @@ void GpsdReader::Worker::run() {
     }
 }
 
+// -------------------- constellation helpers --------------------
 QString GpsdReader::constelNameFromGnssid(int g) {
     switch (g) {
     case 0:  return "GPS";
     case 1:  return "SBAS";
-    case 2:  return "GAL";     // Galileo
-    case 3:  return "BDS";     // BeiDou
+    case 2:  return "GAL";
+    case 3:  return "BDS";
     case 4:  return "IMES";
     case 5:  return "QZSS";
-    case 6:  return "GLO";     // GLONASS
-    case 7:  return "NAVIC";   // IRNSS/NavIC
+    case 6:  return "GLO";
+    case 7:  return "NAVIC";
     default: return "UNK";
     }
 }
 
-// เผื่อ gpsd รุ่นเก่าที่ไม่มี gnssid/svid — เดาว่ามาจาก PRN ranges
 QString GpsdReader::constelNameHeuristicFromPRN(int prn) {
     if (prn >= 1   && prn <= 32)  return "GPS";
-    if (prn >= 65  && prn <= 96)  return "GLO";     // GLONASS (slot IDs 65..96)
+    if (prn >= 65  && prn <= 96)  return "GLO";
     if (prn >= 120 && prn <= 158) return "SBAS";
-    if (prn >= 193 && prn <= 200) return "QZSS";    // legacy ranges (approx)
-    if (prn >= 201 && prn <= 237) return "BDS";     // BeiDou
-    if (prn >= 301 && prn <= 336) return "GAL";     // Galileo
+    if (prn >= 193 && prn <= 200) return "QZSS";
+    if (prn >= 201 && prn <= 237) return "BDS";
+    if (prn >= 301 && prn <= 336) return "GAL";
     return "UNK";
 }
 
-// helper: แปลงเวลาจาก libgps รุ่นใหม่/เก่า
-static inline double fixTimeToSec(const gps_fix_t& fix) {
-#if defined(GPSD_API_MAJOR_VERSION) && (GPSD_API_MAJOR_VERSION >= 9)
-    return (double)fix.time.tv_sec + (double)fix.time.tv_nsec * 1e-9;
-#else
-    return fix.time;
-#endif
-}
-
+// -------------------- core: handleFixAndSky --------------------
 void GpsdReader::handleFixAndSky(const gps_data_t& gd, const char* devPathC) {
     if (!devPathC) return;
     QString devPath(devPathC);
 
-    // map ไปยัง state ไหน
+    // device mapping
     QString dev1, dev2;
     {
         QMutexLocker lk(&m_);
@@ -216,66 +214,129 @@ void GpsdReader::handleFixAndSky(const gps_data_t& gd, const char* devPathC) {
     GPSInfo* st = nullptr;
     bool isDev1 = false;
 
-    // เทียบแบบเข้มกว่าหน่อย: ลองเทียบ path ตรง ๆ ก่อน
-    if (!dev1.isEmpty() && devPath == dev1) { st = &state1_; isDev1 = true; }
-    else if (!dev2.isEmpty() && devPath == dev2) { st = &state2_; }
+    const QString dev1Base = dev1.isEmpty() ? QString() : QFileInfo(dev1).fileName();
+    const QString dev2Base = dev2.isEmpty() ? QString() : QFileInfo(dev2).fileName();
+
+    const bool matchDev1 =
+        (!dev1.isEmpty() && (devPath == dev1 || devPath.endsWith(dev1Base)));
+    const bool matchDev2 =
+        (!dev2.isEmpty() && (devPath == dev2 || devPath.endsWith(dev2Base)));
+
+    if (matchDev1) { st = &state1_; isDev1 = true; }
+    else if (matchDev2) { st = &state2_; }
     else {
-        // เผื่อ gpsd รายงานเป็น /dev/serial/by-id/... ให้ลองเทียบ basename
-        if (!dev1.isEmpty() && devPath.endsWith(QFileInfo(dev1).fileName())) { st = &state1_; isDev1 = true; }
-        else if (!dev2.isEmpty() && devPath.endsWith(QFileInfo(dev2).fileName())) { st = &state2_; }
-        else {
-            // ไม่รู้จะลง state ไหน ก็ข้าม
+        // ✅ fallback: ถ้าใช้ device เดียว (dev2 ว่าง) แล้ว path รายงานเปลี่ยน
+        if (!dev1.isEmpty() && dev2.isEmpty()) {
+            st = &state1_;
+            isDev1 = true;
+        } else {
             return;
         }
     }
 
     bool changed = false;
-    auto finite = [](double v, double def=0.0){ return std::isfinite(v) ? v : def; };
 
-    // ----- อัปเดต FIX/TPV ถ้ามี -----
+    #ifdef PLATFORM_JETSON
+    // ---------- FIX/TPV ----------
     if (gd.set & (TIME_SET | LATLON_SET | ALTITUDE_SET | SPEED_SET | MODE_SET | STATUS_SET)) {
+
+        // time (อัปเดตได้แม้ไม่ lock)
         const double tsec = fixTimeToSec(gd.fix);
-        st->date   = (tsec > 0) ? QDateTime::fromMSecsSinceEpoch((qint64)(tsec*1000.0), Qt::UTC).date().toString("yyyy-MM-dd") : QString();
-        st->time   = (tsec > 0) ? QDateTime::fromMSecsSinceEpoch((qint64)(tsec*1000.0), Qt::UTC).time().toString("HH:mm:ss.zzz") : QString();
-        st->lat    = finite(gd.fix.latitude);
-        st->lon    = finite(gd.fix.longitude);
-        st->alt    = finite(gd.fix.altitude);
-        st->speed  = finite(gd.fix.speed);
+        const QString newDate = (tsec > 0) ? toUtcDate(tsec) : QString();
+        const QString newTime = (tsec > 0) ? toUtcTime(tsec) : QString();
+        if (st->date != newDate) { st->date = newDate; changed = true; }
+        if (st->time != newTime) { st->time = newTime; changed = true; }
+
+        // lock 판단
         const bool modeLock = (gd.fix.mode >= MODE_2D);
         const bool statusOk = (gd.status == STATUS_FIX || gd.status == STATUS_DGPS_FIX);
-        st->locked = (modeLock && statusOk) ? 1 : 0;
+        const bool hasFix   = (modeLock && statusOk);
+
+        const int newLocked = hasFix ? 1 : 0;
+        if (st->locked != newLocked) { st->locked = newLocked; changed = true; }
+
+        // ✅ สำคัญ: อัปเดต lat/lon/alt/speed เฉพาะเมื่อ hasFix + ค่าเป็น finite
+        if (hasFix &&
+            std::isfinite(gd.fix.latitude) &&
+            std::isfinite(gd.fix.longitude))
+        {
+            const double newLat = gd.fix.latitude;
+            const double newLon = gd.fix.longitude;
+
+            if (st->lat != newLat) { st->lat = newLat; changed = true; }
+            if (st->lon != newLon) { st->lon = newLon; changed = true; }
+
+            if (std::isfinite(gd.fix.altitude)) {
+                const double newAlt = gd.fix.altitude;
+                if (st->alt != newAlt) { st->alt = newAlt; changed = true; }
+            }
+            if (std::isfinite(gd.fix.speed)) {
+                const double newSpd = gd.fix.speed;
+                if (st->speed != newSpd) { st->speed = newSpd; changed = true; }
+            }
+        }
+        // ถ้าไม่มี fix: ห้ามไป set lat/lon=0 ทับค่าที่เคยได้
+    }
+#else
+    if (gd.set & (TIME_SET | LATLON_SET | ALTITUDE_SET | SPEED_SET | MODE_SET | STATUS_SET)) {
+
+        const double tsec = fixTimeToSec(gd.fix);
+        st->date = (tsec > 0) ? QDateTime::fromMSecsSinceEpoch((qint64)(tsec * 1000.0), Qt::UTC)
+                                    .date().toString("yyyy-MM-dd")
+                              : QString();
+        st->time = (tsec > 0) ? QDateTime::fromMSecsSinceEpoch((qint64)(tsec * 1000.0), Qt::UTC)
+                                    .time().toString("HH:mm:ss.zzz")
+                              : QString();
+
+        // ✅ gpsd 3.20: ใช้ mode อย่างเดียว (ไม่มี gd.status แล้ว)
+        const bool hasFix = (gd.fix.mode >= MODE_2D);
+        st->locked = hasFix ? 1 : 0;
+
+        // ✅ สำคัญ: อัปเดต lat/lon/alt เฉพาะตอนมี fix และค่าเป็น finite (กัน NaN->0)
+        if (hasFix &&
+            std::isfinite(gd.fix.latitude) &&
+            std::isfinite(gd.fix.longitude))
+        {
+            st->lat   = gd.fix.latitude;
+            st->lon   = gd.fix.longitude;
+
+            if (std::isfinite(gd.fix.altitude))
+                st->alt = gd.fix.altitude;
+
+            if (std::isfinite(gd.fix.speed))
+                st->speed = gd.fix.speed;
+        }
+
         changed = true;
     }
+#endif
 
-// ----- อัปเดต SKY เฉพาะเมื่อแพ็กเก็ตนี้เป็น SKY -----
+// ---------- SKY ----------
 #ifdef SATELLITE_SET
     if (gd.set & SATELLITE_SET)
 #else
-    // บาง libgps เก่ามากอาจไม่มี SATELLITE_SET – ใช้เงื่อนไขนี้แทน
     if (gd.satellites_visible >= 0)
 #endif
     {
-        st->sat    = gd.satellites_visible;
+        const int newSat = gd.satellites_visible;
+        if (st->sat != newSat) { st->sat = newSat; changed = true; }
+
+        // rebuild sat list
         st->satUse = 0;
         st->sats.clear();
         st->constelCounts.clear();
 
-        // used[] ของ gpsd คือรายการ PRN ที่ใช้ คิดจำนวนแบบนี้:
-        for (int i = 0; i < (int)gd.satellites_used; ++i) {
-            // if (gd.skyview[i].used != 0) st->satUse++;
-        }
-
         const int n = qMin(gd.satellites_visible, (int)MAXCHANNELS);
         for (int i = 0; i < n; ++i) {
             SatInfo s;
-            int prn = gd.skyview[i].PRN;  // ฟิลด์ชื่อ PRN ใน gpsd ทั่วไป
+            const int prn = gd.skyview[i].PRN;
 
             s.prn  = prn;
-            s.snr  = finite(gd.skyview[i].ss);
-            s.elev = finite(gd.skyview[i].elevation);
-            s.az   = finite(gd.skyview[i].azimuth);
+            s.snr  = std::isfinite(gd.skyview[i].ss)        ? gd.skyview[i].ss        : 0.0;
+            s.elev = std::isfinite(gd.skyview[i].elevation) ? gd.skyview[i].elevation : 0.0;
+            s.az   = std::isfinite(gd.skyview[i].azimuth)   ? gd.skyview[i].azimuth   : 0.0;
             s.used = (gd.skyview[i].used != 0);
-            if(s.used) st->satUse++;
+            if (s.used) st->satUse++;
 
             int gnssid = -1, svid = -1;
 #if defined(STRUCT_SKYVIEW_T_HAS_GNSSID)
@@ -284,6 +345,7 @@ void GpsdReader::handleFixAndSky(const gps_data_t& gd, const char* devPathC) {
 #endif
             s.gnssid = gnssid;
             s.svid   = svid;
+
             s.constel = (gnssid >= 0 && gnssid <= 7)
                             ? constelNameFromGnssid(gnssid)
                             : constelNameHeuristicFromPRN(prn);
@@ -291,9 +353,11 @@ void GpsdReader::handleFixAndSky(const gps_data_t& gd, const char* devPathC) {
             st->sats.append(s);
             st->constelCounts[s.constel] = st->constelCounts.value(s.constel, 0) + 1;
         }
+
         changed = true;
     }
 
+    // ---------- emit ----------
     if (changed) {
         if (isDev1) emit gps1Updated(*st);
         else        emit gps2Updated(*st);

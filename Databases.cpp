@@ -1,7 +1,5 @@
 #include "Databases.h"
 
-
-
 Database::Database(QString dbName, QString user, QString password, QString host, QObject *parent)
     : QObject(parent)
 {

@@ -5,6 +5,10 @@
 // ✅ ADD: ONLINE/OFFLINE button next to LOCAL/REMOTES
 // - toggles map style mode (online/offline)
 // - broadcasts via Krakenmapval (recommended, works across pages)
+//
+// ✅ FIX: Drawer must be TOPMOST and never click-through
+// - Use overlay MouseArea UNDER drawer for outside-click close
+// - Add drawer "blocker" MouseArea BEHIND controls to swallow empty-space clicks
 
 import QtQuick 2.12
 import QtQuick.Controls 2.12
@@ -18,7 +22,6 @@ import Qt.labs.settings 1.1
 
 import "../i18n" as I18n
 import "./"
-
 Item {
     z: 100
 
@@ -52,6 +55,7 @@ Item {
         property bool savedUseOfflineMap: false   // false=ONLINE, true=OFFLINE
     }
     property bool useOffline: uiSettings.savedUseOfflineMap
+
     // ===== States (ควบคุมเฉพาะ drawer) =====
     state: "closed"
     states: [
@@ -62,24 +66,55 @@ Item {
         NumberAnimation { target: drawer; properties: "x"; duration: 300; easing.type: Easing.InOutQuad }
     }
 
-    // ===== Dim overlay =====
+    // ===== Dim overlay (UNDER drawer) + click outside to close (NO CLICK-THROUGH) =====
     Rectangle {
         id: overlay
         anchors.fill: parent
-        z: 0
-        color: "transparent"
-        opacity: 1.0
+        z: 9000
         visible: settingsPanel.state === "open"
+        color: "#000000"
+        opacity: 0.35
+
+        // ✅ คลิกเฉพาะพื้นที่นอก drawer (เพราะ drawer อยู่ z สูงกว่า)
+        MouseArea {
+            anchors.fill: parent
+            enabled: overlay.visible
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+
+            onPressed:  function(mouse){ mouse.accepted = true }
+            onClicked:  function(mouse){ mouse.accepted = true; settingsPanel.close() }
+            onReleased: function(mouse){ mouse.accepted = true }
+        }
     }
 
-    // ===== Drawer panel =====
+    // ===== Drawer panel (TOPMOST) =====
     Rectangle {
         id: drawer
         width: 500
         height: parent.height
         color: "#111212"
-        z: 10
+        z: 10000
         x: -width
+
+        // ✅ BLOCKER: swallow clicks on EMPTY space inside drawer (behind controls)
+        // - doesn't block buttons because z:-1 (controls are above)
+        MouseArea {
+            id: drawerBlocker
+            anchors.fill: parent
+            z: -1
+            enabled: settingsPanel.state === "open"
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+
+            onPressed:  function(mouse){ mouse.accepted = true }
+            onClicked:  function(mouse){ mouse.accepted = true }
+            onReleased: function(mouse){ mouse.accepted = true }
+            onPositionChanged: function(mouse){ mouse.accepted = true }
+            onWheel: function(w){ w.accepted = true }
+        }
 
         Item {
             id: _item
@@ -207,6 +242,8 @@ Item {
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
+                            preventStealing: true
+                            propagateComposedEvents: false
                             onEntered: connSwitch.hovered = true
                             onExited:  connSwitch.hovered = false
                             onClicked: {
@@ -233,20 +270,17 @@ Item {
                         border.width: 2
 
                         // false = MAP ONLINE, true = MAP OFFLINE
-                        property bool useOffline: true
-                        property bool hovered: true
+                        property bool useOffline: uiSettings.savedUseOfflineMap
+                        property bool hovered: false
 
-                        // ✅ Colors
-                        readonly property color cOnline:  "#163A35"   // dark green
-                        readonly property color cOnline2: "#7AE2CF"   // accent
-                        readonly property color cOffline: "#3A2A16"   // dark amber
-                        readonly property color cOffline2:"#F3B25E"   // accent amber
+                        readonly property color cOnline:  "#163A35"
+                        readonly property color cOnline2: "#7AE2CF"
+                        readonly property color cOffline: "#3A2A16"
+                        readonly property color cOffline2:"#F3B25E"
 
-                        // ✅ Label
                         readonly property string labelText: useOffline ? "MAP OFFLINE" : "MAP ONLINE"
                         readonly property string subText:   useOffline ? "tiles/cache mode" : "internet mode"
 
-                        // ✅ Visual state
                         border.color: useOffline ? cOffline2 : cOnline2
                         color: hovered
                                ? (useOffline ? Qt.darker(cOffline, 1.15) : Qt.darker(cOnline, 1.15))
@@ -261,11 +295,10 @@ Item {
                             anchors.rightMargin: 10
                             spacing: 10
 
-                            // ✅ Map icon
                             Image {
                                 Layout.preferredWidth: 22
                                 Layout.preferredHeight: 22
-                                source: "qrc:/iScreenDFqml/images/earth-asia.png"   // ใช้อันที่มีอยู่แล้ว
+                                source: "qrc:/iScreenDFqml/images/earth-asia.png"
                                 fillMode: Image.PreserveAspectFit
                                 smooth: true
                                 mipmap: true
@@ -291,45 +324,21 @@ Item {
                                     elide: Text.ElideRight
                                 }
                             }
-
-                            // ✅ Status icon (online/offline)
-                            // Item {
-                            //     Layout.preferredWidth: 22
-                            //     Layout.preferredHeight: 22
-
-                            //     // dot background
-                            //     Rectangle {
-                            //         anchors.centerIn: parent
-                            //         width: 18; height: 18
-                            //         radius: 9
-                            //         color: "transparent"
-                            //         border.width: 2
-                            //         border.color: useOffline ? netStyleSwitch.cOffline2 : netStyleSwitch.cOnline2
-                            //     }
-
-                            //     // dot fill
-                            //     Rectangle {
-                            //         anchors.centerIn: parent
-                            //         width: 10; height: 10
-                            //         radius: 5
-                            //         color: useOffline ? netStyleSwitch.cOffline2 : netStyleSwitch.cOnline2
-                            //     }
-                            // }
                         }
 
                         MouseArea {
                             anchors.fill: parent
                             hoverEnabled: true
+                            preventStealing: true
+                            propagateComposedEvents: false
+
                             onEntered: netStyleSwitch.hovered = true
                             onExited:  netStyleSwitch.hovered = false
 
                             onClicked: {
                                 netStyleSwitch.useOffline = !netStyleSwitch.useOffline
-
-                                // ✅ จำค่า
                                 uiSettings.savedUseOfflineMap = netStyleSwitch.useOffline
 
-                                // ✅ broadcast to MapViewer page
                                 if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
                                     Krakenmapval.setUseOfflineMapStyle(netStyleSwitch.useOffline)
                                 } else {
@@ -343,16 +352,12 @@ Item {
                                       ? "Map OFFLINE: use cached/offline tiles (no internet)"
                                       : "Map ONLINE: use internet map tiles"
 
-                        // ✅ Optional: sync from backend when app starts
                         Connections {
                             target: Krakenmapval
                             function onUseOfflineMapStyleChanged(useOffline) {
                                 var v = !!useOffline
                                 if (netStyleSwitch.useOffline === v) return
-
                                 netStyleSwitch.useOffline = v
-
-                                // ✅ จำค่า (กันเปิดใหม่แล้วเพี้ยน)
                                 uiSettings.savedUseOfflineMap = v
                             }
                         }
@@ -373,11 +378,11 @@ Item {
                     anchors.horizontalCenter: parent.horizontalCenter
                     property int hoveredIndex: -1
                     property var pages: [
-                        { title: "RADIO",              icon: "qrc:/images/radioIcon.png",             source: "qrc:/HomeDisplay.qml" },
+                        { title: "RADIO",              icon: "qrc:/images/radioIcon.png",              source: "qrc:/HomeDisplay.qml" },
                         { title: "MAP\nVISUALIZATION", icon: "qrc:/iScreenDFqml/images/earth-asia.png", source: "qrc:/iScreenDFqml/pages/QMLMap.qml" },
                         { title: "DOA\nVIEWER",        icon: "qrc:/iScreenDFqml/images/dart-board.png", source: "qrc:/DoaViewer/ViewerPage.qml" },
-                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",  source: "qrc:/iRecordManage/TapBarRecordFiles.qml" },
-                        { title: "DIAG\nNOSTIC",       icon: "qrc:/images/Diagnostic.png",            source: "qrc:/iRecordManage/MonitorDisplay.qml" }
+                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",   source: "qrc:/iRecordManage/TapBarRecordFiles.qml" },
+                        { title: "DIAG\nNOSTIC",       icon: "qrc:/images/Diagnostic.png",             source: "qrc:/iRecordManage/MonitorDisplay.qml" }
                     ]
                     property int currentIndex: 0
 
@@ -388,7 +393,6 @@ Item {
                             width: 80; height: 80
                             checkable: true
                             checked: index === toolbar.currentIndex
-
                             hoverEnabled: true
 
                             contentItem: Column {
@@ -420,13 +424,10 @@ Item {
                             }
 
                             onHoveredChanged: {
-                                if (hovered) {
-                                    toolbar.hoveredIndex = index
-                                } else {
-                                    if (toolbar.hoveredIndex === index
-                                        && toolbar.currentIndex !== index) {
+                                if (hovered) toolbar.hoveredIndex = index
+                                else {
+                                    if (toolbar.hoveredIndex === index && toolbar.currentIndex !== index)
                                         toolbar.hoveredIndex = -1
-                                    }
                                 }
                             }
 
@@ -715,6 +716,20 @@ Item {
                                 if (typeof mainWindows !== "undefined" && mainWindows && typeof mainWindows.sendmessage === "function") {
                                     var msg = '{"type":"setfrequency","params":{"frequency":' + freqHz + ',"key":"memagic"}}'
                                     mainWindows.sendmessage(msg)
+
+                                    if (((centerFreq + SpectrumGLPlot.offsetFrequency) > (centerFreq + (sampRate / 2))) ||
+                                        ((centerFreq + offsetFrequency) < (centerFreq - (sampRate / 2)))) {
+                                        centerFreq = centerFreq + offsetFrequency
+                                        offsetFrequency = 0
+                                        mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFreq + ',"key":"memagic"}}')
+                                        updateFrequency()
+                                    } else {
+                                        mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
+                                        freqScan = centerFreq + offsetFrequency
+                                        updateFrequency()
+                                    }
+
+                                    mainWindows.updateCurrentOffsetFreq(0, freqHz)
                                     console.log("[sendmessage] " + msg)
                                 } else {
                                     console.warn("mainWindows.sendmessage not available")
@@ -763,48 +778,6 @@ Item {
         }
     }
 
-    // ✅ Click outside drawer to close (ROCK-SOLID)
-    MouseArea {
-        id: clickOutsideToClose
-        anchors.fill: parent
-        z: 999999
-        enabled: settingsPanel.state === "open"
-        acceptedButtons: Qt.AllButtons
-        hoverEnabled: true
-        preventStealing: true
-        propagateComposedEvents: true
-
-        function isInsideDrawer(x, y) {
-            var p = mapToItem(drawer, x, y)
-            return (p.x >= 0 && p.x <= drawer.width && p.y >= 0 && p.y <= drawer.height)
-        }
-
-        onPressed: function(mouse) {
-            if (isInsideDrawer(mouse.x, mouse.y)) {
-                mouse.accepted = false
-                return
-            }
-            mouse.accepted = true
-            settingsPanel.close()
-        }
-
-        onReleased: function(mouse) {
-            if (!isInsideDrawer(mouse.x, mouse.y))
-                mouse.accepted = true
-            else
-                mouse.accepted = false
-        }
-
-        onClicked: function(mouse) {
-            if (!isInsideDrawer(mouse.x, mouse.y)) {
-                mouse.accepted = true
-                settingsPanel.close()
-            } else {
-                mouse.accepted = false
-            }
-        }
-    }
-
     // ===== Functions =====
     function open() {
         settingsPanel.state = "open"
@@ -815,13 +788,11 @@ Item {
         }
     }
 
-
     function close() { settingsPanel.state = "closed" }
 
     Component.onCompleted: {
         _syncSidePanel()
 
-        // ✅ ถ้า backend พร้อม ให้ sync ค่า “ที่จำไว้” ไปยังระบบ (ครั้งเดียว)
         if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
             Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)
         }

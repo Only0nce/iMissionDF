@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE QtCreatorProject>
-<!-- Written by QtCreator 5.0.2, 2026-01-20T17:39:28. -->
+<!-- Written by QtCreator 5.0.2, 2026-03-06T08:19:26. -->
 <qtcreator>
  <data>
   <variable>EnvironmentId</variable>
@@ -187,9 +187,9 @@
     <valuelist type="QVariantList" key="CustomOutputParsers"/>
     <value type="int" key="PE.EnvironmentAspect.Base">1</value>
     <valuelist type="QVariantList" key="PE.EnvironmentAspect.Changes"/>
-    <value type="QString" key="ProjectExplorer.ProjectConfiguration.DisplayName">iScanMR10 (on %{Device:Name})</value>
-    <value type="QString" key="ProjectExplorer.ProjectConfiguration.Id">RemoteLinuxRunConfiguration:/mnt/nas/only/iScanMR10/new/iScanMR10_20012025_winVersion/iScanMR10_19012026/iScanMR10/iScanMR10.pro</value>
-    <value type="QString" key="ProjectExplorer.RunConfiguration.BuildKey">/mnt/nas/only/iScanMR10/new/iScanMR10_20012025_winVersion/iScanMR10_19012026/iScanMR10/iScanMR10.pro</value>
+    <value type="QString" key="ProjectExplorer.ProjectConfiguration.DisplayName">iScanMR10 (on %{Device:Name})2</value>
+    <value type="QString" key="ProjectExplorer.ProjectConfiguration.Id">RemoteLinuxRunConfiguration:/mnt/nas/only/iScanMR10/iScanMR10_V3_โปรเจ็กส่งมอบ/iScanMR10_TEST/iScanMR10/iScanMR10.pro</value>
+    <value type="QString" key="ProjectExplorer.RunConfiguration.BuildKey">/mnt/nas/only/iScanMR10/iScanMR10_V3_โปรเจ็กส่งมอบ/iScanMR10_TEST/iScanMR10/iScanMR10.pro</value>
     <value type="int" key="RemoteLinux.EnvironmentAspect.Version">1</value>
     <value type="bool" key="RunConfiguration.UseCppDebugger">false</value>
     <value type="bool" key="RunConfiguration.UseCppDebuggerAuto">true</value>

@@ -25,9 +25,9 @@ import "./"
 
 Item {
 id: mapviewer
-width: 1920
-height: 1080
-
+// width: 1920
+// height: 1080
+anchors.fill: parent
 signal requestScreenshot()
 
 // ================== STYLE CONFIG (3 styles) ==================
@@ -245,22 +245,22 @@ property double _maxDoaLastSentAtMs: 0
 
 function _abs(x){ return Math.abs(Number(x)) }
 function _sameDeg(a,b,eps){
-a = Number(a); b = Number(b); eps = Number(eps)
-if (!isFinite(a) || !isFinite(b)) return false
-if (!isFinite(eps) || eps <= 0) eps = 0.5
-// wrap-safe difference
-var da = mapviewer.wrap360(a)
-var db = mapviewer.wrap360(b)
-var d  = Math.abs(da - db)
-d = Math.min(d, 360 - d)
-return d <= eps
-}
-function wrap360(deg) {
-deg = Number(deg)
-if (!isFinite(deg)) return 0
-deg = deg % 360
-if (deg < 0) deg += 360
-return deg
+    a = Number(a); b = Number(b); eps = Number(eps)
+    if (!isFinite(a) || !isFinite(b)) return false
+    if (!isFinite(eps) || eps <= 0) eps = 0.5
+    // wrap-safe difference
+    var da = mapviewer.wrap360(a)
+    var db = mapviewer.wrap360(b)
+    var d  = Math.abs(da - db)
+    d = Math.min(d, 360 - d)
+    return d <= eps
+    }
+    function wrap360(deg) {
+    deg = Number(deg)
+    if (!isFinite(deg)) return 0
+    deg = deg % 360
+    if (deg < 0) deg += 360
+    return deg
 }
 
 // ✅ NEW: clean number helper for C++ values (string/number)
@@ -993,18 +993,18 @@ return R * c
 }
 
 function _latLonToXY_m(lat, lon, refLat, refLon) {
-const R = 6378137.0
-const dLat = _deg2rad(lat - refLat)
-const dLon = _deg2rad(lon - refLon)
-const cos0 = Math.cos(_deg2rad(refLat))
-return { x: R * dLon * cos0, y: R * dLat }
+    const R = 6378137.0
+    const dLat = _deg2rad(lat - refLat)
+    const dLon = _deg2rad(lon - refLon)
+    const cos0 = Math.cos(_deg2rad(refLat))
+    return { x: R * dLon * cos0, y: R * dLat }
 }
 
 function _xyToLatLon(x, y, refLat, refLon) {
-const R = 6378137.0
-const lat = refLat + _rad2deg(y / R)
-const lon = refLon + _rad2deg(x / (R * Math.cos(_deg2rad(refLat))))
-return { lat: lat, lon: lon }
+    const R = 6378137.0
+    const lat = refLat + _rad2deg(y / R)
+    const lon = refLon + _rad2deg(x / (R * Math.cos(_deg2rad(refLat))))
+    return { lat: lat, lon: lon }
 }
 
 function _bearingToUnitENU(bearingDeg) {

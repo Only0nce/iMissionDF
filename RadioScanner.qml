@@ -792,6 +792,8 @@ Item {
                 property bool scanRecOn: false
                 property real blinkOpacity: 0.6
                 Component.onCompleted: {
+                    console.log("mainWindows=", mainWindows)
+                    console.log("has onRecStatusChanged?", mainWindows && mainWindows.onRecStatusChanged)
                     mainWindows.onRecStatusChanged.connect(function(value){
                         scanRecOn = value
                     })

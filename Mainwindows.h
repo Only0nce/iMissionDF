@@ -7,20 +7,23 @@
 #include "QTimer"
 #include "ReceiverRecorderConfigManager.h"
 #include "SocketClient.h"
+
+#ifdef PLATFORM_JETSON
 #include "newGPIOClass.h"
+#include "HMC253Controller.h"
+#endif
 #include <SigmaStudioFW.h>
 #include <PCM3168A.h>
 #include "websocketclient.h"
 #include "OpenWebRxConfig.h"
 #include "FileUpdateWatcher.h"
-#include "HMC253Controller.h"
 #include "Databases.h"
 #include <QUuid>
 #include "rfdc_nco_client.h"
 #include "alsarecconfigmanager.h"
 #include <QThread>
 #include "SetFreqWorker.h"
-
+#include "logwatcher.h"
 #pragma once
 
 #define GPA0   0
@@ -69,10 +72,25 @@
 #define GPIO_LNA1_EN      "gpiochip3",GPB5
 #define GPIO_LNA2_EN      "gpiochip3",GPB3
 
-#define ROTARY_LED "gpiochip0",GPIO13
-#define RST_AMP "gpiochip1",14
-#define SHD_AMP "gpiochip1",15
-#define HS_MUTE "gpiochip0",102
+#define ROTARY_LED              "gpiochip0",GPIO13
+#define RST_AMP                 "gpiochip1",14
+#define SHD_AMP                 "gpiochip1",15
+#define HS_MUTE                 "gpiochip0",102
+#define BT_EN                   "gpiochip2",10
+#define WL_EN                   "gpiochip2",11
+#define CONFIG_0                "gpiochip2",4
+#define CONFIG_1                "gpiochip2",6
+#define CONFIG_2                "gpiochip2",7
+#define CONFIG_3                "gpiochip2",8
+#define FULL_CARD_POWER_OFF     "gpiochip2",9
+#define RST_5G                  "gpiochip2",1
+#define W_DISABLE1              "gpiochip2",2
+#define W_DISABLE2              "gpiochip2",3
+#define WAKE_ON_WAN             "gpiochip2",5
+#define XTRX_RST                "gpiochip2",15
+#define RF_IO8                  "gpiochip2",14
+#define RF_IO9                  "gpiochip2",13
+#define RF_I10                  "gpiochip2",12
 
 #define LED_ON   true
 #define LED_OFF  false
@@ -103,7 +121,9 @@ public:
         return list;
     }
 
+#ifdef PLATFORM_JETSON
     HMC253Controller *hmc = new HMC253Controller;
+#endif
     unsigned char VolumeOutCH1 = 150;
     unsigned char VolumeOutCH2 = 150;
     unsigned char VolumeOutCH3 = 150;
@@ -165,7 +185,7 @@ public:
 
     OpenWebRxConfig openWebRxConfig;
     int gpioKeyProfile = 0;
-
+#ifdef PLATFORM_JETSON
     QString toString(RFPort port) {
         switch (port) {
         case RFPort::RF1: return "RF1";
@@ -179,7 +199,6 @@ public:
         default: return "Unknown";
         }
     }
-
     RFPort selectRFByFreqAndBW(double centerMHz, double bwMHz) {
         double lowFreq = centerMHz - (bwMHz / 2.0);
         double highFreq = centerMHz + (bwMHz / 2.0);
@@ -210,6 +229,7 @@ public:
 
         return RFPort::RF8;  // ไม่สามารถครอบคลุมได้
     }
+#endif
     Database *myDatabase;
     struct ScanRF{
         std::vector<double> freq;
@@ -246,6 +266,8 @@ public:
 
     void setHostPortNc(const QString& host, quint16 port);
     void setHostPortNc();
+    bool setHwclockFromSystem();
+    bool setSystemFromHwclock();
 
 signals:
     ////DISPLAY
@@ -288,6 +310,11 @@ signals:
     void onSendSquelchStatus(int softPhoneID, bool pttOn, bool sqlOn, bool callState, double freq);
     void SquelchStatusChange(bool,QString,int,double);
 
+    void vpnStateChanged(bool connected,
+                         const QString &statusText,
+                         const QString &publicIp,
+                         const QString &detail);
+
 public slots:
     void requestSetFreqAsync(quint64 freqHz, int timeoutMs);
     void initValueJson(const QJsonArray &arr);
@@ -302,6 +329,7 @@ public slots:
         // rfdc->connectToServer();
         // rfdc->setFrequency(center_freq());
         requestSetFreqAsync(center_freq(),200);
+#ifdef PLATFORM_JETSON
         qDebug() << "rfdc->setFrequency(center_freq());";
         double freq = center_freq()/1e6;     // MHz
         double bw = samp_rate()/1e6;        // MHz
@@ -311,11 +339,17 @@ public slots:
         emit updateCenterFreq();
         currentCenterFreq = center_freq();
         qDebug() << "Selected RF:" << toString(port) << "current Center Frequency:" << currentCenterFreq;
+#endif
         // hmc->selectRF(RFPort::RF6);
     }
 
+    void vpnConnect();
+    void vpnDisconnect();
+    void vpnRefresh();
+
 private:
     QThread m_setFreqThread;
+
     SetFreqWorker *m_setFreqWorker = nullptr;
 
     QString nc_host = "127.0.0.1";
@@ -329,6 +363,7 @@ private:
     SocketClient *iPatchServerSocket = nullptr;
     QTimer *socketClientReconnectTimer = nullptr;
     ADAU1467* SigmaFirmWareDownLoad = nullptr;
+#ifdef PLATFORM_JETSON
     newGPIOClass *codecReset = new newGPIOClass(GPIO_CODEC_RESET);
     newGPIOClass *dspReset = new newGPIOClass(GPIO_DSP_RESET);
     newGPIOClass *dspBootSelect = new newGPIOClass(GPIO_DSP_SBOOT);
@@ -344,17 +379,33 @@ private:
     newGPIOClass *rst_amp = new newGPIOClass(RST_AMP);
     newGPIOClass *shd_amp = new newGPIOClass(SHD_AMP);
     newGPIOClass *hs_mute = new newGPIOClass(HS_MUTE);
+    newGPIOClass *bt_en = new newGPIOClass(BT_EN);
+    newGPIOClass *wl_en = new newGPIOClass(WL_EN);
+    newGPIOClass *config_0 = new newGPIOClass(CONFIG_0);
+    newGPIOClass *config_1 = new newGPIOClass(CONFIG_1);
+    newGPIOClass *config_2 = new newGPIOClass(CONFIG_2);
+    newGPIOClass *config_3 = new newGPIOClass(CONFIG_3);
+    newGPIOClass *full_card_power_off = new newGPIOClass(FULL_CARD_POWER_OFF);
+    newGPIOClass *rst_5g = new newGPIOClass(RST_5G);
+    newGPIOClass *w_disable1 = new newGPIOClass(W_DISABLE1);
+    newGPIOClass *w_disable2 = new newGPIOClass(W_DISABLE2);
+    newGPIOClass *wake_on_wan = new newGPIOClass(WAKE_ON_WAN);
+    newGPIOClass *xtrx_rst = new newGPIOClass(XTRX_RST);
+    newGPIOClass *rf_io8 = new newGPIOClass(RF_IO8);
+    newGPIOClass *rf_io9 = new newGPIOClass(RF_IO9);
+    newGPIOClass *rf_i10 = new newGPIOClass(RF_I10);
+#endif
     ChatServer  *wsServer = new ChatServer(8049);
     ChatServer  *webServer = new ChatServer(3310);
     RfdcNcoClient *rfdc = new RfdcNcoClient();
     ReceiverRecorderConfigManager *recConfig = new ReceiverRecorderConfigManager();
     NetworkController *netWorkController = new NetworkController;
-
+#ifdef PLATFORM_JETSON
     void setRfSwitchBand(RFPort port)
     {
         hmc->selectRF(port);
     }
-
+#endif
     QTimer *squelchOffTimer = nullptr;
     QTimer *startScanCard = nullptr;
     bool isSquelchOffPending = false;
@@ -391,7 +442,7 @@ private:
     double VolumeRecOutDSPCH3 = 12;
     double VolumeRecOutDSPCH4 = 12;
 
-
+#ifdef PLATFORM_JETSON
     void codecDSPinit();
     void gpioInit();
     void DSPBootSelect(const bool qspiflash);
@@ -402,6 +453,7 @@ private:
     void set_lna_1_enable(){lna_1_enable->setValue(false);}
     void set_lna_2_disable(){lna_2_enable->setValue(true);}
     void set_lna_2_enable(){lna_2_enable->setValue(false);}
+#endif
 
 
     void updateDSPRecInputGain(int value, uint8_t softPhoneID);
@@ -482,10 +534,73 @@ private:
     static void* ThreadFuncSqlWatcher(void* pTr);
     typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
     pthread_t idThreadSqlWatcher;
+    LogWatcher *m_logWatcher = nullptr;
+    QString m_currentWatchLogPath;
+    static void* ThreadFuncFindRecLog(void* pTr);
+    pthread_t idThreadFindRecLog;
+    bool m_logWatcherStarted = false;
+
     std::atomic_bool m_threadRunning{true};
     QString m_lastRecState;     // เช่น "RECORD", "PAUSE"
     bool m_lastRecIsRecord = false;
     bool m_emittedRecStatusOnRecord = false;
+
+
+    QTimer *vpnStatusTimer = nullptr;
+
+    // UI switch state ที่ "ผู้ใช้ต้องการ"
+    bool vpnDesiredEnabled = false;
+
+    // ชื่อ service ของคุณ (ใช้ตามที่คุณมีอยู่แล้ว)
+    const QString vpnServiceName = QStringLiteral("openvpn-client@myvpn");
+
+    // paths
+    const QString vpnPersistDir       = QStringLiteral("/var/www/html/vpnfile");
+    const QString vpnRememberedPathDB = QStringLiteral("/var/www/html/vpnfile/.last_ovpn_path.txt");
+    const QString vpnActiveConfPath   = QStringLiteral("/etc/openvpn/client/myvpn.conf");
+
+    void vpnBroadcastStatus(const QString &action,
+                            bool ok,
+                            const QString &detail,
+                            QWebSocket *replyTo = nullptr,
+                            bool alsoBroadcast = true);
+
+    QJsonObject vpnBuildStatusObject(const QString &action,
+                                     bool ok,
+                                     const QString &detail) const;
+
+    bool vpnSystemctlIsActive() const;
+    QString vpnGetTun0Ip() const;
+
+    // persist helpers
+    bool vpnEnsureDir(const QString &dir) const;
+    QString vpnReadTextTrim(const QString &path) const;
+    bool vpnAtomicWrite(const QString &path, const QByteArray &data, QString *errOut) const;
+
+    QString vpnSanitizeFileName(QString name) const;
+    bool vpnLooksLikeOvpn(const QByteArray &raw) const;
+
+    void vpnRememberPersistedPath(const QString &persistedPath);
+    QString vpnLoadRememberedPath() const;
+
+    bool vpnCopyPersistedToActive(const QString &persistedPath, QString *errOut) const;
+
+    int vpnRunCmd(const QString &program,
+                  const QStringList &args,
+                  int timeoutMs,
+                  QString *stdErrOut = nullptr) const;
+
+    void vpnEmitState(const QString &detail);
+    void handleMenuVpnControl(const QJsonObject &command, QWebSocket *pSender);
+    void vpnStartPoll(const QString &reason, int times, int intervalMs);
+
+    QTimer *setTimeHWClock = nullptr;
+
+    // helper: run hwclock on a device (async)
+    void runHwclockAsync(const QStringList &args, const QString &tag);
+
+    // helper: choose rtc devices that exist
+    QStringList existingRtcDevs() const;
 
 private slots:
     void onSetFreqDone(quint64 freqHz, bool ok);
@@ -503,6 +618,7 @@ private slots:
     void onNewClientConneceds(QWebSocket *socketClient);
     void sendSquelchStatus(bool sqlVal);
     void newSettingPageConnectd(QWebSocket *pSender);
+    void setTimeHWClockSlot();
 
 };
 
