@@ -72,25 +72,10 @@
 #define GPIO_LNA1_EN      "gpiochip3",GPB5
 #define GPIO_LNA2_EN      "gpiochip3",GPB3
 
-#define ROTARY_LED              "gpiochip0",GPIO13
-#define RST_AMP                 "gpiochip1",14
-#define SHD_AMP                 "gpiochip1",15
-#define HS_MUTE                 "gpiochip0",102
-#define BT_EN                   "gpiochip2",10
-#define WL_EN                   "gpiochip2",11
-#define CONFIG_0                "gpiochip2",4
-#define CONFIG_1                "gpiochip2",6
-#define CONFIG_2                "gpiochip2",7
-#define CONFIG_3                "gpiochip2",8
-#define FULL_CARD_POWER_OFF     "gpiochip2",9
-#define RST_5G                  "gpiochip2",1
-#define W_DISABLE1              "gpiochip2",2
-#define W_DISABLE2              "gpiochip2",3
-#define WAKE_ON_WAN             "gpiochip2",5
-#define XTRX_RST                "gpiochip2",15
-#define RF_IO8                  "gpiochip2",14
-#define RF_IO9                  "gpiochip2",13
-#define RF_I10                  "gpiochip2",12
+#define ROTARY_LED "gpiochip0",GPIO13
+#define RST_AMP "gpiochip1",14
+#define SHD_AMP "gpiochip1",15
+#define HS_MUTE "gpiochip0",102
 
 #define LED_ON   true
 #define LED_OFF  false
@@ -379,21 +364,6 @@ private:
     newGPIOClass *rst_amp = new newGPIOClass(RST_AMP);
     newGPIOClass *shd_amp = new newGPIOClass(SHD_AMP);
     newGPIOClass *hs_mute = new newGPIOClass(HS_MUTE);
-    newGPIOClass *bt_en = new newGPIOClass(BT_EN);
-    newGPIOClass *wl_en = new newGPIOClass(WL_EN);
-    newGPIOClass *config_0 = new newGPIOClass(CONFIG_0);
-    newGPIOClass *config_1 = new newGPIOClass(CONFIG_1);
-    newGPIOClass *config_2 = new newGPIOClass(CONFIG_2);
-    newGPIOClass *config_3 = new newGPIOClass(CONFIG_3);
-    newGPIOClass *full_card_power_off = new newGPIOClass(FULL_CARD_POWER_OFF);
-    newGPIOClass *rst_5g = new newGPIOClass(RST_5G);
-    newGPIOClass *w_disable1 = new newGPIOClass(W_DISABLE1);
-    newGPIOClass *w_disable2 = new newGPIOClass(W_DISABLE2);
-    newGPIOClass *wake_on_wan = new newGPIOClass(WAKE_ON_WAN);
-    newGPIOClass *xtrx_rst = new newGPIOClass(XTRX_RST);
-    newGPIOClass *rf_io8 = new newGPIOClass(RF_IO8);
-    newGPIOClass *rf_io9 = new newGPIOClass(RF_IO9);
-    newGPIOClass *rf_i10 = new newGPIOClass(RF_I10);
 #endif
     ChatServer  *wsServer = new ChatServer(8049);
     ChatServer  *webServer = new ChatServer(3310);
@@ -531,9 +501,9 @@ private:
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,1.0};
-    static void* ThreadFuncSqlWatcher(void* pTr);
-    typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
-    pthread_t idThreadSqlWatcher;
+//    static void* ThreadFuncSqlWatcher(void* pTr);
+//    typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
+//    pthread_t idThreadSqlWatcher;
     LogWatcher *m_logWatcher = nullptr;
     QString m_currentWatchLogPath;
     static void* ThreadFuncFindRecLog(void* pTr);

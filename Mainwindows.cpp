@@ -921,71 +921,48 @@ Q_INVOKABLE void Mainwindows::sCanfreq(){
 #ifdef PLATFORM_JETSON
 void Mainwindows::gpioInit()
 {
-    // codecReset->requestOutput();
-    // dspReset->requestOutput();
-    // dspBootSelect->requestOutput();
-    // led3->requestOutput();
-    // led4->requestOutput();
-    // headphoneGpioOn->requestOutput();
-    // ampGpioMute->requestOutput();
-    // ampGpioStandby->requestOutput();
-    // backlight->requestOutput();
-    // lna_1_enable->requestOutput();
-    // lna_2_enable->requestOutput();
+    codecReset->requestOutput();
+    dspReset->requestOutput();
+    dspBootSelect->requestOutput();
+    led3->requestOutput();
+    led4->requestOutput();
+    headphoneGpioOn->requestOutput();
+    ampGpioMute->requestOutput();
+    ampGpioStandby->requestOutput();
+    backlight->requestOutput();
+    lna_1_enable->requestOutput();
+    lna_2_enable->requestOutput();
 
     rotary_led->requestOutput();
     rst_amp->requestOutput();
     shd_amp->requestOutput();
     hs_mute->requestOutput();
 
-    bt_en->requestOutput();
-    wl_en->requestOutput();
-    full_card_power_off->requestOutput();
-    rst_5g->requestOutput();
-    w_disable1->requestOutput();
-    w_disable2->requestOutput();
-    // config_0;
-    // config_1;
-    // config_2;
-    // config_3;
-    // wake_on_wan;
-    // xtrx_rst;
-    // rf_io8;
-    // rf_io9;
-    // rf_i10;
-
-    // backlightOn();
-    // set_lna_1_enable();
-    // set_lna_2_disable(); // Distortion
+    backlightOn();
+    set_lna_1_enable();
+    set_lna_2_disable(); // Distortion
 
     //resetHW
-    // dspBootSelect->setValue(QSPIFLASH);
-    // codecReset->setValue(RESET_ACTIVE);
-    // dspReset->setValue(RESET_ACTIVE);
+    dspBootSelect->setValue(QSPIFLASH);
+    codecReset->setValue(RESET_ACTIVE);
+    dspReset->setValue(RESET_ACTIVE);
     QThread::msleep(200);
 
-    // codecReset->setValue(RESET_INACTIVE);
-    // dspReset->setValue(RESET_INACTIVE);
+    codecReset->setValue(RESET_INACTIVE);
+    dspReset->setValue(RESET_INACTIVE);
 
 
-    // led3->setValue(LED_ON);
-    // led4->setValue(LED_ON);
-    // headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
-    // ampGpioMute->setValue(SPK_MUTE);
-    // ampGpioStandby->setValue(AMP_SHUTDOWN);
+    led3->setValue(LED_ON);
+    led4->setValue(LED_ON);
+    headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
+    ampGpioMute->setValue(SPK_MUTE);
+    ampGpioStandby->setValue(AMP_SHUTDOWN);
 
     rotary_led->setValue(1);
     rst_amp->setValue(1);
     shd_amp->setValue(0);
     hs_mute->setValue(0);
 
-    bt_en->setValue(1);
-    wl_en->setValue(1);
-    full_card_power_off->setValue(1);
-    rst_5g->setValue(0);
-    w_disable1->setValue(1);
-    w_disable2->setValue(1);
-    qDebug() << "init val gpio to high";
     QThread::msleep(200);
 
 }
@@ -2516,27 +2493,27 @@ void* Mainwindows::ThreadFuncFindRecLog(void* pTr)
 
     return nullptr;
 }
-void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
-{
-    Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
+//void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
+//{
+//    Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
 
-    while (pThis->m_threadRunning) {
+//    while (pThis->m_threadRunning) {
 
-        const bool v = pThis->m_lastRecIsRecord;
+//        const bool v = pThis->m_lastRecIsRecord;
 
-        QMetaObject::invokeMethod(pThis, [pThis, v]() {
-            emit pThis->onRecStatusChanged(v);
+//        QMetaObject::invokeMethod(pThis, [pThis, v]() {
+//            emit pThis->onRecStatusChanged(v);
 
-            // ถ้าคุณอยากให้ SQL ถูกยิงซ้ำด้วย
-            if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
-                pThis->onSQLChanged(pThis->currentSQLValue);
-            }
-        }, Qt::QueuedConnection);
+//            // ถ้าคุณอยากให้ SQL ถูกยิงซ้ำด้วย
+//            if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
+//                pThis->onSQLChanged(pThis->currentSQLValue);
+//            }
+//        }, Qt::QueuedConnection);
 
-        QThread::msleep(300);
-    }
-    return nullptr;
-}
+//        QThread::msleep(300);
+//    }
+//    return nullptr;
+//}
 
 bool Mainwindows::setHwclockFromSystem()
 {
