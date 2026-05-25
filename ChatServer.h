@@ -94,6 +94,8 @@ signals:
     void getVuMeter(QWebSocket *pSender);
     void getServerHomePage(uint8_t softPhoneID,QWebSocket *pSender);
     void recLogging(int softPhoneID, int recorderID,QString recState, QString message);
+    void recLoggingqml(int softPhoneID, int recorderID,QString recState, QString message);
+
 public Q_SLOTS:
     void sendToWebMessageClient(QString message);
 //    void SquelchStatusChange(bool,QString,int,double);

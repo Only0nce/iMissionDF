@@ -9,6 +9,10 @@
 // ✅ FIX: Drawer must be TOPMOST and never click-through
 // - Use overlay MouseArea UNDER drawer for outside-click close
 // - Add drawer "blocker" MouseArea BEHIND controls to swallow empty-space clicks
+//
+// ✅ FIX: เมื่อกดไปหน้าอื่น แล้วกลับมา QMLMap.qml และ SideLogsFile.qml เปิดอยู่
+// - เรียก reloadAndSendToMap() กับ sideLoader.item ตัวที่แสดงจริง
+// - เรียกทันที + delay retry เพื่อรอ QMLMap.qml / MapViewer.qml พร้อมรับ signal
 
 import QtQuick 2.12
 import QtQuick.Controls 2.12
@@ -40,31 +44,253 @@ Item {
 
     // ===== Internal for side content =====
     property string sidePanelKey: "localdevice"
+
     function _sourceForKey(k) {
         switch (k) {
         case "group":       return "qrc:/iScreenDFqml/sidepanels/SideGroup.qml"
         case "remote":      return "qrc:/iScreenDFqml/sidepanels/SideRemote.qml"
         case "localdevice": return "qrc:/iScreenDFqml/sidepanels/SideLocal.qml"
+        case "datalogs":    return "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
         default:            return "qrc:/iScreenDFqml/sidepanels/SideLocal.qml"
         }
     }
-    function _syncSidePanel() { sideLoader.source = _sourceForKey(sidePanelKey) }
+
+    function _syncSidePanel() {
+        sideLoader.source = _sourceForKey(sidePanelKey)
+    }
+
+    function _kmObject() {
+        if (settingsPanel.krakenmapval)
+            return settingsPanel.krakenmapval
+
+        if (typeof Krakenmapval !== "undefined" && Krakenmapval)
+            return Krakenmapval
+
+        return null
+    }
+
+    function isCurrentPageMap() {
+        if (!toolbar || !toolbar.pages)
+            return false
+
+        if (toolbar.currentIndex < 0 || toolbar.currentIndex >= toolbar.pages.length)
+            return false
+
+        return toolbar.pages[toolbar.currentIndex].source === settingsPanel.mapSourceUrl
+    }
+
+    function isSideLogsVisibleInDrawer() {
+        return settingsPanel.state === "open" &&
+               settingsPanel.sidePanelKey === "datalogs"
+    }
+
+    function _callReloadOnSideLogsItem(item, reason) {
+        var km = _kmObject()
+
+        if (!km) {
+            console.warn("[SideSettingsDrawer] _callReloadOnSideLogsItem: Krakenmapval not available")
+            return false
+        }
+
+        if (!item) {
+            console.warn("[SideSettingsDrawer] _callReloadOnSideLogsItem: item is null")
+            return false
+        }
+
+        if (item.hasOwnProperty("krakenmapval"))
+            item.krakenmapval = km
+
+        if (typeof item.reloadAndSendToMap === "function") {
+            item.reloadAndSendToMap(reason || "reload SideLogsFile")
+            return true
+        }
+
+        console.warn("[SideSettingsDrawer] SideLogsFile reloadAndSendToMap() not found")
+        return false
+    }
+
+    function reloadSideLogsForMap(reason) {
+        var km = _kmObject()
+
+        if (!km) {
+            console.warn("[SideSettingsDrawer] reloadSideLogsForMap: Krakenmapval not available")
+            return
+        }
+
+        var why = reason || "reloadSideLogsForMap"
+
+        console.log("[SideSettingsDrawer] reload SideLogsFile for QMLMap:",
+                    why,
+                    "state=", settingsPanel.state,
+                    "sidePanelKey=", settingsPanel.sidePanelKey,
+                    "isMap=", settingsPanel.isCurrentPageMap())
+
+        // ============================================================
+        // ✅ สำคัญ:
+        // ถ้า Drawer เปิดอยู่ และตอนนี้เปิด SideLogsFile.qml จริง
+        // ให้ reload ตัวที่แสดงจริงใน sideLoader ไม่ใช่ตัว hidden bridge
+        // ============================================================
+        if (isSideLogsVisibleInDrawer()) {
+            _pendingSideLogsReloadReason = why
+
+            if (sideLoader.status === Loader.Ready && sideLoader.item) {
+                _pendingSideLogsReloadReason = ""
+                _callReloadOnSideLogsItem(sideLoader.item, why + " | visible sideLoader")
+                return
+            }
+
+            // ถ้ายังไม่ ready ให้โหลด SideLogsFile มาแสดงใน drawer
+            sideLoader.setSource(
+                settingsPanel.sideLogsSourceUrl,
+                { "krakenmapval": km }
+            )
+
+            return
+        }
+
+        // ============================================================
+        // ✅ ถ้า Drawer ไม่ได้เปิด SideLogsFile อยู่
+        // ใช้ bridge ซ่อนเพื่อส่ง selected logs ไป map อย่างเดียว
+        // ============================================================
+        if (sideLogsBridgeLoader.status === Loader.Ready && sideLogsBridgeLoader.item) {
+            _callReloadOnSideLogsItem(sideLogsBridgeLoader.item, why + " | hidden bridge")
+            return
+        }
+
+        _pendingBridgeReloadReason = why + " | hidden bridge loaded"
+
+        sideLogsBridgeLoader.active = true
+        sideLogsBridgeLoader.setSource(
+            settingsPanel.sideLogsSourceUrl,
+            { "krakenmapval": km }
+        )
+    }
+
+    // ✅ ใช้ตัวนี้แทนการเรียก reloadSideLogsForMap() ตรง ๆ ตอนกลับเข้า Map
+    // เพราะหลัง navigate() QMLMap.qml / MapViewer.qml อาจยังโหลดไม่เสร็จ
+    function scheduleReloadSideLogsForMap(reason) {
+        var why = reason || "schedule reload SideLogsFile for QMLMap"
+
+        if (!isCurrentPageMap()) {
+            console.log("[SideSettingsDrawer] skip scheduleReloadSideLogsForMap, not map page:", why)
+            return
+        }
+
+        console.log("[SideSettingsDrawer] schedule reload SideLogsFile:",
+                    why,
+                    "state=", settingsPanel.state,
+                    "sidePanelKey=", settingsPanel.sidePanelKey)
+
+        _enterMapReloadReason = why
+        _enterMapReloadTry = 0
+
+        // ✅ เรียกทันที 1 รอบ
+        Qt.callLater(function() {
+            if (settingsPanel.isCurrentPageMap()) {
+                settingsPanel.reloadSideLogsForMap(why + " | immediate")
+            }
+        })
+
+        // ✅ เรียกซ้ำแบบ delay เพื่อรอ QMLMap.qml / MapViewer.qml พร้อมรับ signal
+        enterMapReloadTimer.restart()
+    }
 
     Settings {
         id: uiSettings
         category: "SideSettingsDrawer"
         property bool savedUseOfflineMap: false   // false=ONLINE, true=OFFLINE
     }
+
     property bool useOffline: uiSettings.savedUseOfflineMap
+
+    property string mapSourceUrl: "qrc:/iScreenDFqml/pages/QMLMap.qml"
+    property string sideLogsSourceUrl: "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
+
+    property string _pendingSideLogsReloadReason: ""
+    property string _pendingBridgeReloadReason: ""
+
+    property int _enterMapReloadTry: 0
+    property string _enterMapReloadReason: ""
+
+    Timer {
+        id: enterMapReloadTimer
+        interval: 250
+        repeat: true
+        running: false
+
+        onTriggered: {
+            settingsPanel._enterMapReloadTry++
+
+            console.log("[SideSettingsDrawer] enterMapReloadTimer try =",
+                        settingsPanel._enterMapReloadTry,
+                        "reason =", settingsPanel._enterMapReloadReason)
+
+            if (!settingsPanel.isCurrentPageMap()) {
+                console.log("[SideSettingsDrawer] stop enterMapReloadTimer, not map page")
+                enterMapReloadTimer.stop()
+                return
+            }
+
+            settingsPanel.reloadSideLogsForMap(
+                settingsPanel._enterMapReloadReason +
+                " | delayed try " + settingsPanel._enterMapReloadTry
+            )
+
+            // ✅ 3 รอบพอ: 250ms, 500ms, 750ms
+            if (settingsPanel._enterMapReloadTry >= 3) {
+                enterMapReloadTimer.stop()
+            }
+        }
+    }
+
+    Loader {
+        id: sideLogsBridgeLoader
+        active: false
+        visible: false
+        asynchronous: false
+
+        onLoaded: {
+            var km = settingsPanel._kmObject()
+
+            if (item && km && item.hasOwnProperty("krakenmapval"))
+                item.krakenmapval = km
+
+            if (item) {
+                var why = settingsPanel._pendingBridgeReloadReason
+
+                if (why === "")
+                    why = "hidden bridge loaded"
+
+                settingsPanel._pendingBridgeReloadReason = ""
+
+                Qt.callLater(function() {
+                    settingsPanel._callReloadOnSideLogsItem(sideLogsBridgeLoader.item, why)
+                })
+            }
+        }
+    }
 
     // ===== States (ควบคุมเฉพาะ drawer) =====
     state: "closed"
+
     states: [
-        State { name: "open";   PropertyChanges { target: drawer; x: 0 } },
-        State { name: "closed"; PropertyChanges { target: drawer; x: -drawer.width } }
+        State {
+            name: "open"
+            PropertyChanges { target: drawer; x: 0 }
+        },
+        State {
+            name: "closed"
+            PropertyChanges { target: drawer; x: -drawer.width }
+        }
     ]
+
     transitions: Transition {
-        NumberAnimation { target: drawer; properties: "x"; duration: 300; easing.type: Easing.InOutQuad }
+        NumberAnimation {
+            target: drawer
+            properties: "x"
+            duration: 300
+            easing.type: Easing.InOutQuad
+        }
     }
 
     // ===== Dim overlay (UNDER drawer) + click outside to close (NO CLICK-THROUGH) =====
@@ -76,7 +302,6 @@ Item {
         color: "#000000"
         opacity: 0.35
 
-        // ✅ คลิกเฉพาะพื้นที่นอก drawer (เพราะ drawer อยู่ z สูงกว่า)
         MouseArea {
             anchors.fill: parent
             enabled: overlay.visible
@@ -84,9 +309,18 @@ Item {
             preventStealing: true
             propagateComposedEvents: false
 
-            onPressed:  function(mouse){ mouse.accepted = true }
-            onClicked:  function(mouse){ mouse.accepted = true; settingsPanel.close() }
-            onReleased: function(mouse){ mouse.accepted = true }
+            onPressed: function(mouse) {
+                mouse.accepted = true
+            }
+
+            onClicked: function(mouse) {
+                mouse.accepted = true
+                settingsPanel.close()
+            }
+
+            onReleased: function(mouse) {
+                mouse.accepted = true
+            }
         }
     }
 
@@ -100,7 +334,6 @@ Item {
         x: -width
 
         // ✅ BLOCKER: swallow clicks on EMPTY space inside drawer (behind controls)
-        // - doesn't block buttons because z:-1 (controls are above)
         MouseArea {
             id: drawerBlocker
             anchors.fill: parent
@@ -110,11 +343,25 @@ Item {
             preventStealing: true
             propagateComposedEvents: false
 
-            onPressed:  function(mouse){ mouse.accepted = true }
-            onClicked:  function(mouse){ mouse.accepted = true }
-            onReleased: function(mouse){ mouse.accepted = true }
-            onPositionChanged: function(mouse){ mouse.accepted = true }
-            onWheel: function(w){ w.accepted = true }
+            onPressed: function(mouse) {
+                mouse.accepted = true
+            }
+
+            onClicked: function(mouse) {
+                mouse.accepted = true
+            }
+
+            onReleased: function(mouse) {
+                mouse.accepted = true
+            }
+
+            onPositionChanged: function(mouse) {
+                mouse.accepted = true
+            }
+
+            onWheel: function(w) {
+                w.accepted = true
+            }
         }
 
         Item {
@@ -124,6 +371,7 @@ Item {
 
             Connections {
                 target: Krakenmapval
+
                 function onUpdateReceiverParametersFreqandbw(freq, bw, link) {
                     if (!link) {
                         console.log("[QML] link=false, not sending frequency")
@@ -187,18 +435,41 @@ Item {
                             border.width: settingsButton.hovered ? 2 : 1
                             radius: 24
                             anchors.fill: parent
-                            Behavior on color { ColorAnimation { duration: 200 } }
+
+                            Behavior on color {
+                                ColorAnimation { duration: 200 }
+                            }
                         }
 
                         Item {
-                            width: 32; height: 32
+                            width: 32
+                            height: 32
                             anchors.centerIn: parent
+
                             Column {
                                 spacing: 6
                                 anchors.centerIn: parent
-                                Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
-                                Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
-                                Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
+
+                                Rectangle {
+                                    width: 20
+                                    height: 3
+                                    radius: 1.5
+                                    color: "#7AE2CF"
+                                }
+
+                                Rectangle {
+                                    width: 20
+                                    height: 3
+                                    radius: 1.5
+                                    color: "#7AE2CF"
+                                }
+
+                                Rectangle {
+                                    width: 20
+                                    height: 3
+                                    radius: 1.5
+                                    color: "#7AE2CF"
+                                }
                             }
                         }
 
@@ -207,6 +478,7 @@ Item {
 
                         onClicked: {
                             settingsPanel.close()
+
                             if (typeof popupSetting !== "undefined" && popupSetting)
                                 popupSetting.close()
                         }
@@ -231,6 +503,7 @@ Item {
                         Row {
                             anchors.centerIn: parent
                             spacing: 10
+
                             Text {
                                 text: connSwitch.labelText
                                 color: "#ffffff"
@@ -245,8 +518,10 @@ Item {
                             hoverEnabled: true
                             preventStealing: true
                             propagateComposedEvents: false
+
                             onEntered: connSwitch.hovered = true
-                            onExited:  connSwitch.hovered = false
+                            onExited: connSwitch.hovered = false
+
                             onClicked: {
                                 connSwitch.isLocal = !connSwitch.isLocal
                                 Krakenmapval.setMode(connSwitch.isLocal ? "LOCAL" : "REMOTES")
@@ -255,13 +530,14 @@ Item {
 
                         Connections {
                             target: Krakenmapval
+
                             function onUpdateParameterMode(mode) {
                                 connSwitch.isLocal = (mode === "LOCAL")
                             }
                         }
                     }
 
-                    // ===================== MAP ONLINE / OFFLINE button (CLEAR UX) =====================
+                    // ===================== MAP ONLINE / OFFLINE button =====================
                     Rectangle {
                         id: netStyleSwitch
                         Layout.preferredHeight: 40
@@ -274,21 +550,26 @@ Item {
                         property bool useOffline: uiSettings.savedUseOfflineMap
                         property bool hovered: false
 
-                        readonly property color cOnline:  "#163A35"
+                        readonly property color cOnline: "#163A35"
                         readonly property color cOnline2: "#7AE2CF"
                         readonly property color cOffline: "#3A2A16"
-                        readonly property color cOffline2:"#F3B25E"
+                        readonly property color cOffline2: "#F3B25E"
 
                         readonly property string labelText: useOffline ? "MAP OFFLINE" : "MAP ONLINE"
-                        readonly property string subText:   useOffline ? "tiles/cache mode" : "internet mode"
+                        readonly property string subText: useOffline ? "tiles/cache mode" : "internet mode"
 
                         border.color: useOffline ? cOffline2 : cOnline2
                         color: hovered
                                ? (useOffline ? Qt.darker(cOffline, 1.15) : Qt.darker(cOnline, 1.15))
                                : (useOffline ? cOffline : cOnline)
 
-                        Behavior on color { ColorAnimation { duration: 150 } }
-                        Behavior on border.color { ColorAnimation { duration: 150 } }
+                        Behavior on color {
+                            ColorAnimation { duration: 150 }
+                        }
+
+                        Behavior on border.color {
+                            ColorAnimation { duration: 150 }
+                        }
 
                         RowLayout {
                             anchors.fill: parent
@@ -317,6 +598,7 @@ Item {
                                     font.bold: true
                                     elide: Text.ElideRight
                                 }
+
                                 Text {
                                     text: netStyleSwitch.subText
                                     color: useOffline ? "#E9D8B5" : "#CFEFEA"
@@ -334,7 +616,7 @@ Item {
                             propagateComposedEvents: false
 
                             onEntered: netStyleSwitch.hovered = true
-                            onExited:  netStyleSwitch.hovered = false
+                            onExited: netStyleSwitch.hovered = false
 
                             onClicked: {
                                 netStyleSwitch.useOffline = !netStyleSwitch.useOffline
@@ -355,9 +637,13 @@ Item {
 
                         Connections {
                             target: Krakenmapval
+
                             function onUseOfflineMapStyleChanged(useOffline) {
                                 var v = !!useOffline
-                                if (netStyleSwitch.useOffline === v) return
+
+                                if (netStyleSwitch.useOffline === v)
+                                    return
+
                                 netStyleSwitch.useOffline = v
                                 uiSettings.savedUseOfflineMap = v
                             }
@@ -377,21 +663,46 @@ Item {
                     spacing: 16
                     anchors.margins: 10
                     anchors.horizontalCenter: parent.horizontalCenter
+
                     property int hoveredIndex: -1
+
                     property var pages: [
-                        { title: "RADIO",              icon: "qrc:/images/radioIcon.png",              source: "qrc:/HomeDisplay.qml" },
-                        { title: "MAP\nVISUALIZATION", icon: "qrc:/iScreenDFqml/images/earth-asia.png", source: "qrc:/iScreenDFqml/pages/QMLMap.qml" },
-                        { title: "DOA\nVIEWER",        icon: "qrc:/iScreenDFqml/images/dart-board.png", source: "qrc:/DoaViewer/ViewerPage.qml" },
-                        { title: "RECORDER",           icon: "qrc:/iRecordManage/images/IconRec.png",   source: "qrc:/iRecordManage/TapBarRecordFiles.qml" },
-                        { title: "DIAG\nNOSTIC",       icon: "qrc:/images/Diagnostic.png",             source: "qrc:/iRecordManage/MonitorDisplay.qml" }
+                        {
+                            title: "RADIO",
+                            icon: "qrc:/images/radioIcon.png",
+                            source: "qrc:/HomeDisplay.qml"
+                        },
+                        {
+                            title: "MAP\nVISUALIZATION",
+                            icon: "qrc:/iScreenDFqml/images/earth-asia.png",
+                            source: "qrc:/iScreenDFqml/pages/QMLMap.qml"
+                        },
+                        {
+                            title: "DOA\nVIEWER",
+                            icon: "qrc:/iScreenDFqml/images/dart-board.png",
+                            source: "qrc:/DoaViewer/ViewerPage.qml"
+                        },
+                        {
+                            title: "RECORDER",
+                            icon: "qrc:/iRecordManage/images/IconRec.png",
+                            source: "qrc:/iRecordManage/TapBarRecordFiles.qml"
+                        },
+                        {
+                            title: "DIAG\nNOSTIC",
+                            icon: "qrc:/images/Diagnostic.png",
+                            source: "qrc:/iRecordManage/MonitorDisplay.qml"
+                        }
                     ]
+
                     property int currentIndex: 0
 
                     Repeater {
                         model: toolbar.pages
+
                         ToolButton {
                             id: btn
-                            width: 80; height: 80
+                            width: 80
+                            height: 80
                             checkable: true
                             checked: index === toolbar.currentIndex
                             hoverEnabled: true
@@ -399,12 +710,15 @@ Item {
                             contentItem: Column {
                                 spacing: 4
                                 anchors.centerIn: parent
+
                                 Image {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     source: modelData.icon
-                                    width: 40; height: 40
+                                    width: 40
+                                    height: 40
                                     fillMode: Image.PreserveAspectFit
                                 }
+
                                 Text {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     text: modelData.title
@@ -425,15 +739,17 @@ Item {
                             }
 
                             onHoveredChanged: {
-                                if (hovered) toolbar.hoveredIndex = index
-                                else {
+                                if (hovered) {
+                                    toolbar.hoveredIndex = index
+                                } else {
                                     if (toolbar.hoveredIndex === index && toolbar.currentIndex !== index)
                                         toolbar.hoveredIndex = -1
                                 }
                             }
 
                             onClicked: {
-                                if (index < 0 || index >= toolbar.pages.length) return
+                                if (index < 0 || index >= toolbar.pages.length)
+                                    return
 
                                 var oldSource = toolbar.pages[toolbar.currentIndex].source
                                 var newSource = modelData.source
@@ -463,20 +779,22 @@ Item {
                                     }
                                 }
 
-                                var MAP_SOURCE = "qrc:/iScreenDFqml/pages/QMLMap.qml"
-                                var enteringMap = (newSource === MAP_SOURCE)
+                                var enteringMap = (newSource === settingsPanel.mapSourceUrl)
 
-                                var km = (typeof krakenmapval !== "undefined" && krakenmapval) ? krakenmapval
-                                        : ((typeof Krakenmapval !== "undefined" && Krakenmapval) ? Krakenmapval : null)
+                                var km = (typeof krakenmapval !== "undefined" && krakenmapval)
+                                         ? krakenmapval
+                                         : ((typeof Krakenmapval !== "undefined" && Krakenmapval)
+                                            ? Krakenmapval
+                                            : null)
 
-                                if (km) {
-                                    if (enteringMap) {
-                                        if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
-                                            Krakenmapval.sendSetSpectrumEnable(false)
+                                if (km && enteringMap) {
+                                    if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
+                                        Krakenmapval.sendSetSpectrumEnable(false)
 
-                                        if (typeof Krakenmapval.requestRfFrequency === "function")
-                                            Krakenmapval.requestRfFrequency()
-                                    }
+                                    if (typeof Krakenmapval.requestRfFrequency === "function")
+                                        Krakenmapval.requestRfFrequency()
+
+                                    // ไม่ reload SideLogsFile อัตโนมัติ ตอนกลับเข้า QMLMap.qml
                                 }
                             }
                         }
@@ -491,17 +809,45 @@ Item {
                         id: bar
                         anchors.horizontalCenter: parent.horizontalCenter
                         width: 320
+
                         model: [
-                            { iconSource: "qrc:/iScreenDFqml/images/remote-access.png", tooltip: "Local Device",  sidePanel: "localdevice" },
-                            { iconSource: "qrc:/iScreenDFqml/images/object-group.png",  tooltip: "Group Device",  sidePanel: "group" },
-                            { iconSource: "qrc:/iScreenDFqml/images/remotedevice.png",  tooltip: "Remote Device", sidePanel: "remote" }
+                            {
+                                iconSource: "qrc:/iScreenDFqml/images/remote-access.png",
+                                tooltip: "Local Device",
+                                sidePanel: "localdevice"
+                            },
+                            {
+                                iconSource: "qrc:/iScreenDFqml/images/object-group.png",
+                                tooltip: "Group Device",
+                                sidePanel: "group"
+                            },
+                            {
+                                iconSource: "qrc:/iScreenDFqml/images/remotedevice.png",
+                                tooltip: "Remote Device",
+                                sidePanel: "remote"
+                            },
+                            {
+                                iconSource: "qrc:/iScreenDFqml/images/file.png",
+                                tooltip: "Data logs",
+                                sidePanel: "datalogs"
+                            }
                         ]
+
                         onTriggered: function(i) {
                             const item = bar.model[i]
+
                             if (item && item.sidePanel) {
                                 bar.currentIndex = i
                                 settingsPanel.sidePanelKey = item.sidePanel
                                 settingsPanel._syncSidePanel()
+
+                                // ✅ ถ้าอยู่หน้า QMLMap แล้วกดเปิด SideLogsFile
+                                // ให้ show + reload + ส่ง selected logs ไป map ทันที
+                                if (item.sidePanel === "datalogs" && settingsPanel.isCurrentPageMap()) {
+                                    Qt.callLater(function() {
+                                        settingsPanel.scheduleReloadSideLogsForMap("open SideLogsFile on QMLMap.qml")
+                                    })
+                                }
                             }
                         }
                     }
@@ -520,14 +866,17 @@ Item {
                     rowSpacing: 30
                     columnSpacing: 30
                     Layout.rightMargin: 0
+
                     property bool vfoFormInitialized: false
 
                     Connections {
                         target: settingsPanel.krakenmapval
+
                         function onRfsocParameterUpdated(frequencyHz, doaBwHz) {
                             offcentersetInput.text = (frequencyHz / 1e6).toFixed(4)
 
                             var bwHz = Number(doaBwHz)
+
                             if (isFinite(bwHz) && bwHz > 0) {
                                 bwInput.text = (bwHz / 1000.0).toFixed(3)
                             } else {
@@ -536,7 +885,11 @@ Item {
                         }
                     }
 
-                    Label { text: "Frequency:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label {
+                        text: "Frequency:"
+                        font.pixelSize: 16
+                        color: "#ffffff"
+                    }
 
                     RowLayout {
                         Layout.preferredWidth: 260
@@ -557,7 +910,11 @@ Item {
                             placeholderTextColor: "#666"
                             placeholderText: "-500 .. 500"
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            validator: DoubleValidator { bottom: -10000000.0; top: 10000000.0 }
+
+                            validator: DoubleValidator {
+                                bottom: -10000000.0
+                                top: 10000000.0
+                            }
 
                             background: Rectangle {
                                 color: "#111A1E"
@@ -567,14 +924,19 @@ Item {
                             }
 
                             Keys.onReturnPressed: focus = false
-                            Keys.onEnterPressed:  focus = false
-                            onFocusChanged: if (focus) selectAll()
+                            Keys.onEnterPressed: focus = false
+
+                            onFocusChanged: {
+                                if (focus)
+                                    selectAll()
+                            }
                         }
 
                         ToolButton {
                             id: connectBtn
                             Layout.preferredWidth: 32
                             Layout.preferredHeight: 32
+
                             property bool connected: false
 
                             background: Rectangle {
@@ -603,6 +965,7 @@ Item {
 
                             Connections {
                                 target: settingsPanel.krakenmapval
+
                                 function onUpdatelinkStatus(link) {
                                     console.log("[QML] updatelinkStatus =", link, typeof link)
                                     connectBtn.connected = link
@@ -612,6 +975,7 @@ Item {
                             onClicked: {
                                 connectBtn.connected = !connectBtn.connected
                                 console.log("Connect:", connectBtn.connected)
+
                                 if (Krakenmapval && typeof Krakenmapval.setLinkStatus === "function") {
                                     Krakenmapval.setLinkStatus(connectBtn.connected)
                                 } else {
@@ -632,7 +996,11 @@ Item {
                         }
                     }
 
-                    Label { text: "Bandwidth:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label {
+                        text: "Bandwidth:"
+                        font.pixelSize: 16
+                        color: "#ffffff"
+                    }
 
                     RowLayout {
                         Layout.preferredWidth: 260
@@ -653,7 +1021,12 @@ Item {
                             placeholderTextColor: "#666"
                             placeholderText: "0.05 .. 10000"
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            validator: DoubleValidator { bottom: 0.05; top: 10000.0; decimals: 3 }
+
+                            validator: DoubleValidator {
+                                bottom: 0.05
+                                top: 10000.0
+                                decimals: 3
+                            }
 
                             background: Rectangle {
                                 color: "#111A1E"
@@ -663,11 +1036,20 @@ Item {
                             }
 
                             Keys.onReturnPressed: focus = false
-                            Keys.onEnterPressed:  focus = false
-                            onFocusChanged: if (focus) selectAll()
+                            Keys.onEnterPressed: focus = false
+
+                            onFocusChanged: {
+                                if (focus)
+                                    selectAll()
+                            }
                         }
 
-                        Text { text: "kHz"; color: "#9CA3AF"; font.pixelSize: 14; Layout.preferredWidth: 40 }
+                        Text {
+                            text: "kHz"
+                            color: "#9CA3AF"
+                            font.pixelSize: 14
+                            Layout.preferredWidth: 40
+                        }
                     }
 
                     Button {
@@ -695,11 +1077,12 @@ Item {
                         }
 
                         onClicked: {
-                            if (!settingsPanel.krakenmapval) return
+                            if (!settingsPanel.krakenmapval)
+                                return
 
                             var mhz = Number(offcentersetInput.text)
                             var bwKhz = Number(bwInput.text)
-                            var bwHz  = bwKhz * 1000.0
+                            var bwHz = bwKhz * 1000.0
 
                             if (isNaN(mhz) || isNaN(bwKhz) || !isFinite(bwHz)) {
                                 console.warn("Invalid input")
@@ -708,21 +1091,30 @@ Item {
 
                             var freqHz = Math.round(mhz * 1e6)
 
-                            console.log("updateReceiverParameters freqHz=" + freqHz + " bwHz=" + bwHz +
+                            console.log("updateReceiverParameters freqHz=" + freqHz +
+                                        " bwHz=" + bwHz +
                                         " connected=" + connectBtn.connected)
 
                             Krakenmapval.updateReceiverParametersFreqandbw(freqHz, bwHz)
 
                             if (connectBtn.connected) {
-                                if (typeof mainWindows !== "undefined" && mainWindows && typeof mainWindows.sendmessage === "function") {
-                                    var msg = '{"type":"setfrequency","params":{"frequency":' + freqHz + ',"key":"memagic"}}'
+                                if (typeof mainWindows !== "undefined"
+                                    && mainWindows
+                                    && typeof mainWindows.sendmessage === "function") {
+
+                                    var msg = '{"type":"setfrequency","params":{"frequency":' +
+                                              freqHz +
+                                              ',"key":"memagic"}}'
+
                                     mainWindows.sendmessage(msg)
                                     console.log("[sendmessage] " + msg)
                                 } else {
                                     console.warn("mainWindows.sendmessage not available")
                                 }
 
-                                if (typeof spectrumCanvas !== "undefined" && spectrumCanvas && spectrumCanvas.clearPeakTimer) {
+                                if (typeof spectrumCanvas !== "undefined"
+                                    && spectrumCanvas
+                                    && spectrumCanvas.clearPeakTimer) {
                                     spectrumCanvas.clearPeakTimer.start()
                                 }
                             }
@@ -755,8 +1147,29 @@ Item {
                             anchors.top: parent.top
 
                             onLoaded: {
-                                if (item && settingsPanel.krakenmapval && item.hasOwnProperty("krakenmapval"))
+                                if (item &&
+                                    settingsPanel.krakenmapval &&
+                                    item.hasOwnProperty("krakenmapval")) {
                                     item.krakenmapval = settingsPanel.krakenmapval
+                                }
+
+                                // ✅ ถ้าโหลด SideLogsFile.qml ขึ้นมาใน Drawer ขณะอยู่หน้า QMLMap
+                                // ให้ reload + ส่ง selected logs ไป map ทันที
+                                if (item &&
+                                    settingsPanel.sidePanelKey === "datalogs" &&
+                                    settingsPanel.isCurrentPageMap()) {
+
+                                    var why = settingsPanel._pendingSideLogsReloadReason
+
+                                    if (why === "")
+                                        why = "sideLoader loaded SideLogsFile on QMLMap.qml"
+
+                                    settingsPanel._pendingSideLogsReloadReason = ""
+
+                                    Qt.callLater(function() {
+                                        settingsPanel._callReloadOnSideLogsItem(sideLoader.item, why)
+                                    })
+                                }
                             }
                         }
                     }
@@ -773,9 +1186,21 @@ Item {
         if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
             Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)
         }
+
+        if (toolbar &&
+            toolbar.pages &&
+            toolbar.currentIndex >= 0 &&
+            toolbar.currentIndex < toolbar.pages.length &&
+            toolbar.pages[toolbar.currentIndex].source === settingsPanel.mapSourceUrl) {
+
+            // ✅ เปิด drawer บน QMLMap.qml แล้วถ้า SideLogsFile เปิดอยู่ ให้ reloadAndSendToMap()
+            // scheduleReloadSideLogsForMap("open drawer on QMLMap.qml")
+        }
     }
 
-    function close() { settingsPanel.state = "closed" }
+    function close() {
+        settingsPanel.state = "closed"
+    }
 
     Component.onCompleted: {
         _syncSidePanel()

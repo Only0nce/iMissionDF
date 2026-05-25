@@ -1,1 +1,0 @@
-UPDATE 25052026 11:33 Version 5G And WiFi

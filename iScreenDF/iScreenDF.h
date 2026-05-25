@@ -53,6 +53,7 @@
 
 #include "CompassClient.h"
 
+#include <cmath>
 // #include "WorkerScan.h"
 
 #define FILESETTING "/home/orinnx/.config/iSensorServer/settings.ini"
@@ -173,6 +174,7 @@ public:
     Q_INVOKABLE void disableManualGps1();
     Q_INVOKABLE void disableManualGps2();
 
+
 signals:
     // EMIT  FROM cpp to /MainPage.qml
     void openPopupSettingRequested(const QString &msg);
@@ -222,6 +224,8 @@ signals:
     void useOfflineMapStyleChanged(bool mapStatus);
     void updateDoaLineDistanceMFromServer(int m);
     void updateMaxDoaDelayMsFromServer(int ms);
+    void setSideLogsJson(const QString &json);
+    void showDoaLogOnMapJson(const QString &jsonText);
 
 public slots:
     // void cppSubmitTextFiled(QString qmlCommand);
@@ -340,6 +344,16 @@ public slots:
     void setUseOfflineMapStyle(bool mapStatus);
     void setDelayMs(const int ms);
     void setDistance(const int m);
+    void requestSaveDoaLogSelectedJson(const QString &jsonText);
+    void requestShowDoaLogOnMapJson(const QString &jsonText);
+    /////////////////////////////////
+    void requestDeleteDoaLogsJson(const QString &jsonText);
+
+    Q_INVOKABLE void getdatabaseToSideSettingDrawerPage(const QString &msg,
+                                                        int page,
+                                                        int pageSize,
+                                                        const QString &searchText);
+
 
 private slots:
     void remoteGroupsJson(const QString &json);

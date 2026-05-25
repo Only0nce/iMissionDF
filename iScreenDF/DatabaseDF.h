@@ -139,6 +139,11 @@ public:
     void ensureParameterHasMaxDoaLineMeters();
     void ensureParameterIPLocalForRemoteGroup();
 
+    void createDoaLogRecordsTable();
+    bool insertDoaLogRecordsFromJson(const QString &jsonText);
+    void getDoaLogRecords();
+
+    void deleteDoaLogsFromJson(const QString &jsonText);
 
 signals:
     // Network / NTP
@@ -176,6 +181,7 @@ signals:
                            , int maxDoaLineMeters,const QString &ipLocalForRemoteGroup, int setDelayMs, int setDistance);
     void GetIPDFServer(const QString &ip);
     void updateNetworkDfDevice(const QString &iface,const QString &mode,const QString &ip,const QString &subnet,const QString &gateway,const QString &primaryDns,const QString &secondaryDns);
+    void setSideLogsJson(const QString &json);
 
 public slots:
     void init();
@@ -190,12 +196,15 @@ public slots:
                         const QString &secondaryDns,
                         const QString &krakenserver);
     // void appendNewClient(int id = 0, QString name = "", QString ipAddress ="", uint16_t socketPort = 0);
-
+    // void getDoaLogRecords();
+    void getDoaLogRecordsPage(int page, int pageSize, const QString &searchText = QString());
 private:
     QSqlDatabase db;
     bool ensureDb();
 
-    // config สำหรับสร้าง connection ใน thread ปัจจุบัน
+    QString m_connName;
+    Qt::HANDLE m_dbThreadId = nullptr;
+
     QString m_dbName;
     QString m_dbUser;
     QString m_dbPassword;

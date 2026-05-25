@@ -147,25 +147,33 @@ void mainwindowsiRec::onVerifyUserDatabaseDone(bool ok, const QString& message)
     if (!ok) {
         return;
     }
-    system("systemctl daemon-reload");
-    RestartSystemServicesAfter30s();
+    QProcess::execute("/bin/systemctl", {"daemon-reload"});
+    QProcess::startDetached("/bin/systemctl", {"start", "irec-recover.service"});
+    bool started = QProcess::startDetached(
+        "/bin/systemctl",
+        QStringList() << "start" << "irec-recover.service"
+    );
+
+    qDebug() << "[VerifyUserDatabaseDone] start irec-recover.service =" << started;
 }
 void mainwindowsiRec::RestartSystemServicesAfter30s(){
     qDebug() << "<<<<<<<---Restart service system--->>>>>>>";
-    system("systemctl reset-failed alsarecd.service");
-    system("systemctl stop alsarecd.service");
-    QTimer::singleShot(30000, this, [this]() {
-        system("systemctl restart irecd.service");
-        system("systemctl restart iplayd.service");
-        QTimer::singleShot(15000, this, [this]() {
-            system("systemctl restart iGateRec@1.service");
-            QTimer::singleShot(30000, this, [this]() {
-                qDebug() << "<<<<<<<---Restart service system alsarecd.service--->>>>>>>";
-                system("systemctl restart alsarecd.service");
-            });
-        });
-    });
+//    system("systemctl reset-failed alsarecd.service");
+//    system("systemctl stop alsarecd.service");
+//    QTimer::singleShot(30000, this, [this]() {
+//        system("systemctl restart irecd.service");
+//        system("systemctl restart iplayd.service");
+//        QTimer::singleShot(15000, this, [this]() {
+//            system("systemctl restart iGateRec@1.service");
+//            QTimer::singleShot(30000, this, [this]() {
+//                qDebug() << "<<<<<<<---Restart service system alsarecd.service--->>>>>>>";
+//                system("systemctl restart alsarecd.service");
+//            });
+//        });
+//    });
 }
+
+
 void mainwindowsiRec::enableI2SLoopback()
 {
     // ใช้ I2S1 เป็นตัวตัดสินหลัก

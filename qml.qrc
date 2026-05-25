@@ -448,5 +448,7 @@
         <file>iRecordManage/StorageUsed.qml</file>
         <file>iRecordManage/RAMused.qml</file>
         <file>iRecordManage/UpTimeUsed.qml</file>
+        <file>iScreenDFqml/images/file.png</file>
+        <file>iScreenDFqml/sidepanels/SideLogsFile.qml</file>
     </qresource>
 </RCC>

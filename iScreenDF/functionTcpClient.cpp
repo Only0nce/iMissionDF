@@ -62,24 +62,24 @@ void iScreenDF::updateFromTcpServer(const QJsonObject &obj)
         // ✅ ตรงนี้คือ “อัปเดตตัวแปรภายใน” ของ iScreenDF ตามที่คุณมีจริง
         // (ผมใส่เป็น qDebug ให้ก่อน ถ้าคุณมี member/Signal ก็แทนได้เลย)
         // =====================================================
-        // qDebug() << "[iScreenDF][updateFromTcpServer] DoAResult:"
-        //          << "fc_hz=" << fcHz
-        //          << "fs_hz=" << fsHz
-        //          << "stream=" << streamEnabled
-        //          << "doa=" << doaEnabled
-        //          << "spectrum=" << spectrumEnabled
-        //          << "tx_hz=" << txHz
-        //          << "offset_hz=" << doaOffsetHz
-        //          << "bw_hz=" << doaBwHz
-        //          << "sig=" << signalPresent
-        //          << "band_peak_db=" << bandPeakDb
-        //          << "gate_th_db=" << gateThDb
-        //          << "doa_deg=" << doaDeg
-        //          << "conf=" << conf
-        //          << "fft_ch=" << fftChannel
-        //          << "thetaN=" << thetaDegArr.size()
-        //          << "specN=" << specArr.size()
-        //          << "fftN=" << fftFreqArr.size();
+        qDebug() << "[iScreenDF][updateFromTcpServer] DoAResult:"
+                 << "fc_hz=" << fcHz
+                 << "fs_hz=" << fsHz
+                 << "stream=" << streamEnabled
+                 << "doa=" << doaEnabled
+                 << "spectrum=" << spectrumEnabled
+                 << "tx_hz=" << txHz
+                 << "offset_hz=" << doaOffsetHz
+                 << "bw_hz=" << doaBwHz
+                 << "sig=" << signalPresent
+                 << "band_peak_db=" << bandPeakDb
+                 << "gate_th_db=" << gateThDb
+                 << "doa_deg=" << doaDeg
+                 << "conf=" << conf
+                 << "fft_ch=" << fftChannel
+                 << "thetaN=" << thetaDegArr.size()
+                 << "specN=" << specArr.size()
+                 << "fftN=" << fftFreqArr.size();
 
         // ตัวอย่างถ้าคุณมี member ใน iScreenDF (ค่อย uncomment/ปรับชื่อเอง)
         // m_streamEnabled = streamEnabled;
@@ -126,7 +126,7 @@ void iScreenDF::updateFromTcpServer(const QJsonObject &obj)
             const double doaOffsetHz   = st.value("doa_offset_hz").toDouble(0.0);
             const double doaBwHz       = st.value("doa_bw_hz").toDouble(0.0);
             const double gateThDb      = st.value("gate_th_db").toDouble(-65.0);
-
+            // const double fsHz          = st.value("fs_hz").toDouble(0.0);
             qDebug() << "[iScreenDF][updateFromTcpServer] Ack state:"
                      << "stream=" << streamEnabled
                      << "doa=" << doaEnabled
@@ -144,7 +144,7 @@ void iScreenDF::updateFromTcpServer(const QJsonObject &obj)
         }
     }
     else {
-        qDebug() << "[iScreenDF][updateFromTcpServer] menuID=" << menuID;
+        qDebug() << "[iScreenDF][updateFromTcpServer] menuID IS =" << menuID;
     }
 }
 

@@ -16,6 +16,7 @@ void LogWatcher::startWatching(const QString &logFile)
 {
     QStringList args = {"-f", logFile};
     tailProcess->start("tail", args);
+    qDebug() << "startWatching tails::";
     if (!tailProcess->waitForStarted()) {
         qWarning() << "Failed to start tail process";
     }
@@ -31,6 +32,7 @@ void LogWatcher::handleReadyRead()
             QString conn = match.captured(2);
             QString state = match.captured(3);
             emit stateChanged(alsaId, conn, state);
+            qDebug() << "handleReadyRead";
         }
     }
 }

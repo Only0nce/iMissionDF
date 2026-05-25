@@ -635,8 +635,11 @@ Item {
                     border.color: "transparent"
                 }
                 onClicked: {
+                    console.log("[QML] btnRefresh clicked")
                     var msg = { menuID: "refreshpage" }
-                    qmlCommand(JSON.stringify(msg))
+                    var json = JSON.stringify(msg)
+                    console.log("[QML] send =", json)
+                    qmlCommand(json)
                 }
                 contentItem: Image {
                     anchors.fill: parent

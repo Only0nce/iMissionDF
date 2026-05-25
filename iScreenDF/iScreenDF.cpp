@@ -111,6 +111,9 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     connect(db, &DatabaseDF::GetIPDFServer,this, &iScreenDF::GetIPDFServer, Qt::QueuedConnection);
     connect(db, &DatabaseDF::updateNetworkDfDevice,
             this,       &iScreenDF::onUpdateNetworkDfDevice, Qt::QueuedConnection);
+
+    connect(db, &DatabaseDF::setSideLogsJson,this,&iScreenDF::setSideLogsJson,Qt::QueuedConnection);
+
     // ====== ห้ามเรียก db->xxx ตรง ๆ ตรงนี้แล้ว! ======
     // db->ensureColumnsInIScreenparameter();
     // db->createServerKrakenNetworkTable();
@@ -580,7 +583,7 @@ void iScreenDF::loopGetInfo() {
             // SET_AND_EMIT(m_memUsage,memUsage, memUsageChanged);
             // }
             if (memUsage >= 90){
-                system("systemctl restart iScreenKraken.service");
+                // system("systemctl restart iScreenKraken.service");
                 // exit(1);
             }
         }

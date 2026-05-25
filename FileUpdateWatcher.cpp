@@ -4,6 +4,7 @@
 FileUpdateWatcher::FileUpdateWatcher(const QString &dir, const QString &targetFile, QObject *parent)
     : QObject(parent), m_dir(dir), m_targetFile(targetFile)
 {
+    qDebug() << "FileUpdateWatcher";
     m_fullPath = m_dir + "/" + m_targetFile;
 
     connect(&m_timer, &QTimer::timeout, this, &FileUpdateWatcher::checkFile);

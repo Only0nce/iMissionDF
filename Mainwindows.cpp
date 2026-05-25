@@ -18,7 +18,7 @@
 Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
 {
     #ifdef PLATFORM_JETSON
-        system("systemctl stop alsarecd.service");
+//        system("systemctl stop alsarecd.service");
     #endif
     // iPatchServerSocket = new SocketClient;
     socketClientReconnectTimer = new QTimer(this);
@@ -136,21 +136,22 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     m_lastRecIsRecord = false;
     m_lastRecState = "UNKNOWN";
 
-    //    LogWatcher *watcher = new LogWatcher(this);
-    //    connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
-    //         qDebug() << "State update: ID=" << id << "conn=" << conn << "state=" << state;
-    //        this->recRunningCount = 0;
-    //        emit onRecStatusChanged(state == "RECORD");
-    //        if ((state == "RECORD") && (currentSQLValue == false))
-    //        {
-    //            onSQLChanged(currentSQLValue);
-    //        }
-    //        else if ((state == "PAUSE") && (currentSQLValue == true))
-    //        {
-    //            onSQLChanged(currentSQLValue);
-    //        }
-    //    });
+       // LogWatcher *watcher = new LogWatcher(this);
+       // connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
+       //      qDebug() << "State update: ID=" << id << "conn=" << conn << "state=" << state;
+       //     this->recRunningCount = 0;
+       //     emit onRecStatusChanged(state == "RECORD");
+       //     if ((state == "RECORD") && (currentSQLValue == false))
+       //     {
+       //         onSQLChanged(currentSQLValue);
+       //     }
+       //     else if ((state == "PAUSE") && (currentSQLValue == true))
+       //     {
+       //         onSQLChanged(currentSQLValue);
+       //     }
+       // });
     //    watcher->startWatching("/tmp/alsarecd_production.log");
+
     LogWatcher *watcher = new LogWatcher(this);
     connect(watcher, &LogWatcher::stateChanged, this,
             [this](const QString &id, const QString &conn, const QString &state)
@@ -168,6 +169,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     });
 
     watcher->startWatching("/tmp/alsarecd_id_1.log");
+    qDebug() << "watcher->startWatching";
 
 
     startScanCard = new QTimer();
@@ -175,6 +177,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     connect(recRunningCountTimer, &QTimer::timeout, this, [this]() {
         this->recRunningCount += 1;
         if (this->recRunningCount == 5){
+            qDebug() << "[this->recRunningCount] emit onRecStatusChanged =" << m_lastRecIsRecord;
             emit onRecStatusChanged(false);
             this->recRunningCount = 0;
         }
@@ -183,7 +186,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     connect(startScanCard, SIGNAL(timeout()), this, SLOT(startScanCardFn()));
     startScanCard->setSingleShot(true);
 
-    recRunningCountTimer->start(1000);  // Increment every second
+    // recRunningCountTimer->start(1000);  // Increment every second
 #ifdef PLATFORM_JETSON
     system("systemctl start alsarecd.service");
 #endif
@@ -2414,6 +2417,7 @@ void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
         const bool v = pThis->m_lastRecIsRecord;
 
         QMetaObject::invokeMethod(pThis, [pThis, v]() {
+            qDebug() << "[ThreadFuncSqlWatcher] emit invokeMethod =";
             emit pThis->onRecStatusChanged(v);
             if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
                 pThis->onSQLChanged(pThis->currentSQLValue);

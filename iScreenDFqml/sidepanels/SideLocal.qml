@@ -2,6 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
+import Qt.labs.settings 1.1
 
 Item {
     id: sidelocal
@@ -10,6 +11,16 @@ Item {
     property var groups: []
     property var krakenmapval: null
     property string test: ""
+
+    Settings {
+        id: locationSettings
+        category: "SideLocalLocation"
+
+        // 0 = Auto, 1 = Manual
+        property int gpsModeIndex: 0
+        property string latitudeText: ""
+        property string longitudeText: ""
+    }
 
     Connections {
         target: krakenmapval
@@ -49,6 +60,7 @@ Item {
             font.bold: true
             Layout.alignment: Qt.AlignVCenter
         }
+
         Item { Layout.fillWidth: true }
     }
 
@@ -93,6 +105,7 @@ Item {
 
                     // --- Device Name ---
                     Label { text: "Device Name:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: nameDecimationField
                         Layout.preferredWidth: 200
@@ -116,12 +129,18 @@ Item {
                         }
 
                         property string previousValue2: ""
+
                         Keys.onReturnPressed: commit()
-                        Keys.onEnterPressed:  commit()
+                        Keys.onEnterPressed: commit()
 
-                        function commit() { nameDecimationField.focus = false }
+                        function commit() {
+                            nameDecimationField.focus = false
+                        }
 
-                        onFocusChanged: if (focus) selectAll()
+                        onFocusChanged: {
+                            if (focus)
+                                selectAll()
+                        }
 
                         onEditingFinished: {
                             if (text !== previousValue2) {
@@ -134,6 +153,7 @@ Item {
 
                     // --- Serial Number ---
                     Label { text: "Serial Number:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: serialDecimationField
                         Layout.preferredWidth: 200
@@ -157,12 +177,18 @@ Item {
                         }
 
                         property string previousValue: ""
+
                         Keys.onReturnPressed: commit()
-                        Keys.onEnterPressed:  commit()
+                        Keys.onEnterPressed: commit()
 
-                        function commit() { serialDecimationField.focus = false }
+                        function commit() {
+                            serialDecimationField.focus = false
+                        }
 
-                        onFocusChanged: if (focus) selectAll()
+                        onFocusChanged: {
+                            if (focus)
+                                selectAll()
+                        }
 
                         onEditingFinished: {
                             if (text !== previousValue) {
@@ -175,6 +201,7 @@ Item {
 
                     // --- IP Local For Remote Group ---
                     Label { text: "IP for Remote:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: ipRemoteField
                         Layout.preferredWidth: 200
@@ -202,29 +229,42 @@ Item {
 
                         function commit() {
                             var v = text.trim()
-                            if (v === previousValue) { focus = false; return }
+                            if (v === previousValue) {
+                                focus = false
+                                return
+                            }
+
                             previousValue = v
                             focus = false
 
-                            if (krakenmapval && !krakenmapval.blockUiSync) {
+                            if (krakenmapval && !krakenmapval.blockUiSync)
                                 krakenmapval.setIPLocalForRemoteGroup(v)
-                            }
                         }
 
                         Keys.onReturnPressed: commit()
-                        Keys.onEnterPressed:  commit()
+                        Keys.onEnterPressed: commit()
 
-                        onFocusChanged: if (focus) { previousValue = text; selectAll() }
+                        onFocusChanged: {
+                            if (focus) {
+                                previousValue = text
+                                selectAll()
+                            }
+                        }
 
                         onEditingFinished: {
-                            if (text !== previousValue) commit()
-                            else focus = false
+                            if (text !== previousValue)
+                                commit()
+                            else
+                                focus = false
                         }
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateIPLocalForRemoteGroupFromServer(ip) {
-                                if (ipRemoteField.activeFocus) return
+                                if (ipRemoteField.activeFocus)
+                                    return
+
                                 var s = (ip === undefined || ip === null) ? "" : String(ip).trim()
                                 if (ipRemoteField.text !== s) {
                                     ipRemoteField.text = s
@@ -244,7 +284,6 @@ Item {
                         font.pixelSize: 16
                         textRole: "text"
 
-                        // กัน loop ตอน set จาก server
                         property bool blockLocal: false
 
                         model: ListModel {
@@ -290,33 +329,43 @@ Item {
 
                         function indexByMeters(v) {
                             v = Number(v)
-                            if (!isFinite(v)) return -1
+                            if (!isFinite(v))
+                                return -1
+
                             for (var i = 0; i < model.count; i++) {
                                 if (Number(model.get(i).meters) === v)
                                     return i
                             }
+
                             return -1
                         }
 
-                        onActivated: (index) => {
-                            if (blockLocal) return
-                            if (!krakenmapval) return
-                            if (krakenmapval.blockUiSync) return
+                        onActivated: function(index) {
+                            if (blockLocal)
+                                return
+                            if (!krakenmapval)
+                                return
+                            if (krakenmapval.blockUiSync)
+                                return
 
-                            const m = Number(model.get(index).meters)
-                            if (!isFinite(m)) return
+                            var m = Number(model.get(index).meters)
+                            if (!isFinite(m))
+                                return
+
                             krakenmapval.sendMaxDoaLineMeters(m)
                         }
 
                         Component.onCompleted: {
-                            if (currentIndex < 0 && model.count > 0) currentIndex = 0
+                            if (currentIndex < 0 && model.count > 0)
+                                currentIndex = 0
                         }
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateDoaLineMeters(meters) {
-                                const m = Number(meters)
-                                const idx = doaLineMetersCombo.indexByMeters(m)
+                                var m = Number(meters)
+                                var idx = doaLineMetersCombo.indexByMeters(m)
 
                                 console.log("[QML] onUpdateDoaLineMeters:", m, "idx=", idx)
 
@@ -328,6 +377,7 @@ Item {
                             }
                         }
                     }
+
                     // ===================== Delay (s) -> sendDelayMs(ms) =====================
                     Label { text: "Delay (s):"; font.pixelSize: 16; color: "#ffffff" }
 
@@ -339,23 +389,24 @@ Item {
                         textRole: "text"
 
                         property bool blockLocal: false
-                        property int  currentMs: 0
+                        property int currentMs: 0
                         property bool gotServerValue: false
+
                         model: ListModel {
-                            ListElement { text: "None";    ms: 0 }
-                            ListElement { text: "0.5 s";  ms: 500 }
-                            ListElement { text: "1 s";    ms: 1000 }
-                            ListElement { text: "1.5 s";  ms: 1500 }
-                            ListElement { text: "2 s";    ms: 2000 }
-                            ListElement { text: "3 s";    ms: 3000 }
-                            ListElement { text: "5 s";    ms: 5000 }
-                            ListElement { text: "8 s";    ms: 8000 }
-                            ListElement { text: "10 s";   ms: 10000 }
-                            ListElement { text: "15 s";   ms: 15000 }
-                            ListElement { text: "20 s";   ms: 20000 }
-                            ListElement { text: "30 s";   ms: 30000 }
-                            ListElement { text: "45 s";   ms: 45000 }
-                            ListElement { text: "60 s";   ms: 60000 }
+                            ListElement { text: "None"; ms: 0 }
+                            ListElement { text: "0.5 s"; ms: 500 }
+                            ListElement { text: "1 s"; ms: 1000 }
+                            ListElement { text: "1.5 s"; ms: 1500 }
+                            ListElement { text: "2 s"; ms: 2000 }
+                            ListElement { text: "3 s"; ms: 3000 }
+                            ListElement { text: "5 s"; ms: 5000 }
+                            ListElement { text: "8 s"; ms: 8000 }
+                            ListElement { text: "10 s"; ms: 10000 }
+                            ListElement { text: "15 s"; ms: 15000 }
+                            ListElement { text: "20 s"; ms: 20000 }
+                            ListElement { text: "30 s"; ms: 30000 }
+                            ListElement { text: "45 s"; ms: 45000 }
+                            ListElement { text: "60 s"; ms: 60000 }
                         }
 
                         background: Rectangle {
@@ -367,8 +418,8 @@ Item {
 
                         contentItem: Text {
                             text: {
-                                // ใช้ currentIndex เพื่อให้โชว์ "None" ตาม text ใน model เสมอ
-                                if (maxDoaDelayCombo.currentIndex >= 0 && maxDoaDelayCombo.currentIndex < maxDoaDelayCombo.model.count)
+                                if (maxDoaDelayCombo.currentIndex >= 0 &&
+                                        maxDoaDelayCombo.currentIndex < maxDoaDelayCombo.model.count)
                                     return maxDoaDelayCombo.model.get(maxDoaDelayCombo.currentIndex).text
                                 return ""
                             }
@@ -378,7 +429,6 @@ Item {
                             leftPadding: 10
                             elide: Text.ElideRight
                         }
-
 
                         delegate: ItemDelegate {
                             width: maxDoaDelayCombo.width
@@ -395,10 +445,13 @@ Item {
 
                         function clampMs(ms) {
                             ms = Number(ms)
-                            if (!isFinite(ms) || isNaN(ms)) return 0
+                            if (!isFinite(ms) || isNaN(ms))
+                                return 0
                             ms = Math.round(ms)
-                            if (ms < 0) ms = 0
-                            if (ms > 60000) ms = 60000
+                            if (ms < 0)
+                                ms = 0
+                            if (ms > 60000)
+                                ms = 60000
                             return ms
                         }
 
@@ -414,6 +467,7 @@ Item {
                         function applyFromMs(ms) {
                             ms = clampMs(ms)
                             currentMs = ms
+
                             var idx = indexByMs(ms)
                             if (idx >= 0 && currentIndex !== idx) {
                                 blockLocal = true
@@ -422,24 +476,27 @@ Item {
                             }
                         }
 
-                        onActivated: (index) => {
-                            if (blockLocal) return
-                            if (!krakenmapval) return
-                            if (krakenmapval.blockUiSync) return
+                        onActivated: function(index) {
+                            if (blockLocal)
+                                return
+                            if (!krakenmapval)
+                                return
+                            if (krakenmapval.blockUiSync)
+                                return
 
                             var ms = clampMs(model.get(index).ms)
 
-                            // ✅ ให้ UI เปลี่ยนแน่นอน
                             if (currentIndex !== index) {
                                 blockLocal = true
                                 currentIndex = index
                                 blockLocal = false
                             }
 
-                            if (ms === currentMs) return
+                            if (ms === currentMs)
+                                return
+
                             currentMs = ms
 
-                            // ✅ send: setDelayMs(ms)
                             if (typeof krakenmapval.setDelayMs === "function")
                                 krakenmapval.setDelayMs(ms)
                             else
@@ -455,12 +512,12 @@ Item {
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateMaxDoaDelayMsFromServer(ms) {
                                 maxDoaDelayCombo.applyFromMs(ms)
                             }
                         }
                     }
-
 
                     // ===================== DistanceM (m) -> sendDistance(meters) =====================
                     Label { text: "Distance (m):"; font.pixelSize: 16; color: "#ffffff" }
@@ -475,15 +532,15 @@ Item {
                         property bool blockLocal: false
 
                         model: ListModel {
-                            ListElement { text: "10 m";      meters: 10 }
-                            ListElement { text: "30 m";      meters: 30 }
-                            ListElement { text: "60 m";      meters: 60 }
-                            ListElement { text: "100 m";     meters: 100 }
-                            ListElement { text: "150 m";     meters: 150 }
-                            ListElement { text: "200 m";     meters: 200 }
-                            ListElement { text: "250 m";     meters: 250 }
-                            ListElement { text: "500 m";     meters: 500 }
-                            ListElement { text: "1,000 m";   meters: 1000 }
+                            ListElement { text: "10 m"; meters: 10 }
+                            ListElement { text: "30 m"; meters: 30 }
+                            ListElement { text: "60 m"; meters: 60 }
+                            ListElement { text: "100 m"; meters: 100 }
+                            ListElement { text: "150 m"; meters: 150 }
+                            ListElement { text: "200 m"; meters: 200 }
+                            ListElement { text: "250 m"; meters: 250 }
+                            ListElement { text: "500 m"; meters: 500 }
+                            ListElement { text: "1,000 m"; meters: 1000 }
                         }
 
                         background: Rectangle {
@@ -517,23 +574,29 @@ Item {
 
                         function indexByMeters(v) {
                             v = Number(v)
-                            if (!isFinite(v)) return -1
+                            if (!isFinite(v))
+                                return -1
+
                             for (var i = 0; i < model.count; i++) {
                                 if (Number(model.get(i).meters) === v)
                                     return i
                             }
+
                             return -1
                         }
 
-                        onActivated: (index) => {
-                            if (blockLocal) return
-                            if (!krakenmapval) return
-                            if (krakenmapval.blockUiSync) return
+                        onActivated: function(index) {
+                            if (blockLocal)
+                                return
+                            if (!krakenmapval)
+                                return
+                            if (krakenmapval.blockUiSync)
+                                return
 
-                            const m = Number(model.get(index).meters)
-                            if (!isFinite(m)) return
+                            var m = Number(model.get(index).meters)
+                            if (!isFinite(m))
+                                return
 
-                            // ✅ CHANGED: sendDistance(meters)
                             if (typeof krakenmapval.setDistance === "function")
                                 krakenmapval.setDistance(m)
                             else
@@ -541,15 +604,19 @@ Item {
                         }
 
                         Component.onCompleted: {
-                            if (currentIndex < 0 && model.count > 0) currentIndex = 0
+                            if (currentIndex < 0 && model.count > 0)
+                                currentIndex = 0
                         }
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateDoaLineDistanceMFromServer(meters) {
-                                const m = Number(meters)
-                                if (!isFinite(m)) return
-                                const idx = doaDistanceMCombo.indexByMeters(m)
+                                var m = Number(meters)
+                                if (!isFinite(m))
+                                    return
+
+                                var idx = doaDistanceMCombo.indexByMeters(m)
                                 if (idx >= 0 && doaDistanceMCombo.currentIndex !== idx) {
                                     doaDistanceMCombo.blockLocal = true
                                     doaDistanceMCombo.currentIndex = idx
@@ -568,9 +635,13 @@ Item {
                         CheckBox {
                             id: doaCheck
                             checked: false
+
                             onToggled: {
-                                if (!krakenmapval) return
-                                if (krakenmapval.blockUiSync) return
+                                if (!krakenmapval)
+                                    return
+                                if (krakenmapval.blockUiSync)
+                                    return
+
                                 krakenmapval.sendSetDoaEnable(checked)
                             }
                         }
@@ -580,9 +651,13 @@ Item {
                         CheckBox {
                             id: fftCheck
                             checked: false
+
                             onToggled: {
-                                if (!krakenmapval) return
-                                if (krakenmapval.blockUiSync) return
+                                if (!krakenmapval)
+                                    return
+                                if (krakenmapval.blockUiSync)
+                                    return
+
                                 krakenmapval.sendSetSpectrumEnable(checked)
                             }
                         }
@@ -592,6 +667,7 @@ Item {
 
                     // --- DOA Algorithm ---
                     Label { text: "DOA Algorithm:"; font.pixelSize: 16; color: "#ffffff" }
+
                     ComboBox {
                         id: doaAlgoCombo
                         Layout.preferredWidth: 200
@@ -605,7 +681,12 @@ Item {
                             ListElement { text: "ESPRIT(UCA Peak only)"; value: "uca_esprit" }
                         }
 
-                        background: Rectangle { color: "#111A1E"; radius: 10; border.color: "#1B8F77"; border.width: 1 }
+                        background: Rectangle {
+                            color: "#111A1E"
+                            radius: 10
+                            border.color: "#1B8F77"
+                            border.width: 1
+                        }
 
                         contentItem: Text {
                             text: doaAlgoCombo.displayText
@@ -636,22 +717,23 @@ Item {
                             return -1
                         }
 
-                        onActivated: (index) => {
-                            if (!krakenmapval) return
-                            if (krakenmapval.blockUiSync) return
-                            const value = model.get(index).value
+                        onActivated: function(index) {
+                            if (!krakenmapval)
+                                return
+                            if (krakenmapval.blockUiSync)
+                                return
+
+                            var value = model.get(index).value
                             krakenmapval.sendDoaAlgorithm(value)
                         }
 
                         Component.onCompleted: {
-                            if (currentIndex < 0 && model.count > 0) currentIndex = 0
+                            if (currentIndex < 0 && model.count > 0)
+                                currentIndex = 0
                         }
                     }
 
-                    // ====== SQL Threshold + Tx Interval + Radius + RF AGC + Target (ของเดิมคุณ) ======
-                    // *** โค้ดช่วงนี้ 그대로 (ผมไม่ตัด) ***
-
-                    // --- SQL (Squelch / Gate threshold) dB ---
+                    // --- SQL Threshold ---
                     Item {
                         id: sqlItem
                         Layout.columnSpan: 2
@@ -665,14 +747,22 @@ Item {
 
                         function clamp(v, lo, hi) {
                             v = Number(v)
-                            if (isNaN(v)) v = lo
-                            if (v < lo) return lo
-                            if (v > hi) return hi
+                            if (isNaN(v))
+                                v = lo
+                            if (v < lo)
+                                return lo
+                            if (v > hi)
+                                return hi
                             return v
                         }
-                        function fmt1(v) { return (Math.round(Number(v) * 10) / 10).toString() }
 
-                        function applyValue(v) { sqlGateDb = v }
+                        function fmt1(v) {
+                            return (Math.round(Number(v) * 10) / 10).toString()
+                        }
+
+                        function applyValue(v) {
+                            sqlGateDb = v
+                        }
 
                         Component.onCompleted: {
                             hasInit = true
@@ -714,16 +804,16 @@ Item {
                                     value: sqlItem.sqlGateDb
 
                                     onValueChanged: {
-                                        if (pressed) {
+                                        if (pressed)
                                             sqlItem.sqlGateDb = sqlItem.clamp(value, -140.0, 0.0)
-                                        }
                                     }
 
                                     onPressedChanged: {
                                         if (!pressed) {
                                             var v = sqlItem.clamp(value, -140.0, 0.0)
                                             sqlItem.applyValue(v)
-                                            if (krakenmapval) krakenmapval.sendGateThDb(v)
+                                            if (krakenmapval)
+                                                krakenmapval.sendGateThDb(v)
                                         }
                                     }
                                 }
@@ -762,19 +852,28 @@ Item {
 
                                     function commit() {
                                         var t = text.trim()
-                                        if (t.length === 0) { focus = false; return }
+                                        if (t.length === 0) {
+                                            focus = false
+                                            return
+                                        }
 
                                         var v = Number(t)
-                                        if (isNaN(v)) { focus = false; return }
+                                        if (isNaN(v)) {
+                                            focus = false
+                                            return
+                                        }
 
                                         v = sqlItem.clamp(v, -140.0, 0.0)
                                         sqlItem.applyValue(v)
-                                        if (krakenmapval) krakenmapval.sendGateThDb(v)
+
+                                        if (krakenmapval)
+                                            krakenmapval.sendGateThDb(v)
+
                                         focus = false
                                     }
 
                                     Keys.onReturnPressed: commit()
-                                    Keys.onEnterPressed:  commit()
+                                    Keys.onEnterPressed: commit()
 
                                     onFocusChanged: {
                                         if (focus) {
@@ -784,8 +883,10 @@ Item {
                                     }
 
                                     onEditingFinished: {
-                                        if (text !== previousValue) commit()
-                                        else focus = false
+                                        if (text !== previousValue)
+                                            commit()
+                                        else
+                                            focus = false
                                     }
                                 }
 
@@ -808,18 +909,20 @@ Item {
                                     sqlItem.hasPending = true
                                     return
                                 }
+
                                 sqlItem.applyValue(vv)
                             }
 
                             function onUpdateDoaAlgorithmFromServer(algo) {
                                 console.log("sqlItem got onUpdateDoaAlgorithmFromServer:", algo)
                                 var idx = doaAlgoCombo.indexByValue(algo)
-                                if (idx >= 0) doaAlgoCombo.currentIndex = idx
+                                if (idx >= 0)
+                                    doaAlgoCombo.currentIndex = idx
                             }
                         }
                     }
 
-                    // --- Tx Rate (Hz) : slider + manual input ---
+                    // --- Tx Rate (Hz) ---
                     Item {
                         id: txItem
                         Layout.columnSpan: 2
@@ -833,30 +936,40 @@ Item {
 
                         function clamp(v, lo, hi) {
                             v = Number(v)
-                            if (isNaN(v)) v = lo
-                            if (v < lo) return lo
-                            if (v > hi) return hi
+                            if (isNaN(v))
+                                v = lo
+                            if (v < lo)
+                                return lo
+                            if (v > hi)
+                                return hi
                             return v
                         }
-                        function fmt1(v) { return (Math.round(Number(v) * 10) / 10).toString() }
+
+                        function fmt1(v) {
+                            return (Math.round(Number(v) * 10) / 10).toString()
+                        }
 
                         function applyUi(v) {
                             txHzVal = v
                             hzSlider.value = v
+
                             if (!hzField.activeFocus) {
-                                const s = fmt1(v)
+                                var s = fmt1(v)
                                 if (hzField.text !== s) {
-                                    Qt.callLater(function() { hzField.text = s })
+                                    Qt.callLater(function() {
+                                        hzField.text = s
+                                    })
                                 }
                             }
                         }
 
                         Component.onCompleted: {
                             hasInit = true
+
                             var initV = txHzVal
-                            if (krakenmapval && typeof krakenmapval.txHz !== "undefined") {
+                            if (krakenmapval && typeof krakenmapval.txHz !== "undefined")
                                 initV = clamp(krakenmapval.txHz, 0.2, 60.0)
-                            }
+
                             hzField.text = fmt1(initV)
 
                             if (hasPending) {
@@ -900,7 +1013,7 @@ Item {
 
                                     onValueChanged: {
                                         if (!hzField.activeFocus) {
-                                            const s = txItem.fmt1(value)
+                                            var s = txItem.fmt1(value)
                                             if (hzField.text !== s)
                                                 hzField.text = s
                                         }
@@ -910,9 +1023,9 @@ Item {
                                         if (!pressed) {
                                             var v = txItem.clamp(value, 0.2, 60.0)
                                             txItem.applyUi(v)
-                                            if (krakenmapval && !krakenmapval.blockUiSync) {
+
+                                            if (krakenmapval && !krakenmapval.blockUiSync)
                                                 krakenmapval.sendTxHz(v)
-                                            }
                                         }
                                     }
                                 }
@@ -960,14 +1073,14 @@ Item {
                                         txItem.applyUi(v)
                                         text = txItem.fmt1(v)
 
-                                        if (krakenmapval && !krakenmapval.blockUiSync) {
+                                        if (krakenmapval && !krakenmapval.blockUiSync)
                                             krakenmapval.sendTxHz(v)
-                                        }
+
                                         focus = false
                                     }
 
                                     Keys.onReturnPressed: commit()
-                                    Keys.onEnterPressed:  commit()
+                                    Keys.onEnterPressed: commit()
 
                                     onFocusChanged: {
                                         if (focus) {
@@ -979,8 +1092,10 @@ Item {
                                     }
 
                                     onEditingFinished: {
-                                        if (text !== previousValue) commit()
-                                        else focus = false
+                                        if (text !== previousValue)
+                                            commit()
+                                        else
+                                            focus = false
                                     }
                                 }
 
@@ -995,6 +1110,7 @@ Item {
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateTxHzFromServer(v) {
                                 var vv = txItem.clamp(v, 0.2, 60.0)
 
@@ -1048,12 +1164,16 @@ Item {
 
                         function clampRadius(v) {
                             v = Number(v)
-                            if (isNaN(v)) return NaN
-                            if (v <= 0) return NaN
+                            if (isNaN(v))
+                                return NaN
+                            if (v <= 0)
+                                return NaN
                             return v
                         }
 
-                        function fmt2(v) { return Number(v).toFixed(2) }
+                        function fmt2(v) {
+                            return Number(v).toFixed(2)
+                        }
 
                         function commit() {
                             var r = clampRadius(text)
@@ -1068,15 +1188,14 @@ Item {
                             text = s
                             lastGoodText = s
 
-                            if (krakenmapval && !krakenmapval.blockUiSync) {
+                            if (krakenmapval && !krakenmapval.blockUiSync)
                                 krakenmapval.sendUcaRadiusM(r)
-                            }
 
                             focus = false
                         }
 
                         Keys.onReturnPressed: commit()
-                        Keys.onEnterPressed:  commit()
+                        Keys.onEnterPressed: commit()
 
                         onFocusChanged: {
                             if (focus) {
@@ -1103,9 +1222,13 @@ Item {
                         CheckBox {
                             id: agcCheck
                             checked: true
+
                             onToggled: {
-                                if (!krakenmapval) return
-                                if (krakenmapval.blockUiSync) return
+                                if (!krakenmapval)
+                                    return
+                                if (krakenmapval.blockUiSync)
+                                    return
+
                                 krakenmapval.sendRfAgcEnable(-1, checked)
                             }
                         }
@@ -1119,22 +1242,26 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 44
 
-                        property var  targetDbArr: [-60, -60, -60, -60, -60]
+                        property var targetDbArr: [-60, -60, -60, -60, -60]
                         property real targetAllDb: -60
                         property bool blockLocal: false
                         property real lastSentDb: 9999
 
                         function clampDb(v) {
                             v = Number(v)
-                            if (isNaN(v)) v = -60
-                            if (v < -90) v = -90
-                            if (v > -30) v = -30
+                            if (isNaN(v))
+                                v = -60
+                            if (v < -90)
+                                v = -90
+                            if (v > -30)
+                                v = -30
                             return v
                         }
 
                         function recomputeAll() {
                             var sum = 0
-                            for (var i = 0; i < 5; i++) sum += clampDb(targetDbArr[i])
+                            for (var i = 0; i < 5; i++)
+                                sum += clampDb(targetDbArr[i])
                             targetAllDb = clampDb(sum / 5.0)
                         }
 
@@ -1148,13 +1275,19 @@ Item {
 
                         function sendAllOnce(v, reason) {
                             v = clampDb(v)
-                            if (blockLocal) return
-                            if (!krakenmapval) return
-                            if (krakenmapval.blockUiSync) return
+
+                            if (blockLocal)
+                                return
+                            if (!krakenmapval)
+                                return
+                            if (krakenmapval.blockUiSync)
+                                return
 
                             var vv = Math.round(v * 10) / 10
                             var ll = Math.round(lastSentDb * 10) / 10
-                            if (vv === ll) return
+
+                            if (vv === ll)
+                                return
 
                             lastSentDb = vv
                             krakenmapval.sendRfAgcTargetAllDb(vv)
@@ -1193,7 +1326,9 @@ Item {
                                     value: rfAgcTargetAllItem.targetAllDb
 
                                     onValueChanged: {
-                                        if (rfAgcTargetAllItem.blockLocal) return
+                                        if (rfAgcTargetAllItem.blockLocal)
+                                            return
+
                                         if (!targetAllField.activeFocus)
                                             targetAllField.text = rfAgcTargetAllItem.clampDb(value).toFixed(1)
                                     }
@@ -1201,9 +1336,11 @@ Item {
                                     onPressedChanged: {
                                         if (!pressed) {
                                             var v = rfAgcTargetAllItem.clampDb(value)
+
                                             rfAgcTargetAllItem.blockLocal = true
                                             targetAllField.text = v.toFixed(1)
                                             rfAgcTargetAllItem.blockLocal = false
+
                                             rfAgcTargetAllItem.sendAllOnce(v, "slider_release")
                                         }
                                     }
@@ -1248,12 +1385,20 @@ Item {
                                     }
 
                                     Keys.onReturnPressed: commit()
-                                    Keys.onEnterPressed:  commit()
+                                    Keys.onEnterPressed: commit()
 
-                                    onFocusChanged: if (focus) { previousValue = text; selectAll() }
+                                    onFocusChanged: {
+                                        if (focus) {
+                                            previousValue = text
+                                            selectAll()
+                                        }
+                                    }
+
                                     onEditingFinished: {
-                                        if (text !== previousValue) commit()
-                                        else focus = false
+                                        if (text !== previousValue)
+                                            commit()
+                                        else
+                                            focus = false
                                     }
                                 }
 
@@ -1268,8 +1413,10 @@ Item {
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateRfAgcTargetFromServer(ch, targetDb) {
-                                if (ch < 0 || ch >= 5) return
+                                if (ch < 0 || ch >= 5)
+                                    return
 
                                 rfAgcTargetAllItem.blockLocal = true
                                 rfAgcTargetAllItem.setOneFromServer(ch, targetDb)
@@ -1283,29 +1430,38 @@ Item {
                         }
                     }
 
-                    // --- Restore values (ครั้งแรก) ---
+                    // --- Restore values ---
                     Connections {
                         target: krakenmapval
+
                         function onRfsocDoaFftUpdated(doaEnable, fftEnable) {
                             doaCheck.checked = !!doaEnable
                             fftCheck.checked = !!fftEnable
                         }
+
                         function onUpdateDoaAlgorithmFromServer(algo) {
-                            const idx = doaAlgoCombo.indexByValue(algo)
+                            var idx = doaAlgoCombo.indexByValue(algo)
                             console.log("QML got DoaAlgorithm:", algo, "idx=", idx)
-                            if (idx >= 0 && doaAlgoCombo.currentIndex !== idx) {
+
+                            if (idx >= 0 && doaAlgoCombo.currentIndex !== idx)
                                 doaAlgoCombo.currentIndex = idx
-                            }
                         }
+
                         function onUpdateUcaRadiusFromServer(radiusM) {
                             console.log("QML got UCA radius:", radiusM, "focus=", radiusField.activeFocus)
-                            if (radiusField.activeFocus) return
+
+                            if (radiusField.activeFocus)
+                                return
+
                             var r = radiusField.clampRadius(radiusM)
-                            if (isNaN(r)) return
+                            if (isNaN(r))
+                                return
+
                             var s = radiusField.fmt2(r)
                             radiusField.text = s
                             radiusField.lastGoodText = s
                         }
+
                         function onUpdateRfAgcEnableFromServer(ch, enable) {
                             if (ch < 0) {
                                 if (agcCheck.checked !== !!enable)
@@ -1313,11 +1469,13 @@ Item {
                                 return
                             }
                         }
-                        // ✅ NEW: ถ้า server ยิงค่า DOA line meters -> ให้ combo DistanceM ตามด้วย (ถ้าคุณต้องการ sync)
+
                         function onUpdateDoaLineMeters(meters) {
-                            const m = Number(meters)
-                            if (!isFinite(m)) return
-                            const idx = doaDistanceMCombo.indexByMeters(m)
+                            var m = Number(meters)
+                            if (!isFinite(m))
+                                return
+
+                            var idx = doaDistanceMCombo.indexByMeters(m)
                             if (idx >= 0 && doaDistanceMCombo.currentIndex !== idx) {
                                 doaDistanceMCombo.blockLocal = true
                                 doaDistanceMCombo.currentIndex = idx
@@ -1326,6 +1484,7 @@ Item {
                         }
                     }
                 }
+
                 /* ===== Location ===== */
                 Label {
                     text: "Location"
@@ -1341,7 +1500,81 @@ Item {
                     columnSpacing: 30
                     Layout.fillWidth: true
 
+                    property bool initialized: false
                     property bool manualMode: gpsModeCombo.currentIndex === 1
+
+                    function validLatLon(lat, lon) {
+                        return isFinite(lat) && isFinite(lon)
+                                && lat >= -90.0 && lat <= 90.0
+                                && lon >= -180.0 && lon <= 180.0
+                    }
+
+                    function saveLocationState() {
+                        if (!initialized)
+                            return
+
+                        locationSettings.gpsModeIndex = gpsModeCombo.currentIndex
+                        locationSettings.latitudeText = latitudeInput.text
+                        locationSettings.longitudeText = longitudeInput.text
+
+                        console.log("[QML] save location:",
+                                    "mode=", locationSettings.gpsModeIndex,
+                                    "lat=", locationSettings.latitudeText,
+                                    "lon=", locationSettings.longitudeText)
+                    }
+
+                    function applyManualGpsFromFields(reason) {
+                        if (!krakenmapval)
+                            return
+
+                        var lat = Number(latitudeInput.text)
+                        var lon = Number(longitudeInput.text)
+
+                        if (!validLatLon(lat, lon)) {
+                            console.log("[QML] invalid manual GPS input:",
+                                        latitudeInput.text,
+                                        longitudeInput.text,
+                                        "reason=", reason)
+                            return
+                        }
+
+                        if (typeof krakenmapval.applyManualGps === "function") {
+                            krakenmapval.applyManualGps(lat, lon, 0.0)
+                            console.log("[QML] applyManualGps:", lat, lon, 0.0, "reason=", reason)
+                        } else {
+                            console.log("[QML] krakenmapval.applyManualGps is not available")
+                        }
+                    }
+
+                    function commitLocation(reason) {
+                        saveLocationState()
+
+                        if (manualMode)
+                            applyManualGpsFromFields(reason)
+                    }
+
+                    Component.onCompleted: {
+                        Qt.callLater(function() {
+                            var idx = Number(locationSettings.gpsModeIndex)
+                            if (!isFinite(idx) || idx < 0 || idx > 1)
+                                idx = 0
+
+                            gpsModeCombo.currentIndex = idx
+
+                            if (locationSettings.latitudeText !== "")
+                                latitudeInput.text = locationSettings.latitudeText
+
+                            if (locationSettings.longitudeText !== "")
+                                longitudeInput.text = locationSettings.longitudeText
+
+                            initialized = true
+                            saveLocationState()
+
+                            // ถ้าเคยเลือก Manual ไว้ พอกลับมาหน้านี้ให้ส่งค่า lat/lon เดิมเข้า backend ทันที
+                            if (manualMode)
+                                applyManualGpsFromFields("restore_on_completed")
+                        })
+                    }
 
                     Label { text: "Mode:"; font.pixelSize: 16; color: "#ffffff" }
 
@@ -1382,14 +1615,19 @@ Item {
                         }
 
                         onCurrentIndexChanged: {
-                            locationLayout.manualMode = (currentIndex === 1)
+                            locationLayout.saveLocationState()
 
                             if (!krakenmapval)
                                 return
 
-                            if (!locationLayout.manualMode) {
+                            if (locationLayout.manualMode) {
+                                // เปลี่ยนเป็น Manual แล้วส่งตำแหน่งที่จำไว้ทันที
+                                locationLayout.applyManualGpsFromFields("mode_changed_manual")
+                            } else {
+                                // เปลี่ยนกลับ Auto ให้ปิด manual GPS เหมือนเดิม
                                 if (typeof krakenmapval.disableManualGps1 === "function")
                                     krakenmapval.disableManualGps1()
+
                                 if (typeof krakenmapval.disableManualGps2 === "function")
                                     krakenmapval.disableManualGps2()
                             }
@@ -1397,6 +1635,7 @@ Item {
                     }
 
                     Label { text: "Latitude:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: latitudeInput
                         Layout.preferredWidth: 220
@@ -1422,9 +1661,29 @@ Item {
                             border.width: 1
                             opacity: locationLayout.manualMode ? 1.0 : 0.75
                         }
+
+                        Keys.onReturnPressed: {
+                            locationLayout.commitLocation("lat_return")
+                            latitudeInput.focus = false
+                        }
+
+                        Keys.onEnterPressed: {
+                            locationLayout.commitLocation("lat_enter")
+                            latitudeInput.focus = false
+                        }
+
+                        onEditingFinished: {
+                            locationLayout.commitLocation("lat_editing_finished")
+                        }
+
+                        onTextChanged: {
+                            if (locationLayout.initialized)
+                                locationLayout.saveLocationState()
+                        }
                     }
 
                     Label { text: "Longitude:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: longitudeInput
                         Layout.preferredWidth: 220
@@ -1449,6 +1708,25 @@ Item {
                             border.color: longitudeInput.activeFocus ? "#7AE2CF" : "#1B8F77"
                             border.width: 1
                             opacity: locationLayout.manualMode ? 1.0 : 0.75
+                        }
+
+                        Keys.onReturnPressed: {
+                            locationLayout.commitLocation("lon_return")
+                            longitudeInput.focus = false
+                        }
+
+                        Keys.onEnterPressed: {
+                            locationLayout.commitLocation("lon_enter")
+                            longitudeInput.focus = false
+                        }
+
+                        onEditingFinished: {
+                            locationLayout.commitLocation("lon_editing_finished")
+                        }
+
+                        onTextChanged: {
+                            if (locationLayout.initialized)
+                                locationLayout.saveLocationState()
                         }
                     }
 
@@ -1480,22 +1758,7 @@ Item {
                             }
 
                             onClicked: {
-                                if (!krakenmapval) return
-
-                                var lat = Number(latitudeInput.text)
-                                var lon = Number(longitudeInput.text)
-
-                                if (!isFinite(lat) || !isFinite(lon)) {
-                                    console.log("[QML] invalid manual GPS input")
-                                    return
-                                }
-
-                                if (typeof krakenmapval.applyManualGps === "function") {
-                                    krakenmapval.applyManualGps(lat, lon, 0.0)
-                                    console.log("[QML] applyManualGps:", lat, lon, 0.0)
-                                } else {
-                                    console.log("[QML] krakenmapval.applyManualGps is not available")
-                                }
+                                locationLayout.commitLocation("button_clicked")
                             }
                         }
                     }
@@ -1504,6 +1767,7 @@ Item {
                         target: krakenmapval
 
                         function onUpdateLocationLatLongFromGPS(latStr, lonStr, altStr, utmText, mgrsText) {
+                            // Manual อยู่ ห้าม GPS จริงมาเขียนทับค่าที่ user ตั้งเอง
                             if (locationLayout.manualMode)
                                 return
 
@@ -1512,6 +1776,9 @@ Item {
 
                             if (!longitudeInput.activeFocus)
                                 longitudeInput.text = String(lonStr)
+
+                            // Auto mode ก็จำค่า GPS ล่าสุดไว้ด้วย
+                            locationLayout.saveLocationState()
                         }
                     }
                 }
@@ -1531,6 +1798,7 @@ Item {
                     Layout.fillWidth: true
 
                     Label { text: "Degree:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextField {
                         id: degreeInput
                         Layout.preferredWidth: 200
@@ -1555,6 +1823,7 @@ Item {
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateDegreelocal(heading) {
                                 degreeInput.text = heading.toFixed(1)
                             }
@@ -1562,6 +1831,7 @@ Item {
                     }
 
                     Label { text: "Status:"; font.pixelSize: 16; color: "#ffffff" }
+
                     TextArea {
                         id: degreeStatus
                         Layout.preferredWidth: 320
@@ -1582,6 +1852,7 @@ Item {
 
                         Connections {
                             target: krakenmapval
+
                             function onUpdateStatusCompass(instruction) {
                                 degreeStatus.text = instruction
                             }
@@ -1599,7 +1870,13 @@ Item {
                         background: Rectangle {
                             radius: 6
                             color: calibrationButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
-                            Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.InOutQuad } }
+
+                            Behavior on color {
+                                ColorAnimation {
+                                    duration: 150
+                                    easing.type: Easing.InOutQuad
+                                }
+                            }
                         }
 
                         contentItem: Text {
@@ -1613,6 +1890,7 @@ Item {
                         onClicked: {
                             if (krakenmapval)
                                 krakenmapval.Calibration("Calibration")
+
                             degreeStatus.text = ""
                         }
                     }

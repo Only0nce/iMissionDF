@@ -88,16 +88,23 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
 
         if (action == "add") {
             if (uniqueIdInGroup.isEmpty()) {
-                db->savegroupSettingNewGroup(groupName,
-                                             deviceUniqueIds,
-                                             groupID,
-                                             uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db, groupName, deviceUniqueIds]() mutable {
+                    int outGroupID = 0;
+                    QString outUniqueIdInGroup;
+
+                    db->savegroupSettingNewGroup(groupName,
+                                                 deviceUniqueIds,
+                                                 outGroupID,
+                                                 outUniqueIdInGroup);
+                });
             } else {
                 qDebug() << "[functionServer] EditGroup add on existing group uid="
                          << uniqueIdInGroup << " not implemented yet.";
             }
         } else if (action == "delete") {
-            db->deleteGroupByUID(uniqueIdInGroup);
+            QTimer::singleShot(0, db, [db = db, uniqueIdInGroup]() {
+                db->deleteGroupByUID(uniqueIdInGroup);
+            });
         }
     }
     else if (objectName == "EditGroupDevices")
@@ -131,13 +138,29 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
             if (deviceUniqueId.isEmpty()) {
                 qWarning() << "[functionServer] EditGroupDevices(add): deviceUniqueId is empty, skip";
             } else {
-                db->insertDevicesinGroup(groupID,groupName,deviceUniqueId,uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db,
+                                           groupID,
+                                           groupName,
+                                           deviceUniqueId,
+                                           uniqueIdInGroup]() {
+                    db->insertDevicesinGroup(groupID,
+                                             groupName,
+                                             deviceUniqueId,
+                                             uniqueIdInGroup);
+                });
             }
         } else if (action == "remove") {
             if (deviceUniqueId.isEmpty()) {
                 qWarning() << "[functionServer] EditGroupDevices(remove): deviceUniqueId is empty, skip";
             } else {
-                db->removeDeviceFromGroup(groupID,deviceUniqueId,uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db,
+                                           groupID,
+                                           deviceUniqueId,
+                                           uniqueIdInGroup]() {
+                    db->removeDeviceFromGroup(groupID,
+                                              deviceUniqueId,
+                                              uniqueIdInGroup);
+                });
             }
         } else if (action == "changedeviceInGroup") {
 
@@ -187,7 +210,10 @@ void iScreenDF::newCommandProcess(const QJsonObject &command, QWebSocket *pSende
         networks->ip_timeserver = obj["ntpServer"].toString();
         //        qDebug() << "updateNTPServer:" << networks->ip_timeserver;
         networking->setNTPServer(networks->ip_timeserver);
-        db->setNTPServer(networks->ip_timeserver);
+        const QString ntpIp = networks->ip_timeserver;
+        QTimer::singleShot(0, db, [db = db, ntpIp]() {
+            db->setNTPServer(ntpIp);
+        });
     }
     else if(menuID == "rebootSystem")
     {

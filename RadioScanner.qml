@@ -795,11 +795,13 @@ Item {
                     console.log("mainWindows=", mainWindows)
                     console.log("has onRecStatusChanged?", mainWindows && mainWindows.onRecStatusChanged)
                     mainWindows.onRecStatusChanged.connect(function(value){
+                        console.log("mainWindows.onRecStatusChanged.connect :: ",value)
                         scanRecOn = value
                     })
                 }
 
                 onScanRecOnChanged: {
+                    console.log("onScanRecOnChanged",scanRecOn)
                     if (scanRecOn) {
                         blinkOpacity = 1.0;
                         blinkTimer.start();

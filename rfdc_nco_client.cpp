@@ -5,7 +5,7 @@
 
 RfdcNcoClient::RfdcNcoClient(QObject *parent)
     : QObject(parent),
-    m_host(QStringLiteral("192.168.10.8")),  // เปลี่ยน IP ตาม RFSoC ของคุณ
+    m_host(QStringLiteral("192.168.10.4")),  // เปลี่ยน IP ตาม RFSoC ของคุณ
     m_port(6000)
 {
     connect(&m_socket, &QTcpSocket::connected,

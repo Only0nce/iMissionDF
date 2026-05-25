@@ -139,6 +139,7 @@ void ChatServer::commandProcess(QString message, QWebSocket *pSender){
         QString recState = QJsonValue(command["state"]).toString();
         if (softPhoneID >4) softPhoneID = softPhoneID-4;
         emit recLogging(softPhoneID,recorderID,recState,message);
+        // emit recLoggingqml(softPhoneID,recorderID,recState,message);
 
     }else if (getCommand == ("getVuMeter"))
     {

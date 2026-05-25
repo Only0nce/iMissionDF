@@ -12,6 +12,8 @@
 // ✅ NEW: maxDoaDelayMs + txStableHoldMs รับจาก C++ "สัญญาณเดียวกัน"
 // ✅ NEW: txSnapDistanceM + intersectionMaxResidualM รับจาก C++ "สัญญาณเดียวกัน"
 // ✅ NEW: save/restore 4 ค่านี้ผ่าน Settings
+// ✅ PERF: saved DOA log lines draw in chunks; supports ~200 lines without freezing UI
+// ✅ PERF: TX history dedupe + reduce TX marker repaint loop
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
@@ -68,27 +70,32 @@ property bool navigationEnabled: false
 property bool followPositionEnabled: false
 
 Settings {
-id: uiSettings
-category: "MapViewer"
+    id: uiSettings
+    category: "MapViewer"
 
-// ===== UI state =====
-property int  savedStyleIndex: 0
-property bool savedFollow: false
-property real savelineLengthMeters: 15000
+    // ===== UI state =====
+    property int  savedStyleIndex: 0
+    property bool savedFollow: false
+    property real savelineLengthMeters: 15000
 
-property bool savedUseOfflineStyle: false
+    property bool savedUseOfflineStyle: false
 
-// ✅ NEW: DOA/TX params from C++
-property int  savedMaxDoaDelayMs: 2000
-property int  savedTxStableHoldMs: 2000
-property real savedTxSnapDistanceM: 250
-property real savedIntersectionMaxResidualM: 250
+    // ✅ จำสถานะ showSwitch ของ HUD แต่ละ device
+    // รูปแบบ: { "serial|name": true }
+    // true = hidden / switch OFF
+    property string savedHiddenKeysJson: "{}"
 
-// ===== Map state =====
-property real savedLat: 13.75
-property real savedLon: 100.5
-property real savedZoom: 13
-property real savedBearing: 0
+    // ✅ NEW: DOA/TX params from C++
+    property int  savedMaxDoaDelayMs: 2000
+    property int  savedTxStableHoldMs: 2000
+    property real savedTxSnapDistanceM: 250
+    property real savedIntersectionMaxResidualM: 250
+
+    // ===== Map state =====
+    property real savedLat: 13.75
+    property real savedLon: 100.5
+    property real savedZoom: 13
+    property real savedBearing: 0
 }
 
 // ================== MAP RELOAD (preserve state) ==================
@@ -194,6 +201,97 @@ ListModel { id: gpsPinsModel }
 // ================== MULTI DOA MODEL ==================
 ListModel { id: doaPinsModel }
 
+// ================== SAVED DOA LOG FROM SideLogs.qml ==================
+// แยกจาก realtime DOA เดิม ไม่กระทบ doaPinsModel / gpsPinsModel
+ListModel { id: savedDoaLogModel }
+
+// ✅ Marker/pin model แยกจากเส้น DOA:
+// lat/lon เดียวกันจะวาด pin แค่จุดเดียว แต่เส้น DOA ยังวาดครบจาก savedDoaLogModel
+ListModel { id: savedDoaLogMarkerModel }
+
+// DoaLog จาก database จะถูกนับเป็น DOA source อีกชุดหนึ่ง
+property bool savedDoaLogVisible: true
+
+// ============================================================
+// ✅ LAYER ORDER
+// ห้ามใช้ z ติดลบใน Map เพราะ Canvas อาจไม่แสดงใต้ map tile
+// saved DOA log line ใช้ z ต่ำ + ประกาศก่อน GPS/DOA pin
+// DOA overlay + GPS pin อยู่กลุ่ม layer เดียวกัน
+// ============================================================
+property int savedDoaLogLineZ: 0
+property int savedDoaLogMarkerZ: 0
+
+property int txHistoryPointZ: 1200
+
+property int mainMaxDoaLineZ: 9000
+property int mainHeadingLineZ: 9100
+
+property int mainDoaOverlayZ: 20000
+property int gpsPinZ: mainDoaOverlayZ + 1
+property int gpsSelectedPinZ: mainDoaOverlayZ + 2
+
+property int txMarkerZ: 30000
+property int selectedTxLogMarkerZ: 31000
+
+// ============================================================
+// ✅ FIX UI FREEZE: bulk-load DOA Log แบบแบ่งชุด ไม่ lock UI
+// ============================================================
+property bool savedDoaBulkLoading: false
+property bool savedDoaLoadBusy: false
+property int  savedDoaLoadChunkSize: 10       // ปรับได้ 8-20 ถ้าเครื่องช้าให้ลด
+property int  savedDoaLogLabelLimit: 30      // เกินนี้ซ่อน label marker เหลือเส้นอย่างเดียว
+
+// ✅ ถ้า marker/pin ไม่ซ้ำกันเยอะ ๆ ให้ Canvas วาดเป็นจุดเล็กแทนการสร้าง MapQuickItem+Text 200 ชุด
+property int  savedDoaLogPinDotLimit: 200   // วาดจุด pin เล็กสูงสุด 200 จุด ถ้าเกินจะ sample กระจาย
+property int  savedDoaLogPinDotRadius: 4    // รัศมีจุด pin เล็กบน Canvas
+
+// ✅ วาดเส้น saved DOA แบบ chunk เพื่อให้ 200 เส้นไม่ค้าง UI
+property int  savedDoaMaxDrawLines: 200     // วาดสูงสุด 200 เส้น ถ้าเกินจะ sample กระจาย
+property int  savedDoaDrawChunkSize: 35     // จำนวนเส้นต่อ frame; ถ้าเครื่องช้าให้ลดเป็น 20
+property var  _savedDoaDrawSegments: []
+property int  _savedDoaDrawIndex: 0
+property bool _savedDoaDrawBusy: false
+
+property var  _savedDoaPendingRecords: []
+property int  _savedDoaLoadIndex: 0
+property bool _savedDoaKeepMapView: true
+property bool _savedDoaHasFirstCoord: false
+property real _savedDoaFirstLat: 0
+property real _savedDoaFirstLon: 0
+
+// ✅ จำกัดจำนวน DOA source ที่เอาไปคำนวณ TX intersection
+// เพราะ 133 เส้น ถ้า pairwise + score ทุก timer จะหนักมาก
+property int txEstimateMaxSources: 24
+property int txEstimateMinIntervalMs: 1200
+property double _lastTxEstimateRebuildMs: 0
+
+Timer {
+    id: savedDoaBulkLoadTimer
+    interval: 8
+    repeat: true
+    running: false
+
+    onTriggered: {
+        mapviewer._loadSavedDoaLogChunk()
+    }
+}
+
+Timer {
+    id: savedDoaDrawChunkTimer
+    interval: 16      // ประมาณ 1 frame; ค่อย ๆ วาดเส้น ไม่ block UI
+    repeat: true
+    running: false
+
+    onTriggered: {
+        if (mapLoader.item && mapLoader.item.savedDoaLogLineCanvas) {
+            mapLoader.item.savedDoaLogLineCanvas.drawNextChunk()
+        } else {
+            stop()
+            mapviewer._savedDoaDrawBusy = false
+        }
+    }
+}
+
 // ====== Pin timeout / cleanup ======
 property int pinTimeoutMs: 2000        // 2 วิ
 property int cleanupIntervalMs: 1000   // ตรวจทุก 1 วิ
@@ -255,12 +353,374 @@ function _sameDeg(a,b,eps){
     d = Math.min(d, 360 - d)
     return d <= eps
     }
-    function wrap360(deg) {
-    deg = Number(deg)
-    if (!isFinite(deg)) return 0
-    deg = deg % 360
-    if (deg < 0) deg += 360
-    return deg
+function wrap360(deg) {
+deg = Number(deg)
+if (!isFinite(deg)) return 0
+deg = deg % 360
+if (deg < 0) deg += 360
+return deg
+}
+
+function _destCoordFromBearing(lat, lon, bearingDeg, meters) {
+    var R = 6378137.0
+
+    var brng = Number(bearingDeg) * Math.PI / 180.0
+    var d = Number(meters) / R
+
+    var lat1 = Number(lat) * Math.PI / 180.0
+    var lon1 = Number(lon) * Math.PI / 180.0
+
+    var lat2 = Math.asin(
+        Math.sin(lat1) * Math.cos(d) +
+        Math.cos(lat1) * Math.sin(d) * Math.cos(brng)
+    )
+
+    var lon2 = lon1 + Math.atan2(
+        Math.sin(brng) * Math.sin(d) * Math.cos(lat1),
+        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2)
+    )
+
+    return QtPositioning.coordinate(lat2 * 180.0 / Math.PI,
+                                    lon2 * 180.0 / Math.PI)
+}
+
+function _savedDoaLatLonKey(lat, lon) {
+    var la = Number(lat)
+    var lo = Number(lon)
+
+    if (!isFinite(la) || !isFinite(lo))
+        return ""
+
+    // 6 ตำแหน่งประมาณ 0.11 เมตร ใช้กัน pin ทับในตำแหน่งเดียวกัน
+    return la.toFixed(6) + "|" + lo.toFixed(6)
+}
+
+function _findSavedDoaMarkerIndexByLatLon(lat, lon) {
+    var k = _savedDoaLatLonKey(lat, lon)
+
+    if (!k.length)
+        return -1
+
+    for (var i = 0; i < savedDoaLogMarkerModel.count; ++i) {
+        if (savedDoaLogMarkerModel.get(i).latLonKey === k)
+            return i
+    }
+
+    return -1
+}
+
+function _upsertSavedDoaMarker(r, lat, lon, doa, heading, srcIndex) {
+    var k = _savedDoaLatLonKey(lat, lon)
+
+    if (!k.length)
+        return
+
+    var idx = _findSavedDoaMarkerIndexByLatLon(lat, lon)
+
+    if (idx >= 0) {
+        var old = savedDoaLogMarkerModel.get(idx)
+        var c = Number(old.markerCount || 1)
+
+        if (!isFinite(c) || c < 1)
+            c = 1
+
+        // ✅ ใช้ marker จุดเดิม แต่เพิ่มจำนวน record ที่ซ้อนตำแหน่งเดียวกัน
+        savedDoaLogMarkerModel.set(idx, {
+            latLonKey: old.latLonKey,
+            key: old.key,
+            timestamp: old.timestamp,
+            device: old.device,
+            frequency: old.frequency,
+            logKey: old.logKey,
+            message: old.message,
+            lat: old.lat,
+            lon: old.lon,
+            doa: old.doa,
+            heading: old.heading,
+            confidence: old.confidence,
+            updatedMs: old.updatedMs,
+            markerCount: c + 1
+        })
+
+        return
+    }
+
+    savedDoaLogMarkerModel.append({
+        latLonKey: k,
+        key: "LOGMARK|" + srcIndex + "|" + String(r.timestamp || "") + "|" + String(r.logKey || ""),
+        timestamp: String(r.timestamp || ""),
+        device: String(r.device || ""),
+        frequency: String(r.frequency || ""),
+        logKey: String(r.logKey || ""),
+        message: String(r.message || ""),
+
+        lat: Number(lat),
+        lon: Number(lon),
+        doa: mapviewer.wrap360(doa),
+        heading: Number(heading),
+        confidence: String(r.confidence || ""),
+        updatedMs: Date.now(),
+
+        // ✅ จำนวน DOA log records ที่อยู่ lat/lon เดียวกัน
+        markerCount: 1
+    })
+}
+
+function _appendOneSavedDoaLog(r, srcIndex) {
+    if (!r)
+        return false
+
+    var lat = Number(r.lat)
+    var lon = Number(r.lon)
+    var doa = Number(r.doa)
+    var heading = Number(r.heading)
+
+    if (!isFinite(lat) || !isFinite(lon))
+        return false
+
+    if (!isFinite(doa))
+        doa = 0
+
+    if (!isFinite(heading))
+        heading = 0
+
+    savedDoaLogModel.append({
+        key: "LOG|" + srcIndex + "|" + String(r.timestamp || "") + "|" + String(r.logKey || ""),
+        timestamp: String(r.timestamp || ""),
+        device: String(r.device || ""),
+        frequency: String(r.frequency || ""),
+        logKey: String(r.logKey || ""),
+        message: String(r.message || ""),
+
+        lat: lat,
+        lon: lon,
+
+        // DoaLog ที่ save มาเป็น world bearing แล้ว
+        doa: mapviewer.wrap360(doa),
+        heading: heading,
+        confidence: String(r.confidence || ""),
+        updatedMs: Date.now()
+    })
+
+    // ✅ lat/lon เดียวกัน ให้ marker/pin มีแค่จุดเดียว
+    // แต่ savedDoaLogModel ยังเก็บครบ เพื่อวาดเส้นและคำนวณ TX intersection
+    _upsertSavedDoaMarker(r, lat, lon, doa, heading, srcIndex)
+
+    if (!_savedDoaHasFirstCoord) {
+        _savedDoaHasFirstCoord = true
+        _savedDoaFirstLat = lat
+        _savedDoaFirstLon = lon
+    }
+
+    return true
+}
+
+
+function rebuildSavedDoaDrawSegments() {
+    mapviewer._savedDoaDrawSegments = []
+
+    if (!mapLoader.item || !mapLoader.item.map)
+        return
+
+    var m = mapLoader.item.map
+
+    var meters = Number(currentMaxDoaLineMeters())
+    if (!isFinite(meters) || meters <= 0)
+        meters = 15000
+
+    var total = savedDoaLogModel.count
+    if (total <= 0)
+        return
+
+    var maxLines = Number(savedDoaMaxDrawLines)
+    if (!isFinite(maxLines) || maxLines <= 0)
+        maxLines = 200
+
+    var drawCount = Math.min(total, maxLines)
+    var step = total / drawCount
+
+    for (var i = 0; i < drawCount; ++i) {
+        var srcIndex = Math.floor(i * step)
+        if (srcIndex < 0)
+            srcIndex = 0
+        if (srcIndex >= total)
+            srcIndex = total - 1
+
+        var it = savedDoaLogModel.get(srcIndex)
+
+        var lat = Number(it.lat)
+        var lon = Number(it.lon)
+        var deg = Number(it.doa)
+
+        if (!isFinite(lat) || !isFinite(lon) || !isFinite(deg))
+            continue
+
+        var start = QtPositioning.coordinate(lat, lon)
+        var end = _destCoordFromBearing(lat, lon, deg, meters)
+
+        var p1 = m.fromCoordinate(start, false)
+        var p2 = m.fromCoordinate(end, false)
+
+        if (!isFinite(p1.x) || !isFinite(p1.y) || !isFinite(p2.x) || !isFinite(p2.y))
+            continue
+
+        mapviewer._savedDoaDrawSegments.push({
+            x1: p1.x,
+            y1: p1.y,
+            x2: p2.x,
+            y2: p2.y
+        })
+    }
+}
+
+function restartSavedDoaLineDraw() {
+    if (!mapLoader.item || !mapLoader.item.savedDoaLogLineCanvas)
+        return
+
+    savedDoaDrawChunkTimer.stop()
+    rebuildSavedDoaDrawSegments()
+
+    mapviewer._savedDoaDrawIndex = 0
+    mapviewer._savedDoaDrawBusy = mapviewer._savedDoaDrawSegments.length > 0
+
+    var c = mapLoader.item.savedDoaLogLineCanvas
+
+    if (!mapviewer._savedDoaDrawBusy) {
+        c.clearCanvas()
+        return
+    }
+
+    // วาด chunk แรกทันที แล้ว chunk ถัดไปตาม Timer
+    c.requestPaint()
+
+    if (mapviewer._savedDoaDrawSegments.length > mapviewer.savedDoaDrawChunkSize)
+        savedDoaDrawChunkTimer.start()
+}
+
+function _finishSavedDoaLogLoad() {
+    savedDoaBulkLoadTimer.stop()
+
+    savedDoaBulkLoading = false
+    savedDoaLoadBusy = false
+
+    if (savedDoaLogModel.count <= 0) {
+        console.log("[MapViewer] no valid DOA log records")
+
+        if (mapLoader.item && mapLoader.item.savedDoaLogLineCanvas)
+            mapLoader.item.savedDoaLogLineCanvas.clearCanvas()
+
+        if (mapLoader.item && mapLoader.item.savedDoaLogPinDotCanvas)
+            mapLoader.item.savedDoaLogPinDotCanvas.safeRequestPaint()
+
+        mapviewer.resetTxCandidateOnly()
+        mapviewer.rebuildTxEstimateKrakenLike()
+        mapviewer._lastTxEstimateRebuildMs = Date.now()
+        return
+    }
+
+    if (mapLoader.item && mapLoader.item.map) {
+        // ✅ saved DOA log เป็น static: วาดเส้นแบบ chunk ครั้งเดียวหลังโหลดครบ
+        mapviewer.restartSavedDoaLineDraw()
+
+        if (mapLoader.item && mapLoader.item.savedDoaLogPinDotCanvas)
+            mapLoader.item.savedDoaLogPinDotCanvas.safeRequestPaint()
+
+        if (!_savedDoaKeepMapView && _savedDoaHasFirstCoord) {
+            var m = mapLoader.item.map
+            mapviewer.restoringMapState = true
+            m.center = QtPositioning.coordinate(_savedDoaFirstLat, _savedDoaFirstLon)
+
+            Qt.callLater(function() {
+                mapviewer.restoringMapState = false
+            })
+        } else {
+            console.log("[MapViewer] keepMapView=true -> skip map.center")
+        }
+    }
+
+    mapviewer.resetTxCandidateOnly()
+
+    // ✅ rebuild ครั้งเดียวหลังโหลดครบ ไม่ rebuild ทุก append
+    mapviewer.rebuildTxEstimateKrakenLike()
+    mapviewer._lastTxEstimateRebuildMs = Date.now()
+
+    console.log("[MapViewer] loaded saved DOA logs async count:",
+                savedDoaLogModel.count,
+                "keepMapView=", _savedDoaKeepMapView)
+}
+
+function _loadSavedDoaLogChunk() {
+    if (!_savedDoaPendingRecords || _savedDoaPendingRecords.length <= 0) {
+        _finishSavedDoaLogLoad()
+        return
+    }
+
+    var end = Math.min(_savedDoaLoadIndex + savedDoaLoadChunkSize,
+                       _savedDoaPendingRecords.length)
+
+    for (var i = _savedDoaLoadIndex; i < end; ++i) {
+        _appendOneSavedDoaLog(_savedDoaPendingRecords[i], i)
+    }
+
+    _savedDoaLoadIndex = end
+
+    if (_savedDoaLoadIndex >= _savedDoaPendingRecords.length) {
+        _finishSavedDoaLogLoad()
+    }
+}
+
+function showSavedDoaLogJson(jsonText) {
+    try {
+        var obj = (typeof jsonText === "string") ? JSON.parse(jsonText) : jsonText
+
+        if (!obj) {
+            console.log("[MapViewer] empty DOA log payload")
+            return
+        }
+
+        var records = []
+
+        if (obj.objectName === "ShowDoaLogsOnMap" && obj.records && Array.isArray(obj.records)) {
+            records = obj.records
+        } else if (obj.objectName === "ShowDoaLogOnMap") {
+            records = [obj]
+        } else {
+            console.log("[MapViewer] invalid DOA log map objectName:", obj.objectName)
+            return
+        }
+
+        savedDoaBulkLoadTimer.stop()
+
+        savedDoaBulkLoading = true
+        savedDoaLoadBusy = true
+
+        _savedDoaPendingRecords = records
+        _savedDoaLoadIndex = 0
+        _savedDoaKeepMapView = (obj.keepMapView === true)
+        _savedDoaHasFirstCoord = false
+        _savedDoaFirstLat = 0
+        _savedDoaFirstLon = 0
+
+        // ✅ clear ตอน bulk loading เพื่อไม่ให้ CountChanged ไป repaint/rebuild หนัก ๆ
+        savedDoaLogModel.clear()
+        savedDoaLogMarkerModel.clear()
+
+        mapviewer.resetTxCandidateOnly()
+
+        if (records.length <= 0) {
+            _finishSavedDoaLogLoad()
+            return
+        }
+
+        console.log("[MapViewer] start async DOA log load records=", records.length)
+
+        savedDoaBulkLoadTimer.start()
+    } catch (e) {
+        savedDoaBulkLoadTimer.stop()
+        savedDoaBulkLoading = false
+        savedDoaLoadBusy = false
+        console.log("[MapViewer] showSavedDoaLogJson error:", e, jsonText)
+    }
 }
 
 // ✅ NEW: clean number helper for C++ values (string/number)
@@ -922,43 +1382,158 @@ if (!isDoaActive(it)) return null
 return it
 }
 
+// ============================================================
+// TX LOG SELECTED FROM TX PANEL
+// ============================================================
+property bool   selectedTxLogVisible: false
+property string selectedTxLogKey: ""
+property int    selectedTxLogIndex: -1
+property real   selectedTxLogLat: 0
+property real   selectedTxLogLon: 0
+property real   selectedTxLogRms: 0
+property real   selectedTxLogUpdatedMs: 0
+
+function _fmtSelectedTxLogTime(ms) {
+    var v = Number(ms || 0)
+    if (!isFinite(v) || v <= 0)
+        return "-"
+
+    var d = new Date(v)
+
+    function p2(n) {
+        n = Math.floor(Number(n))
+        return (n < 10 ? ("0" + n) : ("" + n))
+    }
+
+    return d.getFullYear() + "-" + p2(d.getMonth() + 1) + "-" + p2(d.getDate()) +
+           " " + p2(d.getHours()) + ":" + p2(d.getMinutes()) + ":" + p2(d.getSeconds())
+}
+
+function txCoordModeNow() {
+    // ใช้ mode จาก DoaHistoryViewer
+    // 0 = lat/lon, 1 = MGRS
+    var mode = 1
+
+    if (viewerHud && viewerHud.txCoordMode !== undefined)
+        mode = Number(viewerHud.txCoordMode)
+
+    if (!isFinite(mode))
+        mode = 1
+
+    return Math.round(mode)
+}
+
+function txCoordDisplayText(lat, lon) {
+    var la = Number(lat)
+    var lo = Number(lon)
+    var mode = txCoordModeNow()
+
+    if (!isFinite(la) || !isFinite(lo)) {
+        return mode === 1 ? "MGRS: -" : "lat -  lon -"
+    }
+
+    if (mode === 1) {
+        return "MGRS: " + latLonToMGRS(la, lo, txMgrsPrecision)
+    }
+
+    return "lat " + la.toFixed(6) + "   lon " + lo.toFixed(6)
+}
+
+function selectedTxLogMgrsText() {
+    if (!selectedTxLogVisible)
+        return "MGRS: -"
+
+    return "MGRS: " + latLonToMGRS(selectedTxLogLat, selectedTxLogLon, txMgrsPrecision)
+}
+
+function selectedTxLogLatLonText() {
+    if (!selectedTxLogVisible)
+        return "lat -  lon -"
+
+    return "lat " + Number(selectedTxLogLat).toFixed(6) +
+           "   lon " + Number(selectedTxLogLon).toFixed(6)
+}
+
+// ✅ ใช้ตัวนี้แทนใน marker เพื่อให้เปลี่ยนตามปุ่ม MGRS / lat/lon
+function selectedTxLogCoordText() {
+    if (!selectedTxLogVisible)
+        return txCoordModeNow() === 1 ? "MGRS: -" : "lat -  lon -"
+
+    return txCoordDisplayText(selectedTxLogLat, selectedTxLogLon)
+}
+
+
+function selectedTxLogInfoText() {
+    return "RMS " + Math.round(Number(selectedTxLogRms || 0)) + "m" +
+           "   " + _fmtSelectedTxLogTime(selectedTxLogUpdatedMs)
+}
+
+function markTxLogFromPanel(txKey, rowIndex, lat, lon, rms, updatedMs) {
+    var la = Number(lat)
+    var lo = Number(lon)
+    var rr = Number(rms || 0)
+    var ms = Number(updatedMs || 0)
+
+    // ✅ รับเฉพาะ lat/lon จริงเท่านั้น
+    if (!isFinite(la) || !isFinite(lo)) {
+        console.log("[MapViewer] invalid TX lat/lon, skip mark:", lat, lon)
+        return
+    }
+
+    if (!isFinite(rr)) rr = 0
+    if (!isFinite(ms)) ms = 0
+
+    selectedTxLogVisible = true
+    selectedTxLogKey = String(txKey || "")
+
+    var ri = Math.floor(Number(rowIndex))
+    if (!isFinite(ri)) ri = -1
+
+    selectedTxLogIndex = ri
+    selectedTxLogLat = la
+    selectedTxLogLon = lo
+    selectedTxLogRms = rr
+    selectedTxLogUpdatedMs = ms
+
+    console.log("[MapViewer] mark TX by LAT/LON only",
+                "row=", selectedTxLogIndex,
+                "lat=", la.toFixed(7),
+                "lon=", lo.toFixed(7),
+                "rms=", rr,
+                "updatedMs=", ms)
+
+    if (mapLoader.item && mapLoader.item.map) {
+        var m = mapLoader.item.map
+        selectedCoord = QtPositioning.coordinate(la, lo)
+        m.center = selectedCoord
+
+        if (m.zoomLevel < 14)
+            m.zoomLevel = 14
+    }
+}
+
+function clearSelectedTxLogMark() {
+    selectedTxLogVisible = false
+    selectedTxLogKey = ""
+    selectedTxLogIndex = -1
+}
+
 // ===== TX HISTORY COMMIT WHEN MARK SHOWS =====
 property bool _txMarkWasVisible: false
 
 function commitTxHistoryNow() {
-if (!txVisible) return
-if (!txEstimate || !txEstimate.valid) return
+    if (!txVisible)
+        return
 
-if (txHistoryModel.count === 0) {
-    txHistoryModel.insert(0, {
-        lat: txEstimate.lat,
-        lon: txEstimate.lon,
-        rms: txEstimate.rms,
-        updatedMs: txEstimate.updatedMs
-    })
-} else {
-    const h = txHistoryModel.get(0)
-    const d = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
+    if (!txEstimate || !txEstimate.valid)
+        return
 
-    if (d <= txSnapDistanceM) {
-        txHistoryModel.set(0, {
-            lat: h.lat,
-            lon: h.lon,
-            rms: txEstimate.rms,
-            updatedMs: txEstimate.updatedMs
-        })
-    } else {
-        txHistoryModel.insert(0, {
-            lat: txEstimate.lat,
-            lon: txEstimate.lon,
-            rms: txEstimate.rms,
-            updatedMs: txEstimate.updatedMs
-        })
-    }
-}
-
-while (txHistoryModel.count > txHistoryMax)
-    txHistoryModel.remove(txHistoryModel.count - 1)
+    pushTxHistoryDedup(
+        txEstimate.lat,
+        txEstimate.lon,
+        txEstimate.rms,
+        txEstimate.updatedMs
+    )
 }
 
 // =====================================================================
@@ -967,10 +1542,38 @@ while (txHistoryModel.count > txHistoryMax)
 property bool txVisible: true
 property var  txEstimate: ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
 property var  txCandidate: ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+function resetTxCandidateOnly() {
+    txCandidate = ({
+        valid: false,
+        lat: 0,
+        lon: 0,
+        rms: 0,
+        count: 0,
+        updatedMs: 0,
+        firstSeenMs: 0
+    })
 
+    txEstimate = ({
+        valid: false,
+        lat: 0,
+        lon: 0,
+        rms: 0,
+        count: 0,
+        updatedMs: 0
+    })
+}
 property int  txStableHoldMs: 2000   // ✅ รับจาก C++
 
-property int  txHistoryMax: 100
+// ✅ PERF: limit TX history and merge near/same locations
+// TX Monitor + map trail both use this model, so dedupe here fixes both.
+property int  txHistoryMax: 30
+property real txHistoryMergeDistanceM: 30
+
+// ✅ PERF: disable endless TX marker pulse by default.
+// Set true if you want animated pulse again.
+property bool txMarkerPulseEnabled: false
+property int  txMarkerRepaintIntervalMs: 250
+
 ListModel { id: txHistoryModel }
 
 property real intersectionMaxResidualM: 250   // ✅ รับจาก C++
@@ -990,6 +1593,79 @@ const a = Math.sin(dP/2)*Math.sin(dP/2) +
           Math.cos(p1)*Math.cos(p2) * Math.sin(dL/2)*Math.sin(dL/2)
 const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
 return R * c
+}
+
+function _txHistoryFindNearIndex(lat, lon, mergeM) {
+    var la = Number(lat)
+    var lo = Number(lon)
+    var mm = Number(mergeM)
+
+    if (!isFinite(la) || !isFinite(lo))
+        return -1
+
+    if (!isFinite(mm) || mm <= 0)
+        mm = 30
+
+    for (var i = 0; i < txHistoryModel.count; ++i) {
+        var h = txHistoryModel.get(i)
+        var d = _haversineMeters(la, lo, Number(h.lat), Number(h.lon))
+
+        if (isFinite(d) && d <= mm)
+            return i
+    }
+
+    return -1
+}
+
+function pushTxHistoryDedup(lat, lon, rms, updatedMs) {
+    var la = Number(lat)
+    var lo = Number(lon)
+    var rr = Number(rms || 0)
+    var ms = Number(updatedMs || Date.now())
+
+    if (!isFinite(la) || !isFinite(lo))
+        return
+
+    if (!isFinite(rr))
+        rr = 0
+
+    if (!isFinite(ms) || ms <= 0)
+        ms = Date.now()
+
+    var nearIdx = _txHistoryFindNearIndex(la, lo, txHistoryMergeDistanceM)
+
+    if (nearIdx >= 0) {
+        var old = txHistoryModel.get(nearIdx)
+
+        // Keep the first coordinate for stable marker position.
+        // Update only RMS/time so TX Monitor remains latest without adding duplicates.
+        var merged = {
+            lat: Number(old.lat),
+            lon: Number(old.lon),
+            rms: rr,
+            updatedMs: ms
+        }
+
+        txHistoryModel.set(nearIdx, merged)
+
+        // Move near/same TX point to top instead of appending another duplicate row.
+        if (nearIdx > 0) {
+            txHistoryModel.remove(nearIdx)
+            txHistoryModel.insert(0, merged)
+        }
+
+        return
+    }
+
+    txHistoryModel.insert(0, {
+        lat: la,
+        lon: lo,
+        rms: rr,
+        updatedMs: ms
+    })
+
+    while (txHistoryModel.count > txHistoryMax)
+        txHistoryModel.remove(txHistoryModel.count - 1)
 }
 
 function _latLonToXY_m(lat, lon, refLat, refLon) {
@@ -1077,238 +1753,626 @@ if (isFinite(s) && s > 0) return s
 return 15000
 }
 
-function rebuildTxEstimateKrakenLike() {
-if (!txVisible) {
-    txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-    txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-    txHistoryModel.clear()
-    return
+function _angleBetweenUnitsDeg(u1, u2) {
+    var dot = Number(u1.ux) * Number(u2.ux) + Number(u1.uy) * Number(u2.uy)
+    if (!isFinite(dot))
+        return 0
+
+    dot = Math.max(-1, Math.min(1, dot))
+
+    var a = Math.acos(Math.abs(dot)) * 180.0 / Math.PI
+    if (!isFinite(a))
+        a = 0
+
+    return a
 }
 
-let items = []
-for (let i=0; i<doaPinsModel.count; ++i) {
-    const it = doaPinsModel.get(i)
-    if (!mapviewer.isDoaActive(it)) continue
+function _lineResidualAtPoint(p, u, x, y) {
+    var dx = x - p.x
+    var dy = y - p.y
 
-    // ✅ NEW: hide from TX calc if switch OFF
-    if (hudBox && hudBox.isKeyHidden(it.key)) continue
+    var t = dx * u.ux + dy * u.uy
+    var perp = Math.abs(dx * (-u.uy) + dy * u.ux)
 
-    const lat = Number(it.lat), lon = Number(it.lon)
-    let deg = Number(it.doaDeg)
-    if (!isFinite(lat) || !isFinite(lon) || !isFinite(deg)) continue
-    deg = mapviewer.wrap360(deg)
-
-    items.push({ lat:lat, lon:lon, deg:deg, key:it.key })
-}
-
-if (items.length < 2) {
-    txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-    txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-    return
-}
-
-let refLat=0, refLon=0
-for (let i=0; i<items.length; ++i) { refLat += items[i].lat; refLon += items[i].lon }
-refLat /= items.length; refLon /= items.length
-
-let pts = []
-let uvs = []
-for (let i=0; i<items.length; ++i) {
-    pts.push(_latLonToXY_m(items[i].lat, items[i].lon, refLat, refLon))
-    uvs.push(_bearingToUnitENU(items[i].deg))
-}
-
-const maxLineM = Number(currentMaxDoaLineMeters())
-const maxM = (isFinite(maxLineM) && maxLineM > 0) ? maxLineM : 15000
-
-let x=0, y=0, rms=0
-
-if (items.length === 2) {
-    const r = _intersect2Lines(pts[0], uvs[0], pts[1], uvs[1])
-    if (!r.ok) {
-        txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-        txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-        return
+    return {
+        t: t,
+        perp: perp
     }
+}
 
-    if (!(r.t >= 0 && r.t <= maxM && r.s >= 0 && r.s <= maxM)) {
-        txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-        txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-        return
-    }
+function _scoreCenterByRadius(points, units, x, y, maxM, residualM, snapM) {
+    var n = Math.min(points.length, units.length)
 
-    x = r.x; y = r.y; rms = 0
-} else {
-    const best = _bestPointForLines(pts, uvs)
-    if (!best.ok || best.rms > mapviewer.intersectionMaxResidualM) {
-        txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-        txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-        return
-    }
+    var inlierCount = 0
+    var sum2 = 0
+    var maxPerp = 0
+    var sumPerp = 0
+    var forwardOk = 0
 
-    for (let i=0; i<pts.length; ++i) {
-        const dx = best.x - pts[i].x
-        const dy = best.y - pts[i].y
-        const t  = dx*uvs[i].ux + dy*uvs[i].uy
-        if (!(t >= 0 && t <= maxM)) {
-            txEstimate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-            txCandidate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
-            return
+    for (var i = 0; i < n; ++i) {
+        var r = _lineResidualAtPoint(points[i], units[i], x, y)
+
+        var perp = Number(r.perp)
+        var t = Number(r.t)
+
+        if (!isFinite(perp))
+            perp = 999999999
+
+        if (!isFinite(t))
+            t = -999999999
+
+        var inForwardRange = (t >= -snapM && t <= maxM + snapM)
+        var inRadius = (perp <= residualM)
+
+        if (inForwardRange)
+            forwardOk++
+
+        if (inForwardRange && inRadius) {
+            inlierCount++
+            sum2 += perp * perp
+            sumPerp += perp
+
+            if (perp > maxPerp)
+                maxPerp = perp
         }
     }
 
-    x = best.x; y = best.y; rms = best.rms
+    var rms = inlierCount > 0 ? Math.sqrt(sum2 / inlierCount) : 999999999
+    var avg = inlierCount > 0 ? sumPerp / inlierCount : 999999999
+
+    var missing = n - inlierCount
+
+    return {
+        ok: inlierCount >= 2,
+        inlierCount: inlierCount,
+        forwardOk: forwardOk,
+        rms: rms,
+        avg: avg,
+        maxPerp: maxPerp,
+        missing: missing,
+
+        // score ต่ำ = ดีกว่า
+        // ให้ความสำคัญกับจำนวนเส้นที่อยู่ใน radius ก่อน
+        score: (missing * residualM * 10.0) + (rms * 0.55) + (avg * 0.30) + (maxPerp * 0.15)
+    }
 }
 
-const ll = _xyToLatLon(x, y, refLat, refLon)
+function _bestIntersectionCenterWithinRadius(points, units, maxM) {
+    var n = Math.min(points.length, units.length)
 
-let cand = ({
-    valid: true,
-    lat: ll.lat,
-    lon: ll.lon,
-    rms: rms,
-    count: items.length,
-    updatedMs: Date.now(),
-    firstSeenMs: 0
-})
+    if (n < 2) {
+        return {
+            ok: false,
+            x: 0,
+            y: 0,
+            rms: 0,
+            pairCount: 0,
+            inlierCount: 0
+        }
+    }
 
-if (txCandidate.valid) {
-    const dSame = _haversineMeters(cand.lat, cand.lon, txCandidate.lat, txCandidate.lon)
-    if (dSame <= mapviewer.txSnapDistanceM) {
-        cand.lat = txCandidate.lat
-        cand.lon = txCandidate.lon
-        cand.firstSeenMs = Number(txCandidate.firstSeenMs || txCandidate.updatedMs || Date.now())
+    maxM = Number(maxM)
+    if (!isFinite(maxM) || maxM <= 0)
+        maxM = 15000
+
+    var residualM = Number(mapviewer.intersectionMaxResidualM)
+    if (!isFinite(residualM) || residualM <= 0)
+        residualM = 250
+
+    var snapM = Number(mapviewer.txSnapDistanceM)
+    if (!isFinite(snapM) || snapM <= 0)
+        snapM = 250
+
+    // อย่างน้อยต้องมี radius ใช้งานจริง ไม่เล็กเกินจน reject ตลอด
+    residualM = Math.max(50, residualM)
+    snapM = Math.max(50, snapM)
+
+    var minAngleDeg = 8.0
+    var candidates = []
+
+    // 1) เอาจุดตัดทุกคู่มาเป็น candidate
+    for (var i = 0; i < n; ++i) {
+        for (var j = i + 1; j < n; ++j) {
+            var ang = _angleBetweenUnitsDeg(units[i], units[j])
+            if (ang < minAngleDeg)
+                continue
+
+            var r = _intersect2Lines(points[i], units[i], points[j], units[j])
+            if (!r.ok)
+                continue
+
+            // จุดตัดต้องอยู่ด้านหน้าของเส้น และอยู่ในความยาว line โดยยอม snap radius
+            if (!(r.t >= -snapM && r.t <= maxM + snapM &&
+                  r.s >= -snapM && r.s <= maxM + snapM)) {
+                continue
+            }
+
+            var sc = _scoreCenterByRadius(points, units, r.x, r.y, maxM, residualM, snapM)
+
+            if (sc.ok) {
+                candidates.push({
+                    x: r.x,
+                    y: r.y,
+                    score: sc.score,
+                    rms: sc.rms,
+                    inlierCount: sc.inlierCount,
+                    forwardOk: sc.forwardOk,
+                    pairCount: 1
+                })
+            }
+        }
+    }
+
+    // 2) เพิ่ม candidate จาก least-squares ทุกเส้น
+    // ตัวนี้คือ “ตรงกลางระหว่างเส้น” ตามความน่าจะเป็น
+    var lsAll = _bestPointForLines(points, units)
+    if (lsAll.ok) {
+        var scAll = _scoreCenterByRadius(points, units, lsAll.x, lsAll.y, maxM, residualM, snapM)
+
+        if (scAll.ok) {
+            candidates.push({
+                x: lsAll.x,
+                y: lsAll.y,
+                score: scAll.score,
+                rms: scAll.rms,
+                inlierCount: scAll.inlierCount,
+                forwardOk: scAll.forwardOk,
+                pairCount: n
+            })
+        }
+    }
+
+    if (candidates.length <= 0) {
+        return {
+            ok: false,
+            x: 0,
+            y: 0,
+            rms: 0,
+            pairCount: 0,
+            inlierCount: 0
+        }
+    }
+
+    // 3) เลือก candidate ที่มีจำนวนเส้นใน radius มากที่สุดก่อน
+    candidates.sort(function(a, b) {
+        if (a.inlierCount !== b.inlierCount)
+            return b.inlierCount - a.inlierCount
+
+        if (a.forwardOk !== b.forwardOk)
+            return b.forwardOk - a.forwardOk
+
+        return a.score - b.score
+    })
+
+    var best = candidates[0]
+
+    // 4) สำหรับ 3 เส้นขึ้นไป ต้องพยายามให้จุดอยู่ใน radius ของอย่างน้อย 3 เส้น
+    // ถ้ามีแค่ 3 เส้น ก็คือควรผ่านทั้ง 3 เส้น
+    var requiredInliers = Math.min(3, n)
+
+    if (best.inlierCount < requiredInliers) {
+        return {
+            ok: false,
+            x: best.x,
+            y: best.y,
+            rms: best.rms,
+            pairCount: best.pairCount,
+            inlierCount: best.inlierCount
+        }
+    }
+
+    // 5) refine: ใช้เฉพาะเส้นที่อยู่ใน radius มาคำนวณ least-squares ใหม่
+    // เพื่อให้จุดอยู่ “กลางระหว่างเส้น” ไม่ใช่ล็อกอยู่ที่จุดตัดของคู่ใดคู่หนึ่ง
+    var inPts = []
+    var inUnits = []
+
+    for (var k = 0; k < n; ++k) {
+        var rr = _lineResidualAtPoint(points[k], units[k], best.x, best.y)
+
+        if (rr.t >= -snapM &&
+            rr.t <= maxM + snapM &&
+            rr.perp <= residualM) {
+            inPts.push(points[k])
+            inUnits.push(units[k])
+        }
+    }
+
+    if (inPts.length >= 2) {
+        var refined = _bestPointForLines(inPts, inUnits)
+
+        if (refined.ok) {
+            var scRef = _scoreCenterByRadius(points, units,
+                                             refined.x, refined.y,
+                                             maxM, residualM, snapM)
+
+            // ใช้ refined เฉพาะถ้ายังอยู่ใน radius ตามจำนวนที่ต้องการ
+            if (scRef.ok && scRef.inlierCount >= requiredInliers) {
+                best.x = refined.x
+                best.y = refined.y
+                best.rms = scRef.rms
+                best.inlierCount = scRef.inlierCount
+                best.forwardOk = scRef.forwardOk
+                best.score = scRef.score
+            }
+        }
+    }
+
+    // 6) final validation: ต้องอยู่ใน radius จริง
+    var finalScore = _scoreCenterByRadius(points, units,
+                                          best.x, best.y,
+                                          maxM, residualM, snapM)
+
+    if (!finalScore.ok || finalScore.inlierCount < requiredInliers) {
+        return {
+            ok: false,
+            x: best.x,
+            y: best.y,
+            rms: finalScore.rms,
+            pairCount: best.pairCount,
+            inlierCount: finalScore.inlierCount
+        }
+    }
+
+    return {
+        ok: true,
+        x: best.x,
+        y: best.y,
+        rms: finalScore.rms,
+        pairCount: best.pairCount,
+        inlierCount: finalScore.inlierCount
+    }
+}
+
+function _reduceTxSourceItems(items, maxCount) {
+    if (!items)
+        return []
+
+    maxCount = Math.floor(Number(maxCount))
+    if (!isFinite(maxCount) || maxCount < 2)
+        maxCount = 24
+
+    if (items.length <= maxCount)
+        return items
+
+    var realtime = []
+    var saved = []
+
+    for (var i = 0; i < items.length; ++i) {
+        if (items[i].source === "realtime")
+            realtime.push(items[i])
+        else
+            saved.push(items[i])
+    }
+
+    var out = []
+
+    // เก็บ realtime ก่อน เพราะเป็นข้อมูลสด
+    for (var r = 0; r < realtime.length && out.length < maxCount; ++r)
+        out.push(realtime[r])
+
+    var remain = maxCount - out.length
+    if (remain <= 0)
+        return out
+
+    if (saved.length <= remain) {
+        for (var s0 = 0; s0 < saved.length; ++s0)
+            out.push(saved[s0])
+        return out
+    }
+
+    // sample ให้กระจายจาก saved log ทั้งชุด ไม่เอาแค่ต้น/ท้าย
+    var step = saved.length / remain
+    for (var s = 0; s < remain; ++s) {
+        var idx = Math.floor(s * step)
+        if (idx < 0) idx = 0
+        if (idx >= saved.length) idx = saved.length - 1
+        out.push(saved[idx])
+    }
+
+    console.log("[TX] reduce sources", items.length, "=>", out.length)
+
+    return out
+}
+
+function rebuildTxEstimateKrakenLike() {
+    if (!txVisible) {
+        txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
+        txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0, firstSeenMs:0 })
+        txHistoryModel.clear()
+        return
+    }
+
+    var items = []
+
+    // ===== 1) Realtime DOA เดิม =====
+    for (var i = 0; i < doaPinsModel.count; ++i) {
+        var it = doaPinsModel.get(i)
+
+        if (!mapviewer.isDoaActive(it))
+            continue
+
+        if (hudBox && hudBox.isKeyHidden(it.key))
+            continue
+
+        var lat = Number(it.lat)
+        var lon = Number(it.lon)
+        var deg = Number(it.doaDeg)
+
+        if (!isFinite(lat) || !isFinite(lon) || !isFinite(deg))
+            continue
+
+        items.push({
+            lat: lat,
+            lon: lon,
+            deg: mapviewer.wrap360(deg),
+            key: String(it.key || ("rt-" + i)),
+            source: "realtime"
+        })
+    }
+
+    // ===== 2) DoaLog จาก database = DOA source อีกชุดหนึ่ง =====
+    if (mapviewer.savedDoaLogVisible) {
+        for (var s = 0; s < savedDoaLogModel.count; ++s) {
+            var lg = savedDoaLogModel.get(s)
+
+            var slat = Number(lg.lat)
+            var slon = Number(lg.lon)
+            var sdeg = Number(lg.doa)
+
+            if (!isFinite(slat) || !isFinite(slon) || !isFinite(sdeg))
+                continue
+
+            items.push({
+                lat: slat,
+                lon: slon,
+                deg: mapviewer.wrap360(sdeg),
+                key: String(lg.key || ("saved-" + s)),
+                source: "saved"
+            })
+        }
+    }
+
+    if (items.length > mapviewer.txEstimateMaxSources) {
+        items = mapviewer._reduceTxSourceItems(items, mapviewer.txEstimateMaxSources)
+    }
+
+    if (items.length < 2) {
+        txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:items.length, updatedMs:0 })
+        txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:items.length, updatedMs:0, firstSeenMs:0 })
+        return
+    }
+
+    var refLat = 0
+    var refLon = 0
+
+    for (var a = 0; a < items.length; ++a) {
+        refLat += items[a].lat
+        refLon += items[a].lon
+    }
+
+    refLat /= items.length
+    refLon /= items.length
+
+    var pts = []
+    var uvs = []
+
+    for (var b = 0; b < items.length; ++b) {
+        pts.push(_latLonToXY_m(items[b].lat, items[b].lon, refLat, refLon))
+        uvs.push(_bearingToUnitENU(items[b].deg))
+    }
+
+    var maxLineM = Number(currentMaxDoaLineMeters())
+    var maxM = (isFinite(maxLineM) && maxLineM > 0) ? maxLineM : 15000
+
+    // ✅ จุดสำคัญ: หา pairwise intersections ก่อน แล้วเลือก cluster ที่ดีที่สุด
+    var best = _bestIntersectionCenterWithinRadius(pts, uvs, maxM)
+
+    if (!best.ok) {
+        console.log("[TX] no center within radius",
+                    "items=", items.length,
+                    "inlier=", best.inlierCount,
+                    "rms=", best.rms,
+                    "residualM=", mapviewer.intersectionMaxResidualM,
+                    "snapM=", mapviewer.txSnapDistanceM,
+                    "maxM=", maxM)
+
+        txEstimate   = ({ valid:false, lat:0, lon:0, rms:0, count:items.length, updatedMs:0 })
+        txCandidate  = ({ valid:false, lat:0, lon:0, rms:0, count:items.length, updatedMs:0, firstSeenMs:0 })
+        return
+    }
+
+    console.log("[TX] center within radius ok",
+                "items=", items.length,
+                "inlier=", best.inlierCount,
+                "rms=", best.rms.toFixed(1),
+                "residualM=", mapviewer.intersectionMaxResidualM,
+                "snapM=", mapviewer.txSnapDistanceM)
+
+    var ll = _xyToLatLon(best.x, best.y, refLat, refLon)
+
+    var cand = ({
+        valid: true,
+        lat: ll.lat,
+        lon: ll.lon,
+        rms: best.rms,
+        count: items.length,
+        pairCount: best.pairCount,
+        updatedMs: Date.now(),
+        firstSeenMs: 0
+    })
+
+    if (txCandidate.valid) {
+        var dSame = _haversineMeters(cand.lat, cand.lon, txCandidate.lat, txCandidate.lon)
+
+        if (dSame <= mapviewer.txSnapDistanceM) {
+            cand.lat = txCandidate.lat
+            cand.lon = txCandidate.lon
+            cand.firstSeenMs = Number(txCandidate.firstSeenMs || txCandidate.updatedMs || Date.now())
+        } else {
+            cand.firstSeenMs = Date.now()
+        }
     } else {
         cand.firstSeenMs = Date.now()
     }
-} else {
-    cand.firstSeenMs = Date.now()
-}
 
-txCandidate = cand
+    txCandidate = cand
 
-const ageMs = Date.now() - Number(txCandidate.firstSeenMs || 0)
-const stableOk = isFinite(ageMs) && ageMs >= txStableHoldMs
+    var ageMs = Date.now() - Number(txCandidate.firstSeenMs || 0)
+    var stableOk = isFinite(ageMs) && ageMs >= txStableHoldMs
 
-if (!stableOk) {
-    txEstimate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
-    return
-}
-
-txEstimate = ({
-    valid: true,
-    lat: txCandidate.lat,
-    lon: txCandidate.lon,
-    rms: txCandidate.rms,
-    count: txCandidate.count,
-    updatedMs: Date.now()
-})
-
-if (txHistoryModel.count === 0) {
-    txHistoryModel.insert(0, {
-        lat: txEstimate.lat,
-        lon: txEstimate.lon,
-        rms: txEstimate.rms,
-        updatedMs: txEstimate.updatedMs
-    })
-} else {
-    const h = txHistoryModel.get(0)
-    const d2 = _haversineMeters(txEstimate.lat, txEstimate.lon, h.lat, h.lon)
-
-    if (d2 <= mapviewer.txSnapDistanceM) {
-        txHistoryModel.set(0, {
-            lat: h.lat,
-            lon: h.lon,
-            rms: txEstimate.rms,
-            updatedMs: txEstimate.updatedMs
+    if (!stableOk) {
+        txEstimate = ({
+            valid:false,
+            lat:0,
+            lon:0,
+            rms:txCandidate.rms,
+            count:txCandidate.count,
+            updatedMs:0
         })
-    } else {
-        txHistoryModel.insert(0, {
-            lat: txEstimate.lat,
-            lon: txEstimate.lon,
-            rms: txEstimate.rms,
-            updatedMs: txEstimate.updatedMs
-        })
+        return
     }
-}
 
-while (txHistoryModel.count > txHistoryMax)
-    txHistoryModel.remove(txHistoryModel.count - 1)
-}
+    txEstimate = ({
+        valid: true,
+        lat: txCandidate.lat,
+        lon: txCandidate.lon,
+        rms: txCandidate.rms,
+        count: txCandidate.count,
+        updatedMs: Date.now()
+    })
 
+    pushTxHistoryDedup(
+        txEstimate.lat,
+        txEstimate.lon,
+        txEstimate.rms,
+        txEstimate.updatedMs
+    )
+}
 // =====================================================================
 // MAX DOA monitor (for logger only) - HUD reads from selectedKey directly
 // =====================================================================
+function clearDoaHistoryPendingForKey(key) {
+    key = String(key || "")
+
+    if (!key.length)
+        return
+
+    if (_maxDoaPendingKey === key) {
+        _maxDoaPendingKey = ""
+        _maxDoaPendingDoa = NaN
+        _maxDoaPendingConf = NaN
+        _maxDoaPendingHeading = NaN
+        _maxDoaPendingLat = NaN
+        _maxDoaPendingLon = NaN
+        _maxDoaPendingSinceMs = 0
+    }
+
+    if (_maxDoaLastSentKey === key) {
+        _maxDoaLastSentKey = ""
+        _maxDoaLastSentDoa = NaN
+        _maxDoaLastSentAtMs = 0
+    }
+}
+
 function updateMaxDoaMonitor() {
-var best = null
-var bestConf = -1
+    var best = null
+    var bestConf = -1
 
-for (var i = 0; i < doaPinsModel.count; ++i) {
-    var it = doaPinsModel.get(i)
-    if (!mapviewer.isDoaActive(it)) continue
+    for (var i = 0; i < doaPinsModel.count; ++i) {
+        var it = doaPinsModel.get(i)
 
-    var conf = Number(it.confidence || 0)
-    if (!isFinite(conf)) conf = 0
-    if (conf > bestConf) { bestConf = conf; best = it }
-}
+        if (!mapviewer.isDoaActive(it))
+            continue
 
-if (!best) {
-    _maxDoaPendingKey = ""
-    _maxDoaPendingSinceMs = 0
-    return
-}
+        // ✅ ถ้า showSwitch ปิดอยู่ ห้ามเอาไปเป็น candidate
+        // และห้ามบันทึกเข้า DoaHistoryViewer
+        if (hudBox && hudBox.isKeyHidden(it.key))
+            continue
 
-var keyNow = String(best.key || "")
-var doaNow = Number(best.doaDeg || 0)
-var confNow = Number(best.confidence || 0)
-var headingNow = Number(best.headingDeg || 0)
-var latNow = Number(best.lat || 0)
-var lonNow = Number(best.lon || 0)
+        var conf = Number(it.confidence || 0)
 
-if (!keyNow.length || !isFinite(doaNow) || !isFinite(confNow)) return
+        if (!isFinite(conf))
+            conf = 0
 
-var changed = false
+        if (conf > bestConf) {
+            bestConf = conf
+            best = it
+        }
+    }
 
-if (_maxDoaPendingKey !== keyNow) {
-    changed = true
-} else {
-    if (!_sameDeg(_maxDoaPendingDoa, doaNow, maxDoaChangeEpsDeg)) changed = true
-}
+    if (!best) {
+        _maxDoaPendingKey = ""
+        _maxDoaPendingSinceMs = 0
+        return
+    }
 
-if (changed) {
-    _maxDoaPendingKey = keyNow
-    _maxDoaPendingDoa = doaNow
-    _maxDoaPendingConf = confNow
-    _maxDoaPendingHeading = headingNow
-    _maxDoaPendingLat = latNow
-    _maxDoaPendingLon = lonNow
-    _maxDoaPendingSinceMs = Date.now()
-    return
-}
+    var keyNow = String(best.key || "")
 
-var ageMs = Date.now() - Number(_maxDoaPendingSinceMs || 0)
-if (!isFinite(ageMs) || ageMs < maxDoaDelayMs) {
-    return
-}
+    // ✅ safety อีกรอบ
+    if (hudBox && hudBox.isKeyHidden(keyNow)) {
+        mapviewer.clearDoaHistoryPendingForKey(keyNow)
+        return
+    }
 
-if (_maxDoaLastSentKey === _maxDoaPendingKey && _sameDeg(_maxDoaLastSentDoa, _maxDoaPendingDoa, maxDoaChangeEpsDeg)) {
-    return
-}
+    var doaNow = Number(best.doaDeg || 0)
+    var confNow = Number(best.confidence || 0)
+    var headingNow = Number(best.headingDeg || 0)
+    var latNow = Number(best.lat || 0)
+    var lonNow = Number(best.lon || 0)
 
-if (viewerHud && viewerHud.logger) {
-    viewerHud.logger.feedMaxDoaCandidate({
-        key: String(_maxDoaPendingKey || ""),
-        doa: Number(_maxDoaPendingDoa || 0),
-        confidence: Number(_maxDoaPendingConf || 0),
-        heading: Number(_maxDoaPendingHeading || 0),
-        lat: Number(_maxDoaPendingLat || 0),
-        lon: Number(_maxDoaPendingLon || 0)
-    })
-}
+    if (!keyNow.length || !isFinite(doaNow) || !isFinite(confNow))
+        return
 
-_maxDoaLastSentKey = _maxDoaPendingKey
-_maxDoaLastSentDoa = _maxDoaPendingDoa
-_maxDoaLastSentAtMs = Date.now()
+    var changed = false
+
+    if (_maxDoaPendingKey !== keyNow) {
+        changed = true
+    } else {
+        if (!_sameDeg(_maxDoaPendingDoa, doaNow, maxDoaChangeEpsDeg))
+            changed = true
+    }
+
+    if (changed) {
+        _maxDoaPendingKey = keyNow
+        _maxDoaPendingDoa = doaNow
+        _maxDoaPendingConf = confNow
+        _maxDoaPendingHeading = headingNow
+        _maxDoaPendingLat = latNow
+        _maxDoaPendingLon = lonNow
+        _maxDoaPendingSinceMs = Date.now()
+        return
+    }
+
+    var ageMs = Date.now() - Number(_maxDoaPendingSinceMs || 0)
+
+    if (!isFinite(ageMs) || ageMs < maxDoaDelayMs)
+        return
+
+    if (_maxDoaLastSentKey === _maxDoaPendingKey &&
+        _sameDeg(_maxDoaLastSentDoa, _maxDoaPendingDoa, maxDoaChangeEpsDeg)) {
+        return
+    }
+
+    // ✅ ก่อน feed เข้า DoaHistoryViewer เช็ค hidden อีกครั้ง
+    if (hudBox && hudBox.isKeyHidden(_maxDoaPendingKey)) {
+        mapviewer.clearDoaHistoryPendingForKey(_maxDoaPendingKey)
+        return
+    }
+
+    if (viewerHud && viewerHud.logger) {
+        viewerHud.logger.feedMaxDoaCandidate({
+            key: String(_maxDoaPendingKey || ""),
+            doa: Number(_maxDoaPendingDoa || 0),
+            confidence: Number(_maxDoaPendingConf || 0),
+            heading: Number(_maxDoaPendingHeading || 0),
+            lat: Number(_maxDoaPendingLat || 0),
+            lon: Number(_maxDoaPendingLon || 0)
+        })
+    }
+
+    _maxDoaLastSentKey = _maxDoaPendingKey
+    _maxDoaLastSentDoa = _maxDoaPendingDoa
+    _maxDoaLastSentAtMs = Date.now()
 }
 
 // ================== HUD: COMPASS + MAX DOA ==================
@@ -1336,12 +2400,33 @@ onTriggered: {
     mapviewer.doaNowMs = Date.now()
     mapviewer.doaUpdateTick++
 
-    mapviewer.rebuildTxEstimateKrakenLike()
-    mapviewer.updateMaxDoaMonitor()
+    if (!mapviewer.savedDoaBulkLoading) {
+        var nowMs = Date.now()
+
+        // ✅ PERF: do not rebuild TX estimate every 250ms.
+        // Realtime DOA and saved log both respect txEstimateMinIntervalMs.
+        if ((nowMs - mapviewer._lastTxEstimateRebuildMs) >= mapviewer.txEstimateMinIntervalMs) {
+            if (doaPinsModel.count > 0 || savedDoaLogModel.count > 0) {
+                mapviewer.rebuildTxEstimateKrakenLike()
+                mapviewer._lastTxEstimateRebuildMs = nowMs
+            }
+        }
+
+        mapviewer.updateMaxDoaMonitor()
+    }
 
     if (mapLoader.item) {
-        if (mapLoader.item.headingLineCanvas) mapLoader.item.headingLineCanvas.safeRequestPaint()
-        if (mapLoader.item.maxDoaLineCanvas)  mapLoader.item.maxDoaLineCanvas.safeRequestPaint()
+        if (mapLoader.item.headingLineCanvas)
+            mapLoader.item.headingLineCanvas.safeRequestPaint()
+
+        if (mapLoader.item.maxDoaLineCanvas)
+            mapLoader.item.maxDoaLineCanvas.safeRequestPaint()
+
+        // ✅ saved DOA log เป็นข้อมูลนิ่ง ไม่ repaint ทุก 250ms
+        // ถ้า repaint 200 เส้นทุก tick จะทำให้ UI หน่วง/ค้าง
+        // จะ redraw เฉพาะตอนโหลดข้อมูล, zoom, pan, bearing หรือ lineLength เปลี่ยนเท่านั้น
+        // if (!mapviewer.savedDoaBulkLoading && mapLoader.item.savedDoaLogLineCanvas)
+        //     mapLoader.item.savedDoaLogLineCanvas.safeRequestPaint()
     }
 }
 }
@@ -1387,7 +2472,7 @@ onTriggered: {
         }
     }
 
-    if (!mapviewer.hasAnyActiveMaxDoa()) {
+    if (!mapviewer.hasAnyActiveMaxDoa() && savedDoaLogModel.count <= 0) {
         mapviewer.txEstimate = ({ valid:false, lat:0, lon:0, rms:0, count:0, updatedMs:0 })
     }
 }
@@ -1415,6 +2500,17 @@ anchors.rightMargin: 30
 txModel: txHistoryModel
 rfCache: rfcache
 krakenmapval: Krakenmapval
+
+// ✅ TX PANEL click -> mark selected TX history point on map
+onTxLogClicked: function(txKey, rowIndex, lat, lon, rms, updatedMs) {
+    viewerHud.selectedTxLogKey = txKey
+    mapviewer.markTxLogFromPanel(txKey, rowIndex, lat, lon, rms, updatedMs)
+}
+
+// ✅ MARK OFF / CLEAR / click same TX row again -> clear marker on map
+onTxLogClearRequested: {
+    mapviewer.clearSelectedTxLogMark()
+}
 }
 
 onUseOfflineStyleChanged: {
@@ -1468,6 +2564,10 @@ Connections {
     target: Krakenmapval
     ignoreUnknownSignals: true
 
+    function onShowDoaLogOnMapJson(jsonText) {
+        mapviewer.showSavedDoaLogJson(jsonText)
+    }
+
     // ✅ 1 signal updates BOTH maxDoaDelayMs + txStableHoldMs
     function onUpdateMaxDoaDelayMsFromServer(ms) {
         var md = mapviewer._toNumberClean(ms, mapviewer.maxDoaDelayMs)
@@ -1491,17 +2591,17 @@ Connections {
         var sd = mapviewer._toNumberClean(meters, mapviewer.txSnapDistanceM)
         sd = Math.max(0, sd)
 
-        // txSnapDistanceM
         if (mapviewer.txSnapDistanceM !== sd) {
             mapviewer.txSnapDistanceM = sd
             uiSettings.savedTxSnapDistanceM = sd
         }
 
-        // intersectionMaxResidualM (use same value)
         if (mapviewer.intersectionMaxResidualM !== sd) {
             mapviewer.intersectionMaxResidualM = sd
             uiSettings.savedIntersectionMaxResidualM = sd
         }
+
+        mapviewer.rebuildTxEstimateKrakenLike()
     }
 
     // (optional) keep compatibility if C++ still emits old combined signals
@@ -1563,7 +2663,8 @@ Item {
 
     property alias headingLineCanvas: headingLineCanvas
     property alias maxDoaLineCanvas:  maxDoaLineCanvas
-
+    property alias savedDoaLogLineCanvas: savedDoaLogLineCanvas
+    property alias savedDoaLogPinDotCanvas: savedDoaLogPinDotCanvas
     Plugin {
         id: mapboxPlugin
         name: "mapboxgl"
@@ -1719,13 +2820,132 @@ Item {
         }
 
         // ================= MULTI PIN GPS =================
+        // ============================================================
+        // SAVED DOA LOG LINE BACKGROUND - ต้องอยู่ก่อน GPS / DOA pin
+        // ============================================================
+        Canvas {
+            id: savedDoaLogLineCanvas
+            anchors.fill: parent
+            z: mapviewer.savedDoaLogLineZ
+            visible: mapviewer.savedDoaLogVisible && savedDoaLogModel.count > 0
+            antialiasing: true
+
+            property bool paintScheduled: false
+
+            function clearCanvas() {
+                savedDoaDrawChunkTimer.stop()
+                mapviewer._savedDoaDrawBusy = false
+                mapviewer._savedDoaDrawIndex = 0
+                mapviewer._savedDoaDrawSegments = []
+
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                requestPaint()
+            }
+
+            function safeRequestPaint() {
+                if (paintScheduled)
+                    return
+
+                paintScheduled = true
+
+                Qt.callLater(function() {
+                    paintScheduled = false
+
+                    // ✅ เปลี่ยนจากวาดทุกเส้นใน onPaint เป็นเตรียม segment แล้ววาดแบบ chunk
+                    mapviewer.restartSavedDoaLineDraw()
+                })
+            }
+
+            function drawNextChunk() {
+                if (!mapviewer._savedDoaDrawBusy) {
+                    savedDoaDrawChunkTimer.stop()
+                    return
+                }
+
+                requestPaint()
+            }
+
+            onPaint: {
+                var ctx = getContext("2d")
+
+                if (!mapviewer._savedDoaDrawBusy) {
+                    if (mapviewer._savedDoaDrawSegments.length <= 0)
+                        ctx.clearRect(0, 0, width, height)
+                    return
+                }
+
+                if (mapviewer._savedDoaDrawIndex <= 0)
+                    ctx.clearRect(0, 0, width, height)
+
+                var start = mapviewer._savedDoaDrawIndex
+                var end = Math.min(start + mapviewer.savedDoaDrawChunkSize,
+                                   mapviewer._savedDoaDrawSegments.length)
+
+                for (var i = start; i < end; ++i) {
+                    var s = mapviewer._savedDoaDrawSegments[i]
+
+                    ctx.save()
+
+                    ctx.beginPath()
+                    ctx.moveTo(s.x1, s.y1)
+                    ctx.lineTo(s.x2, s.y2)
+                    ctx.strokeStyle = "rgba(255,207,76,0.12)"
+                    ctx.lineWidth = 7
+                    ctx.stroke()
+
+                    ctx.beginPath()
+                    ctx.moveTo(s.x1, s.y1)
+                    ctx.lineTo(s.x2, s.y2)
+                    ctx.strokeStyle = "rgba(255,207,76,0.50)"
+                    ctx.lineWidth = 2
+                    ctx.stroke()
+
+                    ctx.restore()
+                }
+
+                mapviewer._savedDoaDrawIndex = end
+
+                if (mapviewer._savedDoaDrawIndex >= mapviewer._savedDoaDrawSegments.length) {
+                    savedDoaDrawChunkTimer.stop()
+                    mapviewer._savedDoaDrawBusy = false
+
+                    console.log("[SavedDOA] draw complete lines:",
+                                mapviewer._savedDoaDrawSegments.length,
+                                "totalModel=", savedDoaLogModel.count)
+                }
+            }
+
+            Connections {
+                target: map
+                function onZoomLevelChanged() { savedDoaLogLineCanvas.safeRequestPaint() }
+                function onCenterChanged()    { savedDoaLogLineCanvas.safeRequestPaint() }
+                function onBearingChanged()   { savedDoaLogLineCanvas.safeRequestPaint() }
+            }
+
+            Connections {
+                target: savedDoaLogModel
+                function onCountChanged() {
+                    // ✅ ตอน bulk load ห้าม repaint/rebuild ทุก append
+                    if (mapviewer.savedDoaBulkLoading)
+                        return
+
+                    savedDoaLogLineCanvas.safeRequestPaint()
+                }
+            }
+
+            Component.onCompleted: safeRequestPaint()
+        }
+
         MapItemView {
             id: gpsPinsView
             model: gpsPinsModel
 
             delegate: MapQuickItem {
                 id: onePin
-                z: (mapviewer.selectedKey === model.key) ? 50 : 10
+                z: (mapviewer.selectedKey === model.key)
+                   ? mapviewer.gpsSelectedPinZ
+                   : mapviewer.gpsPinZ
 
                 // ✅ NEW: hide pin when switch OFF
                 visible: !hudBox.isKeyHidden(model.key)
@@ -1742,6 +2962,7 @@ Item {
 
                     Canvas {
                         id: pinCanvas
+                        z: 10
                         width: 60
                         height: 60
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -1822,6 +3043,7 @@ Item {
 
                     Rectangle {
                         id: nameBg
+                        z: 20
                         anchors.top: pinCanvas.bottom
                         anchors.topMargin: 6
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -1835,6 +3057,7 @@ Item {
 
                         Text {
                             id: nameText
+                            z: 30
                             anchors.centerIn: parent
                             text: (model.name && model.name.length) ? model.name : model.serial
                             font.pixelSize: 10
@@ -1849,6 +3072,7 @@ Item {
                     }
 
                     MouseArea {
+                        z: 50
                         anchors.fill: parent
                         onClicked: {
                             mapviewer.selectedKey = model.key
@@ -1859,8 +3083,187 @@ Item {
                 }
             }
         }
-
         // ============================================================
+        // ============================================================
+        // SAVED DOA LOG PIN DOT CANVAS - สำหรับกรณี pin/label 31-200 จุด
+        // วาดเป็น Canvas จุดเล็กแทน MapQuickItem+Text เพื่อลด UI ค้าง
+        // ============================================================
+        Canvas {
+            id: savedDoaLogPinDotCanvas
+            anchors.fill: parent
+            z: mapviewer.savedDoaLogMarkerZ
+            visible: mapviewer.savedDoaLogVisible
+                     && savedDoaLogMarkerModel.count > mapviewer.savedDoaLogLabelLimit
+                     && savedDoaLogMarkerModel.count > 0
+            antialiasing: true
+
+            property bool paintScheduled: false
+
+            function safeRequestPaint() {
+                if (paintScheduled)
+                    return
+
+                paintScheduled = true
+
+                Qt.callLater(function() {
+                    paintScheduled = false
+                    savedDoaLogPinDotCanvas.requestPaint()
+                })
+            }
+
+            onPaint: {
+                if (!map)
+                    return
+
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+
+                if (!visible)
+                    return
+
+                var total = savedDoaLogMarkerModel.count
+                if (total <= 0)
+                    return
+
+                var maxPins = Number(mapviewer.savedDoaLogPinDotLimit)
+                if (!isFinite(maxPins) || maxPins <= 0)
+                    maxPins = 200
+
+                var drawCount = Math.min(total, maxPins)
+                var step = total / drawCount
+
+                var r = Number(mapviewer.savedDoaLogPinDotRadius)
+                if (!isFinite(r) || r <= 0)
+                    r = 4
+
+                for (var i = 0; i < drawCount; ++i) {
+                    var srcIndex = Math.floor(i * step)
+
+                    if (srcIndex < 0)
+                        srcIndex = 0
+
+                    if (srcIndex >= total)
+                        srcIndex = total - 1
+
+                    var it = savedDoaLogMarkerModel.get(srcIndex)
+
+                    var lat = Number(it.lat)
+                    var lon = Number(it.lon)
+
+                    if (!isFinite(lat) || !isFinite(lon))
+                        continue
+
+                    var p = map.fromCoordinate(QtPositioning.coordinate(lat, lon), false)
+
+                    if (!isFinite(p.x) || !isFinite(p.y))
+                        continue
+
+                    // glow
+                    ctx.beginPath()
+                    ctx.arc(p.x, p.y, r + 3, 0, Math.PI * 2)
+                    ctx.fillStyle = "rgba(255,207,76,0.22)"
+                    ctx.fill()
+
+                    // main dot
+                    ctx.beginPath()
+                    ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+                    ctx.fillStyle = "rgba(255,207,76,0.95)"
+                    ctx.fill()
+
+                    // border
+                    ctx.beginPath()
+                    ctx.arc(p.x, p.y, r, 0, Math.PI * 2)
+                    ctx.strokeStyle = "rgba(17,18,18,0.85)"
+                    ctx.lineWidth = 1
+                    ctx.stroke()
+                }
+            }
+
+            Connections {
+                target: map
+                function onZoomLevelChanged() { savedDoaLogPinDotCanvas.safeRequestPaint() }
+                function onCenterChanged()    { savedDoaLogPinDotCanvas.safeRequestPaint() }
+                function onBearingChanged()   { savedDoaLogPinDotCanvas.safeRequestPaint() }
+            }
+
+            Connections {
+                target: savedDoaLogMarkerModel
+                function onCountChanged() {
+                    if (mapviewer.savedDoaBulkLoading)
+                        return
+
+                    savedDoaLogPinDotCanvas.safeRequestPaint()
+                }
+            }
+
+            Component.onCompleted: safeRequestPaint()
+        }
+
+        // SAVED DOA LOG OVERLAY - independent from realtime DOA
+        // ============================================================
+        MapItemView {
+            id: savedDoaLogMarkerView
+            model: savedDoaLogMarkerModel
+
+            // ✅ ถ้า log เยอะ เช่น 133 จุด ไม่สร้าง label 133 อัน ลดค้าง UI
+            // เส้น DOA ยังแสดงผ่าน Canvas อยู่
+            visible: mapviewer.savedDoaLogVisible
+                     && savedDoaLogMarkerModel.count > 0
+                     && savedDoaLogMarkerModel.count <= mapviewer.savedDoaLogLabelLimit
+
+            delegate: MapQuickItem {
+                z: mapviewer.savedDoaLogMarkerZ
+                coordinate: QtPositioning.coordinate(model.lat, model.lon)
+                anchorPoint.x: savedLogRoot.width / 2
+                anchorPoint.y: 10
+
+                sourceItem: Item {
+                    id: savedLogRoot
+                    width: 190
+                    height: 62
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        width: 18
+                        height: 18
+                        radius: 9
+                        color: "#FFCF4C"
+                        border.color: "#111212"
+                        border.width: 2
+                    }
+
+                    Rectangle {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.top: parent.top
+                        anchors.topMargin: 24
+                        width: Math.min(190, Math.max(96, savedLogText.implicitWidth + 18))
+                        height: 34
+                        radius: 10
+                        color: "#000000"
+                        opacity: 0.78
+                        border.color: "#FFCF4C"
+                        border.width: 1
+
+                        Text {
+                            id: savedLogText
+                            anchors.centerIn: parent
+                            text: String(model.device || "-")
+                                  + "  " + Number(model.doa || 0).toFixed(1) + "°"
+                                  + (Number(model.markerCount || 1) > 1 ? ("  x" + Number(model.markerCount || 1)) : "")
+                            color: "#FFFFFF"
+                            font.pixelSize: 11
+                            font.bold: true
+                            elide: Text.ElideRight
+                            width: parent.width - 14
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+                }
+            }
+        }
+
+// ============================================================
         // DOA OVERLAYS (FULL FRAME only)
         // ============================================================
         MapItemView {
@@ -1870,7 +3273,7 @@ Item {
 
             delegate: MapQuickItem {
                 id: doaOverlayItem
-                z: 0
+                z: mapviewer.mainDoaOverlayZ
 
                 // ✅ NEW: hide overlay when switch OFF
                 visible: mapviewer.isDoaActive(doaPinsModel.get(index))
@@ -2013,6 +3416,7 @@ Item {
         Canvas {
             id: headingLineCanvas
             anchors.fill: parent
+            z: mapviewer.mainHeadingLineZ
             antialiasing: true
             visible: mapviewer.hasAnyActiveMaxDoa()
 
@@ -2087,7 +3491,7 @@ Item {
             id: maxDoaLineCanvas
             anchors.fill: parent
             antialiasing: true
-            z: 9999
+            z: mapviewer.mainMaxDoaLineZ
 
             visible: mapviewer.hasAnyActiveMaxDoa()
             onVisibleChanged: safeRequestPaint()
@@ -2104,7 +3508,13 @@ Item {
                 if (isFinite(m) && m > 0) {
                     uiSettings.savelineLengthMeters = m
                 }
+
                 safeRequestPaint()
+
+                if (mapLoader.item && mapLoader.item.savedDoaLogLineCanvas)
+                    mapLoader.item.savedDoaLogLineCanvas.safeRequestPaint()
+
+                mapviewer.rebuildTxEstimateKrakenLike()
             }
 
             function metersToPixelsAt(coord, meters) {
@@ -2210,11 +3620,14 @@ Item {
             // ✅ receive from C++/backend
             Connections {
                 target: Krakenmapval
+
                 function onUpdateDoaLineMeters(meters) {
                     var m = meters
+
                     if (typeof m === "string") {
                         m = m.replace(/,/g, "").replace(/[^\d.]/g, "")
                     }
+
                     m = Number(m)
 
                     console.log("[SIG] onUpdateDoaLineMeters meters=", meters, "=>", m)
@@ -2223,6 +3636,11 @@ Item {
                         maxDoaLineCanvas.lineLengthMeters = m
                         uiSettings.savelineLengthMeters = m
                         maxDoaLineCanvas.safeRequestPaint()
+
+                        if (mapLoader.item && mapLoader.item.savedDoaLogLineCanvas)
+                            mapLoader.item.savedDoaLogLineCanvas.safeRequestPaint()
+
+                        mapviewer.rebuildTxEstimateKrakenLike()
                     }
                 }
             }
@@ -2242,7 +3660,7 @@ Item {
             visible: (txHistoryModel.count > 0) && mapviewer.txVisible
 
             delegate: MapQuickItem {
-                z: 1500
+                z: mapviewer.txHistoryPointZ
                 coordinate: QtPositioning.coordinate(model.lat, model.lon)
                 anchorPoint.x: 3
                 anchorPoint.y: 3
@@ -2257,9 +3675,139 @@ Item {
             }
         }
 
+        // ============================================================
+        // SELECTED TX LOG MARKER FROM TX PANEL CLICK
+        // ============================================================
+        MapQuickItem {
+            id: selectedTxLogMarker
+            z: mapviewer.selectedTxLogMarkerZ
+            visible: mapviewer.selectedTxLogVisible && mapviewer.txVisible
+
+            // ✅ ใช้ lat/lon ตรง ๆ เท่านั้น ไม่ใช้ MGRS
+            coordinate: QtPositioning.coordinate(Number(mapviewer.selectedTxLogLat),
+                                                 Number(mapviewer.selectedTxLogLon))
+
+            // ✅ จุดจริงของ marker คือกลางวงกากบาท ไม่ใช่กลางกล่อง label
+            anchorPoint.x: selectedTxLogRoot.markX
+            anchorPoint.y: selectedTxLogRoot.markY
+
+            sourceItem: Item {
+                id: selectedTxLogRoot
+                width: 285
+                height: 176
+
+                // ✅ center ของวงกากบาท 74x74 ที่อยู่บนสุด
+                property real markX: width / 2
+                property real markY: 37
+
+                Rectangle {
+                    id: selectedRing
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: parent.top
+                    anchors.topMargin: 0
+                    width: 74
+                    height: 74
+                    radius: 37
+                    color: "transparent"
+                    border.width: 3
+                    border.color: "#00FFAA"
+                    opacity: 0.95
+                }
+
+                Rectangle {
+                    anchors.centerIn: selectedRing
+                    width: 46
+                    height: 2
+                    radius: 1
+                    color: "#00FFAA"
+                }
+
+                Rectangle {
+                    anchors.centerIn: selectedRing
+                    width: 2
+                    height: 46
+                    radius: 1
+                    color: "#00FFAA"
+                }
+
+                Rectangle {
+                    anchors.centerIn: selectedRing
+                    width: 12
+                    height: 12
+                    radius: 6
+                    color: "#FFB300"
+                    border.width: 2
+                    border.color: "#111212"
+                }
+
+                Rectangle {
+                    id: selectedInfoBox
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    anchors.top: selectedRing.bottom
+                    anchors.topMargin: 8
+                    width: parent.width
+                    height: 86
+                    radius: 12
+                    color: "#000000"
+                    opacity: 0.82
+                    border.width: 1
+                    border.color: "#00FFAA"
+
+                    Column {
+                        anchors.fill: parent
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        anchors.topMargin: 7
+                        anchors.bottomMargin: 7
+                        spacing: 4
+
+                        Text {
+                            width: parent.width
+                            text: "TX LOG #" + (mapviewer.selectedTxLogIndex + 1)
+                            color: "#00FFAA"
+                            font.pixelSize: 11
+                            font.bold: true
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: mapviewer.selectedTxLogCoordText()
+                            color: "#FFFFFF"
+                            font.pixelSize: 11
+                            font.bold: true
+                            font.family: "Monospace"
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+
+                        Text {
+                            width: parent.width
+                            text: mapviewer.selectedTxLogInfoText()
+                            color: "#FFCF4C"
+                            font.pixelSize: 10
+                            font.bold: true
+                            font.family: "Monospace"
+                            elide: Text.ElideRight
+                            horizontalAlignment: Text.AlignHCenter
+                        }
+                    }
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    onDoubleClicked: {
+                        mapviewer.clearSelectedTxLogMark()
+                        viewerHud.selectedTxLogKey = ""
+                    }
+                }
+            }
+        }
+
         MapQuickItem {
             id: txMarker
-            z: 9999
+            z: mapviewer.txMarkerZ
             visible: mapviewer.txEstimate.valid && mapviewer.txVisible
             coordinate: QtPositioning.coordinate(mapviewer.txEstimate.lat, mapviewer.txEstimate.lon)
             anchorPoint.x: txRoot.width/2
@@ -2284,7 +3832,7 @@ Item {
                         from: 0.0; to: 1.0
                         duration: 900
                         loops: Animation.Infinite
-                        running: txMarker.visible
+                        running: mapviewer.txMarkerPulseEnabled && txMarker.visible
                     }
 
                     onPaint: {
@@ -2327,44 +3875,58 @@ Item {
                     }
 
                     Timer {
-                        interval: 60
-                        running: txMarker.visible
+                        interval: mapviewer.txMarkerRepaintIntervalMs
+                        running: mapviewer.txMarkerPulseEnabled && txMarker.visible
                         repeat: true
                         onTriggered: txCanvas.requestPaint()
                     }
+
+                    Connections {
+                        target: mapviewer
+                        function onTxEstimateChanged() { txCanvas.requestPaint() }
+                        function onTxMarkerPulseEnabledChanged() { txCanvas.requestPaint() }
+                    }
+
+                    Connections {
+                        target: map
+                        function onZoomLevelChanged() { txCanvas.requestPaint() }
+                        function onBearingChanged() { txCanvas.requestPaint() }
+                    }
+
                     Component.onCompleted: requestPaint()
                 }
                 // ===================== MGRS label =====================
+                // ===================== TX coordinate label =====================
+                // ✅ แสดงตาม TX Panel mode: lat/lon หรือ MGRS
                 Item {
-                    id: mgrsLabel
+                    id: txCoordLabel
                     anchors.horizontalCenter: parent.horizontalCenter
                     anchors.bottom: parent.bottom
                     anchors.bottomMargin: 18
-                    width: Math.max(160, mgrsText.implicitWidth + 18)
-                    height: mgrsText.implicitHeight + 10
+                    width: Math.max(170, txCoordText.implicitWidth + 18)
+                    height: txCoordText.implicitHeight + 10
                     visible: txMarker.visible
-
 
                     Rectangle {
                         anchors.fill: parent
                         radius: 10
                         color: "black"
                         opacity: 0.65
-
                         border.width: 1
-                        border.color: Qt.rgba(1, 1, 1, 0.25)   // ✅ FIX
+                        border.color: Qt.rgba(1, 1, 1, 0.25)
                     }
+
                     Text {
-                        id: mgrsText
+                        id: txCoordText
                         anchors.centerIn: parent
-                        text: "MGRS: " + mapviewer.latLonToMGRS(
+                        text: mapviewer.txCoordDisplayText(
                                   mapviewer.txEstimate.lat,
-                                  mapviewer.txEstimate.lon,
-                                  mapviewer.txMgrsPrecision
+                                  mapviewer.txEstimate.lon
                               )
                         color: "#FFFFFF"
                         font.pixelSize: 12
                         font.bold: true
+                        font.family: "Monospace"
                         style: Text.Outline
                         styleColor: "black"
                     }
@@ -2528,21 +4090,87 @@ Item {
    property string hoverKey:  ""
 
    // ===================== Per-card show/hide pin+doa =====================
-   // hiddenKeys[key] === true  -> hide this device on map (pin + doa)
+   // hiddenKeys[key] === true  -> hide this device on map + stop DoaHistoryViewer logging
    property var hiddenKeys: ({})
 
+   function restoreHiddenKeys() {
+       try {
+           var txt = uiSettings.savedHiddenKeysJson || "{}"
+           var obj = JSON.parse(txt)
+
+           hiddenKeys = obj || ({})
+
+           console.log("[HUD] restore hiddenKeys:", txt)
+       } catch (e) {
+           console.log("[HUD] restore hiddenKeys error:", e)
+
+           hiddenKeys = ({})
+           uiSettings.savedHiddenKeysJson = "{}"
+       }
+   }
+
+   function saveHiddenKeys() {
+       try {
+           uiSettings.savedHiddenKeysJson = JSON.stringify(hiddenKeys || ({}))
+           console.log("[HUD] save hiddenKeys:", uiSettings.savedHiddenKeysJson)
+       } catch (e) {
+           console.log("[HUD] save hiddenKeys error:", e)
+       }
+   }
+
    function isKeyHidden(k) {
-       if (!k || !k.length) return false
-       return !!hiddenKeys[k]
+       if (!k || !k.length)
+           return false
+
+       return hiddenKeys && hiddenKeys[k] === true
+   }
+
+   function refreshHiddenPaint() {
+       mapviewer.doaUpdateTick++
+       mapviewer.compassTick++
+
+       if (mapLoader.item) {
+           if (mapLoader.item.headingLineCanvas)
+               mapLoader.item.headingLineCanvas.safeRequestPaint()
+
+           if (mapLoader.item.maxDoaLineCanvas)
+               mapLoader.item.maxDoaLineCanvas.safeRequestPaint()
+
+           if (mapLoader.item.savedDoaLogLineCanvas)
+               mapLoader.item.savedDoaLogLineCanvas.safeRequestPaint()
+       }
+
+       mapviewer.rebuildTxEstimateKrakenLike()
    }
 
    function setKeyHidden(k, hide) {
-       if (!k || !k.length) return
+       if (!k || !k.length)
+           return
+
        var m = hiddenKeys
-       if (!m) m = {}
-       if (hide) m[k] = true
-       else if (m[k] !== undefined) delete m[k]
-       hiddenKeys = m // reassign to trigger bindings
+
+       if (!m)
+           m = ({})
+
+       if (hide) {
+           m[k] = true
+
+           // ✅ เมื่อปิด switch ให้ล้าง pending/last ของ key นี้
+           // กันไม่ให้ key นี้ถูก feed เข้า DoaHistoryViewer ต่อ
+           mapviewer.clearDoaHistoryPendingForKey(k)
+       } else {
+           if (m[k] !== undefined)
+               delete m[k]
+       }
+
+       // reassign เพื่อ trigger binding ของ showSwitch/card
+       hiddenKeys = m
+
+       // ✅ จำค่าไว้ข้ามหน้า
+       saveHiddenKeys()
+
+       // ✅ repaint map + recompute TX
+       refreshHiddenPaint()
    }
 
    function toggleKeyHidden(k) {
@@ -2550,31 +4178,49 @@ Item {
    }
 
    width: cardW
-   height: Math.min(listMaxH, (cardH * Math.max(1, hudList.count)) + (cardGap * Math.max(0, hudList.count - 1)))
+   height: Math.min(listMaxH,
+                    (cardH * Math.max(1, hudList.count)) +
+                    (cardGap * Math.max(0, hudList.count - 1)))
 
-   ListModel { id: hudList }
+   ListModel {
+       id: hudList
+   }
 
-   function _isPinnedOrHovered(k) { return (k === pinnedKey) || (k === hoverKey) }
+   function _isPinnedOrHovered(k) {
+       return (k === pinnedKey) || (k === hoverKey)
+   }
 
    // ✅ get stable pin color from gpsPinsModel (r,g,b stored in model)
    function _pinColorHexByKey(key) {
        var gi = mapviewer.findGpsIndexByKey(key)
+
        if (gi >= 0) {
            var it = gpsPinsModel.get(gi)
-           var r = Number(it.r), g = Number(it.g), b = Number(it.b)
+           var r = Number(it.r)
+           var g = Number(it.g)
+           var b = Number(it.b)
+
            if (isFinite(r) && isFinite(g) && isFinite(b)) {
                r = Math.max(0, Math.min(255, Math.round(r)))
                g = Math.max(0, Math.min(255, Math.round(g)))
                b = Math.max(0, Math.min(255, Math.round(b)))
-               function hex2(v){ var s=v.toString(16); return (s.length<2) ? ("0"+s) : s }
+
+               function hex2(v) {
+                   var s = v.toString(16)
+                   return (s.length < 2) ? ("0" + s) : s
+               }
+
                return "#" + hex2(r) + hex2(g) + hex2(b)
            }
        }
+
        return "#00c896"
    }
 
    function _isKeyValid(key) {
-       if (!key || !key.length) return false
+       if (!key || !key.length)
+           return false
+
        var c = mapviewer.coordOfKey(key)
        return c !== null
    }
@@ -2587,34 +4233,66 @@ Item {
        }
 
        var keys = []
+
        for (var i = 0; i < gpsPinsModel.count; ++i) {
            var it = gpsPinsModel.get(i)
-           if (!it || !it.key) continue
-           if (!_isKeyValid(it.key)) continue
-           if (selectedFirst && it.key === mapviewer.selectedKey) continue
-           keys.push({ key: it.key, updatedMs: Number(it.updatedMs || 0) })
+
+           if (!it || !it.key)
+               continue
+
+           if (!_isKeyValid(it.key))
+               continue
+
+           if (selectedFirst && it.key === mapviewer.selectedKey)
+               continue
+
+           keys.push({
+               key: it.key,
+               updatedMs: Number(it.updatedMs || 0)
+           })
        }
-       keys.sort(function(a,b){ return (b.updatedMs - a.updatedMs) })
+
+       keys.sort(function(a, b) {
+           return b.updatedMs - a.updatedMs
+       })
 
        for (var k = 0; k < keys.length; ++k) {
-           if (hudList.count >= hudMaxCards) break
+           if (hudList.count >= hudMaxCards)
+               break
+
            hudList.append({ key: keys[k].key })
        }
 
-       if (hudList.count === 0 && mapviewer.selectedKey && mapviewer.selectedKey.length) {
+       if (hudList.count === 0 &&
+           mapviewer.selectedKey &&
+           mapviewer.selectedKey.length) {
            hudList.append({ key: mapviewer.selectedKey })
        }
    }
 
-   Component.onCompleted: rebuildHudList()
+   Component.onCompleted: {
+       restoreHiddenKeys()
+       rebuildHudList()
+
+       Qt.callLater(function() {
+           refreshHiddenPaint()
+       })
+   }
 
    Connections {
        target: gpsPinsModel
-       function onCountChanged() { hudBox.rebuildHudList() }
+
+       function onCountChanged() {
+           hudBox.rebuildHudList()
+       }
    }
+
    Connections {
        target: mapviewer
-       function onSelectedKeyChanged() { hudBox.rebuildHudList() }
+
+       function onSelectedKeyChanged() {
+           hudBox.rebuildHudList()
+       }
    }
 
    ListView {
@@ -2624,7 +4302,9 @@ Item {
        clip: true
        spacing: hudBox.cardGap
 
-       ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+       ScrollBar.vertical: ScrollBar {
+           policy: ScrollBar.AsNeeded
+       }
 
        delegate: Item {
            id: card
@@ -2641,7 +4321,9 @@ Item {
            // ✅ if hidden => dim
            property bool isHidden: hudBox.isKeyHidden(cardKey)
 
-           property bool  isHi: (!card.isHidden) && ((cardKey === mapviewer.selectedKey) || hudBox._isPinnedOrHovered(cardKey))
+           property bool isHi: (!card.isHidden) &&
+                               ((cardKey === mapviewer.selectedKey) ||
+                                hudBox._isPinnedOrHovered(cardKey))
 
            Rectangle {
                anchors.fill: parent
@@ -2649,7 +4331,9 @@ Item {
                color: "#0B1216"
                opacity: card.isHidden ? 0.35 : 0.72
                border.width: 2
-               border.color: card.isHidden ? "#2A3A44" : (card.isHi ? card.pinColor : "#2A3A44")
+               border.color: card.isHidden
+                             ? "#2A3A44"
+                             : (card.isHi ? card.pinColor : "#2A3A44")
            }
 
            Row {
@@ -2660,8 +4344,12 @@ Item {
                spacing: 8
 
                Rectangle {
-                   width: 8; height: 8; radius: 4
-                   color: card.isHidden ? "#69737C" : (card.isHi ? card.pinColor : "#9aa6b2")
+                   width: 8
+                   height: 8
+                   radius: 4
+                   color: card.isHidden
+                          ? "#69737C"
+                          : (card.isHi ? card.pinColor : "#9aa6b2")
                    opacity: 0.9
                    anchors.verticalCenter: parent.verticalCenter
                }
@@ -2673,11 +4361,11 @@ Item {
                    font.pixelSize: 11
                    font.bold: true
                    elide: Text.ElideRight
-                   width: hudBox.cardW - 14 - 14 - 60 // leave space for switch
+                   width: hudBox.cardW - 14 - 14 - 60
                }
            }
 
-           // ✅ ONE SWITCH: show/hide pin+doa
+           // ✅ ONE SWITCH: show/hide pin+doa and stop DoaHistoryViewer logging
            Switch {
                id: showSwitch
                z: 9999
@@ -2690,16 +4378,9 @@ Item {
                checked: !hudBox.isKeyHidden(cardKey)
 
                onToggled: {
+                   // checked = SHOW, unchecked = HIDE
+                   // setKeyHidden() จะ save ค่า + repaint + กันบันทึก DoaHistoryViewer ให้แล้ว
                    hudBox.setKeyHidden(cardKey, !checked)
-
-                   // repaint immediately
-                   mapviewer.doaUpdateTick++
-                   mapviewer.compassTick++
-
-                   if (mapLoader.item) {
-                       if (mapLoader.item.headingLineCanvas) mapLoader.item.headingLineCanvas.safeRequestPaint()
-                       if (mapLoader.item.maxDoaLineCanvas)  mapLoader.item.maxDoaLineCanvas.safeRequestPaint()
-                   }
                }
            }
 
@@ -2708,17 +4389,27 @@ Item {
                hoverEnabled: true
 
                onEntered: hudBox.hoverKey = cardKey
-               onExited:  if (hudBox.hoverKey === cardKey) hudBox.hoverKey = ""
+
+               onExited: {
+                   if (hudBox.hoverKey === cardKey)
+                       hudBox.hoverKey = ""
+               }
 
                onClicked: {
                    hudBox.pinnedKey = cardKey
 
                    mapviewer.selectedKey = cardKey
-                   var c = mapviewer.coordOfKey(cardKey)
-                   if (c) mapviewer.selectedCoord = c
 
-                   if (mapviewer.followPositionEnabled && mapLoader.item && mapLoader.item.map)
+                   var c = mapviewer.coordOfKey(cardKey)
+
+                   if (c)
+                       mapviewer.selectedCoord = c
+
+                   if (mapviewer.followPositionEnabled &&
+                       mapLoader.item &&
+                       mapLoader.item.map) {
                        mapLoader.item.map.center = mapviewer.selectedCoord
+                   }
                }
            }
 
@@ -2759,13 +4450,26 @@ Item {
                            anchors.fill: parent
                            antialiasing: true
 
-                           property real mapBearingDeg: (mapLoader.item && mapLoader.item.map) ? Number(mapLoader.item.map.bearing || 0) : 0
+                           property real mapBearingDeg: (mapLoader.item && mapLoader.item.map)
+                                                         ? Number(mapLoader.item.map.bearing || 0)
+                                                         : 0
                            property real doaWorldDeg: (card.doaIt ? Number(card.doaIt.doaDeg || 0) : NaN)
 
-                           function _deg2rad(d) { return Number(d) * Math.PI / 180.0 }
+                           function _deg2rad(d) {
+                               return Number(d) * Math.PI / 180.0
+                           }
+
                            function _wrap360(d) {
-                               d = Number(d); if (!isFinite(d)) return 0
-                               d = d % 360; if (d < 0) d += 360
+                               d = Number(d)
+
+                               if (!isFinite(d))
+                                   return 0
+
+                               d = d % 360
+
+                               if (d < 0)
+                                   d += 360
+
                                return d
                            }
 
@@ -2773,17 +4477,18 @@ Item {
                                var ctx = getContext("2d")
                                ctx.clearRect(0, 0, width, height)
 
-                               var cx = width/2, cy = height/2
-                               var r  = Math.min(width, height)/2 - 3
+                               var cx = width / 2
+                               var cy = height / 2
+                               var r  = Math.min(width, height) / 2 - 3
 
                                ctx.beginPath()
-                               ctx.arc(cx, cy, r, 0, Math.PI*2)
+                               ctx.arc(cx, cy, r, 0, Math.PI * 2)
                                ctx.strokeStyle = "rgba(255,255,255,0.35)"
                                ctx.lineWidth = 2
                                ctx.stroke()
 
                                ctx.beginPath()
-                               ctx.arc(cx, cy, r*0.62, 0, Math.PI*2)
+                               ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2)
                                ctx.strokeStyle = "rgba(255,255,255,0.12)"
                                ctx.lineWidth = 1
                                ctx.stroke()
@@ -2803,15 +4508,17 @@ Item {
                                    var rad = _deg2rad(a - 90)
                                    var x1 = (r - len) * Math.cos(rad)
                                    var y1 = (r - len) * Math.sin(rad)
-                                   var x2 = (r) * Math.cos(rad)
-                                   var y2 = (r) * Math.sin(rad)
+                                   var x2 = r * Math.cos(rad)
+                                   var y2 = r * Math.sin(rad)
 
                                    ctx.beginPath()
                                    ctx.moveTo(x1, y1)
                                    ctx.lineTo(x2, y2)
-                                   ctx.strokeStyle = isMajor ? "rgba(255,255,255,0.60)"
-                                                : isMid   ? "rgba(255,255,255,0.32)"
-                                                          : "rgba(255,255,255,0.18)"
+                                   ctx.strokeStyle = isMajor
+                                                     ? "rgba(255,255,255,0.60)"
+                                                     : (isMid
+                                                        ? "rgba(255,255,255,0.32)"
+                                                        : "rgba(255,255,255,0.18)")
                                    ctx.lineWidth = isMajor ? 2 : 1
                                    ctx.stroke()
                                }
@@ -2822,9 +4529,10 @@ Item {
                                ctx.textBaseline = "middle"
 
                                function drawLabel(txt, deg, rr) {
-                                   var rad = _deg2rad(deg - 90)
-                                   ctx.fillText(txt, rr*Math.cos(rad), rr*Math.sin(rad))
+                                   var rad2 = _deg2rad(deg - 90)
+                                   ctx.fillText(txt, rr * Math.cos(rad2), rr * Math.sin(rad2))
                                }
+
                                drawLabel("N", 0,   r - 14)
                                drawLabel("E", 90,  r - 14)
                                drawLabel("S", 180, r - 14)
@@ -2841,8 +4549,10 @@ Item {
                                    ctx.fillText("OFF", cx, cy)
                                } else {
                                    var doa = doaWorldDeg
+
                                    if (isFinite(doa)) {
                                        doa = _wrap360(doa)
+
                                        var rel = _wrap360(doa - mb)
                                        var radDoa = _deg2rad(rel - 90)
 
@@ -2873,7 +4583,7 @@ Item {
 
                                        // dot
                                        ctx.beginPath()
-                                       ctx.arc(x, y, 4.0, 0, Math.PI*2)
+                                       ctx.arc(x, y, 4.0, 0, Math.PI * 2)
                                        ctx.fillStyle = pc
                                        ctx.fill()
                                    } else {
@@ -2886,27 +4596,40 @@ Item {
                                }
 
                                ctx.beginPath()
-                               ctx.arc(cx, cy, 3.0, 0, Math.PI*2)
+                               ctx.arc(cx, cy, 3.0, 0, Math.PI * 2)
                                ctx.fillStyle = "rgba(255,255,255,0.55)"
                                ctx.fill()
                            }
 
                            Connections {
                                target: mapviewer
+
                                function onDoaUpdateTickChanged() {
                                    compassMini.doaWorldDeg = (card.doaIt ? Number(card.doaIt.doaDeg || 0) : NaN)
                                    compassMini.requestPaint()
                                }
-                               function onCompassTickChanged() { compassMini.requestPaint() }
-                               function onSelectedKeyChanged() { compassMini.requestPaint() }
-                           }
-                           Connections {
-                               target: (mapLoader.item && mapLoader.item.map) ? mapLoader.item.map : null
-                               function onBearingChanged() {
-                                   compassMini.mapBearingDeg = Number((mapLoader.item && mapLoader.item.map) ? mapLoader.item.map.bearing : 0)
+
+                               function onCompassTickChanged() {
+                                   compassMini.requestPaint()
+                               }
+
+                               function onSelectedKeyChanged() {
                                    compassMini.requestPaint()
                                }
                            }
+
+                           Connections {
+                               target: (mapLoader.item && mapLoader.item.map) ? mapLoader.item.map : null
+
+                               function onBearingChanged() {
+                                   compassMini.mapBearingDeg =
+                                           Number((mapLoader.item && mapLoader.item.map)
+                                                  ? mapLoader.item.map.bearing
+                                                  : 0)
+                                   compassMini.requestPaint()
+                               }
+                           }
+
                            Component.onCompleted: requestPaint()
                        }
                    }
@@ -2966,26 +4689,36 @@ Item {
                    }
                }
            }
-        // ===================== MAX HUD placeholder (kept) =====================
-        Item {
-            id: maxHud
-            visible: mapviewer.showMaxDoaHud
-            anchors.left: parent.left
-            anchors.top: compassHud.visible ? compassHud.bottom : parent.top
-            anchors.leftMargin: 14
-            anchors.topMargin: compassHud.visible ? 6 : 34
-            width: hudBox.cardW - 28
-            height: 20
 
-            Connections {
-                target: mapviewer
-                function onDoaUpdateTickChanged() { card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey) }
-                function onCompassTickChanged()   { card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey) }
-                function onSelectedKeyChanged()   { card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey) }
-            }
-        }
-    }
-}
+           // ===================== MAX HUD placeholder (kept) =====================
+           Item {
+               id: maxHud
+               visible: mapviewer.showMaxDoaHud
+               anchors.left: parent.left
+               anchors.top: compassHud.visible ? compassHud.bottom : parent.top
+               anchors.leftMargin: 14
+               anchors.topMargin: compassHud.visible ? 6 : 34
+               width: hudBox.cardW - 28
+               height: 20
+
+               Connections {
+                   target: mapviewer
+
+                   function onDoaUpdateTickChanged() {
+                       card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey)
+                   }
+
+                   function onCompassTickChanged() {
+                       card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey)
+                   }
+
+                   function onSelectedKeyChanged() {
+                       card.doaIt = mapviewer.getActiveDoaItemByKey(cardKey)
+                   }
+               }
+           }
+       }
+   }
 }
 
     Rectangle {

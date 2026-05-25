@@ -31,6 +31,12 @@ void iScreenDF::getdatabaseToSideSettingDrawer(const QString &msg) {
         QTimer::singleShot(0, db, &DatabaseDF::GetParameter);
         QTimer::singleShot(0, db, &DatabaseDF::GetrfsocParameter);
     }
+    else if (msg == "SideLogsFile") {
+        // QTimer::singleShot(0, db, &DatabaseDF::getDoaLogRecords);
+        QTimer::singleShot(0, db, [=]() {
+            db->getDoaLogRecordsPage(1, 50, QString());
+        });
+    }
 }
 
 void iScreenDF::groupSetting(const QString &title, int id, const QString &json)
@@ -92,16 +98,29 @@ void iScreenDF::groupSetting(const QString &title, int id, const QString &json)
 
         if (action == "add") {
             if (uniqueIdInGroup.isEmpty()) {
-                db->savegroupSettingNewGroup(groupName,
-                                             deviceUniqueIds,
-                                             groupID,
-                                             uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db, groupName, deviceUniqueIds]() mutable {
+                    int outGroupID = 0;
+                    QString outUniqueIdInGroup;
+
+                    QTimer::singleShot(0, db, [db = db, groupName, deviceUniqueIds]() mutable {
+                        int outGroupID = 0;
+                        QString outUniqueIdInGroup;
+
+                        db->savegroupSettingNewGroup(groupName,
+                                                     deviceUniqueIds,
+                                                     outGroupID,
+                                                     outUniqueIdInGroup);
+                    });
+
+                });
             } else {
                 qDebug() << "[functionMonitor] EditGroup add on existing group uid="
                          << uniqueIdInGroup << " not implemented yet.";
             }
         } else if (action == "delete") {
-            db->deleteGroupByUID(uniqueIdInGroup);
+            QTimer::singleShot(0, db, [db = db, uniqueIdInGroup]() {
+                db->deleteGroupByUID(uniqueIdInGroup);
+            });
         }
     }
     else if (title == "EditGroupDevices"){
@@ -132,18 +151,29 @@ void iScreenDF::groupSetting(const QString &title, int id, const QString &json)
             if (deviceUniqueId.isEmpty()) {
                 qWarning() << "[functionMonitor] EditGroupDevices(add): deviceUniqueId is empty, skip";
             } else {
-                db->insertDevicesinGroup(groupID,
-                                         groupName,
-                                         deviceUniqueId,
-                                         uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db,
+                                           groupID,
+                                           groupName,
+                                           deviceUniqueId,
+                                           uniqueIdInGroup]() {
+                    db->insertDevicesinGroup(groupID,
+                                             groupName,
+                                             deviceUniqueId,
+                                             uniqueIdInGroup);
+                });
             }
         } else if (action == "remove") {
             if (deviceUniqueId.isEmpty()) {
                 qWarning() << "[functionMonitor] EditGroupDevices(remove): deviceUniqueId is empty, skip";
             } else {
-                db->removeDeviceFromGroup(groupID,
-                                          deviceUniqueId,
-                                          uniqueIdInGroup);
+                QTimer::singleShot(0, db, [db = db,
+                                           groupID,
+                                           deviceUniqueId,
+                                           uniqueIdInGroup]() {
+                    db->removeDeviceFromGroup(groupID,
+                                              deviceUniqueId,
+                                              uniqueIdInGroup);
+                });
             }
         }
     }
@@ -250,6 +280,15 @@ void iScreenDF::sigGroupsInGroupSetting(const QString &json) {
     qDebug() << "[functionMonitor]  sigGroupsInGroupSetting:" << json;
     emit setsigGroupsInGroupSetting(json);
 }
+
+
+
+// void iScreenDF::getSideLogsJson(const QString &json)
+// {
+//     qDebug() << "[iScreenDF] getSideLogsJson:" << json;
+
+//     emit setSideLogsJson(json);
+// }
 
 void iScreenDF::cancelScan()
 {
@@ -767,6 +806,11 @@ void iScreenDF::processConnectGroupSingleInternal(const QJsonObject &obj)
     // setupServerClientForDevices(groupId, groupName, devices);
 }
 
+void iScreenDF::requestShowDoaLogOnMapJson(const QString &jsonText)
+{
+    qDebug() << "[SHOW DOA LOG ON MAP] jsonText =" << jsonText;
+    emit showDoaLogOnMapJson(jsonText);
+}
 
 void iScreenDF::setParameterdevice(const QString &deviceName, const QString &serial)
 {
@@ -783,13 +827,45 @@ void iScreenDF::setUseOfflineMapStyle(bool mapStatus)
 {
     emit useOfflineMapStyleChanged(mapStatus);
 }
-void iScreenDF::setDelayMs(const int ms){
-    qDebug()  << "[functionMonitor] setDelayMs" << ms;
-    db->UpdateParameterField("setDelayMs", ms);
+void iScreenDF::setDelayMs(const int ms)
+{
+    qDebug() << "[functionMonitor] setDelayMs" << ms;
+
+    QTimer::singleShot(0, db, [db = db, ms]() {
+        db->UpdateParameterField("setDelayMs", ms);
+    });
+
     emit updateMaxDoaDelayMsFromServer(ms);
 }
-void iScreenDF::setDistance(const int m){
-    qDebug()  << "[functionMonitor] setDistance" << m;
-    db->UpdateParameterField("setDistance", m);
+void iScreenDF::setDistance(const int m)
+{
+    qDebug() << "[functionMonitor] setDistance" << m;
+
+    QTimer::singleShot(0, db, [db = db, m]() {
+        db->UpdateParameterField("setDistance", m);
+    });
+
     emit updateDoaLineDistanceMFromServer(m);
+}
+
+void iScreenDF::getdatabaseToSideSettingDrawerPage(const QString &msg,
+                                                   int page,
+                                                   int pageSize,
+                                                   const QString &searchText)
+{
+    qDebug() << "[functionMonitor] getdatabaseToSideSettingDrawerPage :"
+             << msg
+             << "page =" << page
+             << "pageSize =" << pageSize
+             << "search =" << searchText;
+
+    if (msg == "SideLogsFile") {
+        QTimer::singleShot(0, db, [=]() {
+            db->getDoaLogRecordsPage(page, pageSize, searchText);
+        });
+        return;
+    }
+
+    // fallback สำหรับเมนูอื่น
+    getdatabaseToSideSettingDrawer(msg);
 }

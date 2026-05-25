@@ -34,27 +34,57 @@ bool DatabaseDF::database_createConnection()
 
 bool DatabaseDF::ensureDb()
 {
-    if (!db.isValid()) {
-        QString connName =
-            QStringLiteral("dbconn_%1").arg(reinterpret_cast<quintptr>(this));
+    const Qt::HANDLE currentTid = QThread::currentThreadId();
+
+    QString connName = QStringLiteral("dbconn_%1_%2")
+                           .arg(reinterpret_cast<quintptr>(this), 0, 16)
+                           .arg(reinterpret_cast<quintptr>(currentTid), 0, 16);
+
+    // ถ้า db member เคยถูกสร้างใน thread อื่น ห้ามใช้ต่อ
+    if (db.isValid() && m_dbThreadId != nullptr && m_dbThreadId != currentTid) {
+        qWarning() << "[Database] WARNING: db handle belongs to another thread."
+                   << "oldThread =" << m_dbThreadId
+                   << "currentThread =" << currentTid
+                   << "Rebinding connection.";
+        db = QSqlDatabase();
+    }
+
+    if (!QSqlDatabase::contains(connName)) {
         db = QSqlDatabase::addDatabase("QMYSQL", connName);
         db.setHostName(m_dbHost);
         db.setDatabaseName(m_dbName);
         db.setUserName(m_dbUser);
         db.setPassword(m_dbPassword);
+
+        qDebug() << "[Database] create connection"
+                 << connName
+                 << "thread =" << QThread::currentThread();
+    } else {
+        db = QSqlDatabase::database(connName, false);
     }
+
+    m_connName = connName;
+    m_dbThreadId = currentTid;
 
     if (db.isOpen())
         return true;
 
     if (!db.open()) {
-        qWarning() << "[Database] open failed:" << db.lastError().text();
+        qWarning() << "[Database] open failed:"
+                   << db.lastError().text()
+                   << "driver =" << db.driverName()
+                   << "connName =" << connName
+                   << "thread =" << QThread::currentThread();
         return false;
     }
 
-    qDebug() << "[Database] DB opened in thread" << QThread::currentThread();
+    qDebug() << "[Database] DB opened OK"
+             << "connName =" << connName
+             << "thread =" << QThread::currentThread();
+
     return true;
 }
+
 
 void DatabaseDF::restartMysql()
 {
@@ -75,6 +105,7 @@ void DatabaseDF::init()
     }
     ensureColumnsInIScreenparameter();
     createServerKrakenNetworkTable();
+    createDoaLogRecordsTable();
     getNetwork();
     getNTPServer();
     // getKrakenServer();  // ถ้าไม่ใช้ก็ไม่ต้อง
@@ -97,8 +128,25 @@ void DatabaseDF::init()
 void DatabaseDF::shutdown()
 {
     qDebug() << "[Database::shutdown]";
-    if (db.isValid() && db.isOpen())
-        db.close();
+
+    QString name;
+
+    if (db.isValid()) {
+        name = db.connectionName();
+
+        if (db.isOpen())
+            db.close();
+
+        db = QSqlDatabase();
+    }
+
+    if (!name.isEmpty() && QSqlDatabase::contains(name)) {
+        QSqlDatabase::removeDatabase(name);
+        qDebug() << "[Database::shutdown] removed connection:" << name;
+    }
+
+    m_connName.clear();
+    m_dbThreadId = nullptr;
 }
 
 void DatabaseDF::getKrakenSetting()
@@ -238,6 +286,71 @@ void DatabaseDF::createServerKrakenNetworkTable()
     }
 }
 
+void DatabaseDF::createDoaLogRecordsTable()
+{
+    if (!ensureDb()) {
+        qWarning() << "[createDoaLogRecordsTable] DB open failed";
+        return;
+    }
+
+    // =========================
+    // Check table exists
+    // =========================
+    QSqlQuery checkQuery(db);
+    checkQuery.prepare("SHOW TABLES LIKE 'DoaLogRecords'");
+
+    if (!checkQuery.exec()) {
+        qWarning() << "[createDoaLogRecordsTable] Failed to check table:"
+                   << checkQuery.lastError().text();
+        return;
+    }
+
+    if (checkQuery.next()) {
+        qDebug() << "[createDoaLogRecordsTable] Table DoaLogRecords already exists. Skip create.";
+        return;
+    }
+
+    // =========================
+    // Create table if not exists
+    // =========================
+    QSqlQuery createQuery(db);
+
+    const QString createSql = R"(
+        CREATE TABLE DoaLogRecords (
+            id              BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+
+            log_timestamp   VARCHAR(128),
+            log_name        VARCHAR(128),
+            frequency       VARCHAR(128),
+            doa_value       DOUBLE NULL,
+
+            extra           TEXT,
+
+            log_key         VARCHAR(255),
+            confidence      DOUBLE NULL,
+            heading         DOUBLE NULL,
+            lat             DOUBLE NULL,
+            lon             DOUBLE NULL,
+
+            raw_json        LONGTEXT,
+
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+            INDEX idx_created_at (created_at),
+            INDEX idx_log_timestamp (log_timestamp),
+            INDEX idx_frequency (frequency),
+            INDEX idx_lat_lon (lat, lon)
+        )
+    )";
+
+    if (!createQuery.exec(createSql)) {
+        qWarning() << "[createDoaLogRecordsTable] Failed to create table DoaLogRecords:"
+                   << createQuery.lastError().text();
+        return;
+    }
+
+    qDebug() << "[createDoaLogRecordsTable] Table DoaLogRecords created successfully.";
+}
 
 void DatabaseDF::getIScreenParameter()
 {
@@ -2842,4 +2955,486 @@ void DatabaseDF::ensureParameterIPLocalForRemoteGroup()
         qWarning() << "[ensureParameterIPLocalForRemoteGroup] UPDATE default failed:"
                    << upd.lastError().text();
     }
+}
+static QVariant jsonStringToDoubleOrNull(const QJsonObject &obj, const QString &key)
+{
+    QString s = obj.value(key).toString().trimmed();
+
+    if (s.isEmpty())
+        return QVariant();
+
+    bool ok = false;
+    double v = s.toDouble(&ok);
+
+    if (!ok)
+        return QVariant();
+
+    return QVariant(v);
+}
+
+bool DatabaseDF::insertDoaLogRecordsFromJson(const QString &jsonText)
+{
+    if (!ensureDb()) {
+        qWarning() << "[insertDoaLogRecordsFromJson] DB open failed";
+        return false;
+    }
+
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8(), &err);
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "[insertDoaLogRecordsFromJson] Invalid JSON:"
+                   << err.errorString();
+        return false;
+    }
+
+    QJsonObject root = doc.object();
+
+    QString objectName = root.value("objectName").toString();
+
+    if (objectName != "DoaLogSaveSelectedRows") {
+        qWarning() << "[insertDoaLogRecordsFromJson] Invalid objectName:"
+                   << objectName;
+        return false;
+    }
+
+    QJsonArray records = root.value("records").toArray();
+
+    if (records.isEmpty()) {
+        qWarning() << "[insertDoaLogRecordsFromJson] No records to insert";
+        return false;
+    }
+
+    if (!db.transaction()) {
+        qWarning() << "[insertDoaLogRecordsFromJson] Transaction start failed:"
+                   << db.lastError().text();
+        return false;
+    }
+
+    QSqlQuery insertQuery(db);
+
+    QString insertSql = R"(
+        INSERT INTO DoaLogRecords
+        (
+            log_timestamp,
+            log_name,
+            frequency,
+            doa_value,
+            extra,
+            log_key,
+            confidence,
+            heading,
+            lat,
+            lon,
+            raw_json
+        )
+        VALUES
+        (
+            :log_timestamp,
+            :log_name,
+            :frequency,
+            :doa_value,
+            :extra,
+            :log_key,
+            :confidence,
+            :heading,
+            :lat,
+            :lon,
+            :raw_json
+        )
+    )";
+
+    if (!insertQuery.prepare(insertSql)) {
+        qWarning() << "[insertDoaLogRecordsFromJson] Prepare failed:"
+                   << insertQuery.lastError().text();
+        db.rollback();
+        return false;
+    }
+
+    int insertedCount = 0;
+
+    for (const QJsonValue &v : records) {
+        if (!v.isObject())
+            continue;
+
+        QJsonObject r = v.toObject();
+
+        QString logTimestamp = r.value("timestamp").toString();
+        QString logName      = r.value("name").toString();
+        QString frequency    = r.value("frequency").toString();
+        QString extra        = r.value("extra").toString();
+        QString logKey       = r.value("key").toString();
+
+        QVariant doaValue   = jsonStringToDoubleOrNull(r, "doa");
+        QVariant confidence = jsonStringToDoubleOrNull(r, "confidence");
+        QVariant heading    = jsonStringToDoubleOrNull(r, "heading");
+        QVariant lat        = jsonStringToDoubleOrNull(r, "lat");
+        QVariant lon        = jsonStringToDoubleOrNull(r, "lon");
+
+        QJsonDocument rawDoc(r);
+        QString rawJson = QString::fromUtf8(rawDoc.toJson(QJsonDocument::Compact));
+
+        insertQuery.bindValue(":log_timestamp", logTimestamp);
+        insertQuery.bindValue(":log_name", logName);
+        insertQuery.bindValue(":frequency", frequency);
+        insertQuery.bindValue(":doa_value", doaValue);
+        insertQuery.bindValue(":extra", extra);
+        insertQuery.bindValue(":log_key", logKey);
+        insertQuery.bindValue(":confidence", confidence);
+        insertQuery.bindValue(":heading", heading);
+        insertQuery.bindValue(":lat", lat);
+        insertQuery.bindValue(":lon", lon);
+        insertQuery.bindValue(":raw_json", rawJson);
+
+        if (!insertQuery.exec()) {
+            qWarning() << "[insertDoaLogRecordsFromJson] Insert failed:"
+                       << insertQuery.lastError().text()
+                       << "record =" << rawJson;
+            db.rollback();
+            return false;
+        }
+
+        insertedCount++;
+    }
+
+    if (!db.commit()) {
+        qWarning() << "[insertDoaLogRecordsFromJson] Commit failed:"
+                   << db.lastError().text();
+        db.rollback();
+        return false;
+    }
+
+    qDebug() << "[insertDoaLogRecordsFromJson] Inserted records =" << insertedCount;
+    return insertedCount > 0;
+}
+
+void DatabaseDF::getDoaLogRecords()
+{
+    // default page
+    getDoaLogRecordsPage(1, 50, QString());
+}
+
+void DatabaseDF::getDoaLogRecordsPage(int page, int pageSize, const QString &searchText)
+{
+    if (!ensureDb()) {
+        qWarning() << "[getDoaLogRecordsPage] DB open failed";
+        return;
+    }
+
+    createDoaLogRecordsTable();
+
+    if (page < 1)
+        page = 1;
+
+    if (pageSize < 1)
+        pageSize = 50;
+
+    // กันโหลดหนักเกินไป
+    if (pageSize > 200)
+        pageSize = 200;
+
+    const QString qText = searchText.trimmed();
+
+    // SQLite ใช้ CAST(... AS TEXT)
+    // MySQL/MariaDB ใช้ CAST(... AS CHAR)
+    const QString driverName = db.driverName().toUpper();
+    const QString castType = driverName.contains("MYSQL") ? "CHAR" : "TEXT";
+
+    QString whereSql;
+    QVariantMap binds;
+
+    if (!qText.isEmpty()) {
+        whereSql = QString(R"(
+            WHERE
+                log_timestamp LIKE :search
+                OR log_name LIKE :search
+                OR frequency LIKE :search
+                OR extra LIKE :search
+                OR log_key LIKE :search
+                OR created_at LIKE :search
+                OR CAST(doa_value AS %1) LIKE :search
+                OR CAST(confidence AS %1) LIKE :search
+                OR CAST(heading AS %1) LIKE :search
+                OR CAST(lat AS %1) LIKE :search
+                OR CAST(lon AS %1) LIKE :search
+        )").arg(castType);
+
+        binds[":search"] = "%" + qText + "%";
+    }
+
+    // ============================================================
+    // 1) COUNT ทั้ง database ตาม searchText
+    // ============================================================
+    int totalRows = 0;
+
+    {
+        QSqlQuery countQuery(db);
+
+        const QString countSql = QString(R"(
+            SELECT COUNT(*) AS total
+            FROM DoaLogRecords
+            %1
+        )").arg(whereSql);
+
+        if (!countQuery.prepare(countSql)) {
+            qWarning() << "[getDoaLogRecordsPage] count prepare failed:"
+                       << countQuery.lastError().text()
+                       << "sql =" << countSql;
+            return;
+        }
+
+        for (auto it = binds.constBegin(); it != binds.constEnd(); ++it)
+            countQuery.bindValue(it.key(), it.value());
+
+        if (!countQuery.exec()) {
+            qWarning() << "[getDoaLogRecordsPage] count failed:"
+                       << countQuery.lastError().text()
+                       << "sql =" << countSql;
+            return;
+        }
+
+        if (countQuery.next())
+            totalRows = countQuery.value("total").toInt();
+    }
+
+    int totalPages = 1;
+    if (totalRows > 0)
+        totalPages = (totalRows + pageSize - 1) / pageSize;
+
+    if (page > totalPages)
+        page = totalPages;
+
+    const int offset = (page - 1) * pageSize;
+
+    // ============================================================
+    // 2) SELECT เฉพาะหน้าปัจจุบันของ searchText เดิม
+    // ============================================================
+    QSqlQuery query(db);
+
+    const QString sql = QString(R"(
+        SELECT
+            id,
+            log_timestamp,
+            log_name,
+            frequency,
+            doa_value,
+            extra,
+            log_key,
+            confidence,
+            heading,
+            lat,
+            lon,
+            created_at
+        FROM DoaLogRecords
+        %1
+        ORDER BY id DESC
+        LIMIT :limit OFFSET :offset
+    )").arg(whereSql);
+
+    if (!query.prepare(sql)) {
+        qWarning() << "[getDoaLogRecordsPage] select prepare failed:"
+                   << query.lastError().text()
+                   << "sql =" << sql;
+        return;
+    }
+
+    for (auto it = binds.constBegin(); it != binds.constEnd(); ++it)
+        query.bindValue(it.key(), it.value());
+
+    query.bindValue(":limit", pageSize);
+    query.bindValue(":offset", offset);
+
+    if (!query.exec()) {
+        qWarning() << "[getDoaLogRecordsPage] select failed:"
+                   << query.lastError().text()
+                   << "sql =" << sql;
+        return;
+    }
+
+    QJsonArray records;
+
+    while (query.next()) {
+        const QString timestamp = query.value("log_timestamp").toString();
+        const QString name      = query.value("log_name").toString();
+        const QString frequency = query.value("frequency").toString();
+        const QString extra     = query.value("extra").toString();
+        const QString logKey    = query.value("log_key").toString();
+
+        const double doa     = query.value("doa_value").toDouble();
+        const double conf    = query.value("confidence").toDouble();
+        const double heading = query.value("heading").toDouble();
+        const double lat     = query.value("lat").toDouble();
+        const double lon     = query.value("lon").toDouble();
+
+        QString message = QString("DOA=%1°  conf=%2  hdg=%3  lat=%4  lon=%5")
+                              .arg(doa, 0, 'f', 3)
+                              .arg(conf, 0, 'f', 2)
+                              .arg(heading, 0, 'f', 1)
+                              .arg(lat, 0, 'f', 6)
+                              .arg(lon, 0, 'f', 6);
+
+        if (!extra.isEmpty())
+            message += " | " + extra;
+
+        QJsonObject obj;
+
+        // ส่งชื่อ field ให้ตรงกับ SideLogsFile.qml
+        obj["Timestamp"]  = timestamp;
+        obj["Level"]      = "Info";
+        obj["DeviceName"] = name;
+        obj["IPAddress"]  = frequency;
+        obj["Serial"]     = logKey;
+        obj["Message"]    = message;
+
+        // field จริง
+        obj["id"]         = query.value("id").toInt();
+        obj["doa"]        = doa;
+        obj["confidence"] = conf;
+        obj["heading"]    = heading;
+        obj["lat"]        = lat;
+        obj["lon"]        = lon;
+        obj["created_at"] = query.value("created_at").toString();
+
+        records.append(obj);
+    }
+
+    QJsonObject root;
+    root["objectName"] = "SideLogsFile";
+
+    // จำนวน record เฉพาะหน้านี้
+    root["count"] = records.size();
+    root["records"] = records;
+
+    // metadata สำหรับ QML pager
+    root["page"]       = page;
+    root["pageSize"]   = pageSize;
+    root["totalRows"]  = totalRows;
+    root["totalPages"] = totalPages;
+    root["searchText"] = qText;
+
+    const QString jsonText =
+        QString::fromUtf8(QJsonDocument(root).toJson(QJsonDocument::Compact));
+
+    qDebug() << "[getDoaLogRecordsPage]"
+             << "page =" << page
+             << "pageSize =" << pageSize
+             << "rows =" << records.size()
+             << "totalRows =" << totalRows
+             << "totalPages =" << totalPages
+             << "search =" << qText;
+
+    emit setSideLogsJson(jsonText);
+}
+
+
+void DatabaseDF::deleteDoaLogsFromJson(const QString &jsonText)
+{
+    QJsonParseError err;
+    QJsonDocument doc = QJsonDocument::fromJson(jsonText.toUtf8(), &err);
+
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "[DOA DELETE] invalid json:" << err.errorString()
+        << "json =" << jsonText;
+        return;
+    }
+
+    QJsonObject obj = doc.object();
+    QJsonArray records = obj.value("records").toArray();
+
+    if (records.isEmpty()) {
+        qDebug() << "[DOA DELETE] no records";
+        return;
+    }
+
+    if (!ensureDb()) {
+        qWarning() << "[DOA DELETE] DB open failed";
+        return;
+    }
+
+    createDoaLogRecordsTable();
+
+    if (!db.transaction()) {
+        qWarning() << "[DOA DELETE] transaction failed:"
+                   << db.lastError().text();
+        return;
+    }
+
+    int deletedCount = 0;
+    bool hasError = false;
+
+    for (const QJsonValue &v : records) {
+        if (!v.isObject())
+            continue;
+
+        QJsonObject r = v.toObject();
+
+        QString idText;
+
+        if (r.value("id").isString()) {
+            idText = r.value("id").toString().trimmed();
+        } else if (r.value("id").isDouble()) {
+            int idNum = r.value("id").toInt(-1);
+            if (idNum > 0)
+                idText = QString::number(idNum);
+        }
+
+        QSqlQuery q(db);
+
+        if (!idText.isEmpty()) {
+            q.prepare(R"(
+                DELETE FROM DoaLogRecords
+                WHERE id = :id
+            )");
+
+            q.bindValue(":id", idText.toInt());
+        } else {
+            q.prepare(R"(
+                DELETE FROM DoaLogRecords
+                WHERE log_timestamp = :log_timestamp
+                  AND log_name      = :log_name
+                  AND log_key       = :log_key
+                  AND lat           = :lat
+                  AND lon           = :lon
+                  AND doa_value     = :doa_value
+            )");
+
+            q.bindValue(":log_timestamp", r.value("timestamp").toString());
+            q.bindValue(":log_name",      r.value("device").toString());
+            q.bindValue(":log_key",       r.value("logKey").toString());
+            q.bindValue(":lat",           r.value("lat").toString().toDouble());
+            q.bindValue(":lon",           r.value("lon").toString().toDouble());
+            q.bindValue(":doa_value",     r.value("doa").toString().toDouble());
+        }
+
+        if (!q.exec()) {
+            hasError = true;
+            qWarning() << "[DOA DELETE] failed:"
+                       << q.lastError().text()
+                       << "record =" << QJsonDocument(r).toJson(QJsonDocument::Compact);
+            break;
+        }
+
+        deletedCount += q.numRowsAffected();
+
+        qDebug() << "[DOA DELETE] id =" << idText
+                 << "affected =" << q.numRowsAffected();
+    }
+
+    if (hasError) {
+        db.rollback();
+        qWarning() << "[DOA DELETE] rollback";
+        return;
+    }
+
+    if (!db.commit()) {
+        qWarning() << "[DOA DELETE] commit failed:"
+                   << db.lastError().text();
+        db.rollback();
+        return;
+    }
+
+    qDebug() << "[DOA DELETE] done deleted =" << deletedCount;
+
+    // refresh SideLogs.qml หลังลบ
+    getDoaLogRecords();
 }

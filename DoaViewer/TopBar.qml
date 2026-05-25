@@ -494,7 +494,8 @@ Rectangle {
                 from: 0
                 to: 63
                 value: root.dc() ? root.dc().ncoUpdateEn : 31
-                editable: true
+                editable: false
+                enabled: false
                 Layout.preferredWidth: 110
                 Connections {
                     target: root.dc()
@@ -517,7 +518,8 @@ Rectangle {
                     var fHz = root.rfTextToHz(freqField.text)
                     if (isNaN(fHz) || fHz <= 0) return
 
-                    c.setFrequencyHz(fHz, updateEnSpin.value, true)
+                    // c.setFrequencyHz(fHz, updateEnSpin.value, true)
+                    c.setFrequencyHz(fHz, 31, true)
                 }
             }
 
