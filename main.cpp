@@ -341,8 +341,8 @@ int main(int argc, char *argv[])
     QObject::connect(&recMain,  SIGNAL(cppCommand(QVariant)),
                      qmlWindow, SLOT(qmlSubmitTextFiled(QVariant)));
 
-    QObject::connect(qmlWindow, SIGNAL(getScreenshot()),
-                     imageProviderDF, SLOT(makeScreenshot()));
+    // QObject::connect(qmlWindow, SIGNAL(getScreenshot()),
+    //                  imageProviderDF, SLOT(makeScreenshot()));
 #endif
 
     return app.exec();
