@@ -28,6 +28,7 @@ DEFINES += QT_NO_DEBUG_OUTPUT
 # Default is NONE_5G for safety.
 # ============================================================
 CONFIG+=HW_5G
+# CONFIG+=HW_NONE_5G
 contains(CONFIG, HW_5G) {
     message("Hardware version: 5G")
     DEFINES += HARDWARE_VERSION_5G
