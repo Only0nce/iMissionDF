@@ -26,13 +26,27 @@ public:
 
     // ===== WiFi =====
     Q_INVOKABLE QVariantMap loadWifiConfig();
-    Q_INVOKABLE QVariantList scanWifi(const QString &iface = QStringLiteral("wlan0"));
-    Q_INVOKABLE QVariantMap wifiStatus(const QString &iface = QStringLiteral("wlan0"));
+    Q_INVOKABLE QVariantMap wifiState(const QString &iface = QString());
+    Q_INVOKABLE QVariantMap scanWifiPage(const QString &iface = QString());
+    Q_INVOKABLE QVariantList scanWifi(const QString &iface = QString());
+    Q_INVOKABLE QVariantMap wifiStatus(const QString &iface = QString());
+    Q_INVOKABLE QVariantMap wifiToggle(bool enabled);
+    Q_INVOKABLE QVariantMap forgetWifi(const QString &ssid);
+    Q_INVOKABLE QVariantMap wifiAdvancedInfo(const QString &ssid = QString(),
+                                             const QString &iface = QString());
+    Q_INVOKABLE QVariantMap applyWifiIpv4(const QString &ssid,
+                                          const QString &method,
+                                          const QString &ip,
+                                          const QString &mask,
+                                          const QString &gateway,
+                                          bool dnsAuto,
+                                          const QString &dns);
     Q_INVOKABLE void connectWifi(const QString &iface,
                                  const QString &ssid,
                                  const QString &password,
-                                 bool autoConnect = true);
-    Q_INVOKABLE void disconnectWifi(const QString &iface = QStringLiteral("wlan0"));
+                                 bool autoConnect = true,
+                                 const QString &bssid = QString());
+    Q_INVOKABLE void disconnectWifi(const QString &iface = QString());
 
     // ===== 5G / Cellular =====
     // These functions are always declared so QML never breaks.

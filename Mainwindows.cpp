@@ -25,6 +25,11 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     // wsClient = new WebSocketClient;
     myDatabase = new Database("ScanRF","orinnx","Ifz8zean6868**","127.0.0.1");
     qWarning() << "MYDATABASE ONLYONE";
+    wifi5gController = new Wifi5GController(netWorkController, this);
+    connect(wifi5gController, &Wifi5GController::responseReady,
+            this, [this](const QString &jsonMessage) {
+        emit cppCommand(jsonMessage);
+    });
     // wsClient.connectToServer(QUrl("ws://192.168.10.58:8073/ws/"));
     wsClient.connectToServer(QUrl("ws://127.0.0.1:8073/ws/"));
     // wsClient.connectToServer(QUrl("ws://192.168.10.26:8073/ws/"));
@@ -1609,10 +1614,27 @@ void Mainwindows::sCan(const QString&  mode){
     emit findBandsWithProfile(mode);
 }
 
+static QString redactedCommandForLog(QJsonObject command)
+{
+    // WiFi connect commands carry credentials. Keep routing fields useful in
+    // logs while preventing secrets from being printed to stdout/syslog.
+    const QStringList sensitiveKeys = {
+        QStringLiteral("password"),
+        QStringLiteral("wifiPassword"),
+        QStringLiteral("content_b64")
+    };
+
+    for (const QString &key : sensitiveKeys) {
+        if (command.contains(key))
+            command[key] = QStringLiteral("<redacted>");
+    }
+
+    return QString::fromUtf8(
+        QJsonDocument(command).toJson(QJsonDocument::Compact));
+}
+
 void Mainwindows::cppSubmitTextFiled(const QString &qmlJson)
 {
-    qDebug() << "C++: cppSubmitTextFiled:: qmlJson =" << qmlJson;
-
     QJsonParseError parseError;
     QJsonDocument d = QJsonDocument::fromJson(qmlJson.toUtf8(), &parseError);
 
@@ -1628,6 +1650,11 @@ void Mainwindows::cppSubmitTextFiled(const QString &qmlJson)
 
     QJsonObject command = d.object();
     QString getCommand = command.value("menuID").toString();
+
+    qDebug().noquote() << "C++: cppSubmitTextFiled =" << redactedCommandForLog(command);
+
+    if (wifi5gController && wifi5gController->handleCommand(command))
+        return;
 
     qDebug() << "Parsed menuID:" << getCommand;
 }

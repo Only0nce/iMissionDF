@@ -4,6 +4,7 @@
 #include <QObject>
 #include "ChatServer.h"
 #include "NetworkController.h"
+#include "Wifi5GController.h"
 #include "QTimer"
 #include "ReceiverRecorderConfigManager.h"
 #include "SocketClient.h"
@@ -370,6 +371,7 @@ private:
     RfdcNcoClient *rfdc = new RfdcNcoClient();
     ReceiverRecorderConfigManager *recConfig = new ReceiverRecorderConfigManager();
     NetworkController *netWorkController = new NetworkController;
+    Wifi5GController *wifi5gController = nullptr;
 #ifdef PLATFORM_JETSON
     void setRfSwitchBand(RFPort port)
     {

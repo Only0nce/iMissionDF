@@ -17,9 +17,19 @@ Item {
     property bool hardwareHas5G: (typeof HardwareHas5G !== "undefined") ? HardwareHas5G : false
     property string hardwareVersionName: (typeof HardwareVersionName !== "undefined") ? HardwareVersionName : "NONE_5G"
     property bool useBackendJson: true
+    // QML uses this flag for visibility and layout sizing.
+    // When the build is HW_NONE_5G the cellular section is not created visually.
+    readonly property bool showCellularControls: hardwareHas5G
+    readonly property int networkGridColumns: showCellularControls && root.width > 1200 ? 2 : 1
+    readonly property int networkCardHeight: showCellularControls
+                                             ? 620
+                                             : Math.max(620, root.height - 220)
 
-    property string wifiIface: "wlan0"
+    property bool wifiEnabled: true
+    property string wifiIface: "wlP9p1s0"
     property string wifiSsid: ""
+    property string wifiBssid: ""
+    property string wifiProfileName: ""
     property string wifiPassword: ""
     property bool wifiAutoConnect: true
     property var wifiList: []
@@ -43,26 +53,34 @@ Item {
 
     function refreshWifiConfig() {
         var cfg = NetworkController.loadWifiConfig()
-        wifiIface = safeText(cfg.interface, "wlan0")
+        wifiIface = safeText(cfg.interface, "wlP9p1s0")
         wifiSsid = safeText(cfg.ssid, "")
         wifiAutoConnect = cfg.autoConnect === undefined ? true : cfg.autoConnect
     }
 
     function refreshWifiStatus() {
-        if (sendBackendCommand({"menuID":"wifiStatus", "iface":wifiIface}))
+        if (sendBackendCommand({"menuID":"wifi_state", "iface":wifiIface}))
             return
-        wifiState = NetworkController.wifiStatus(wifiIface)
+        wifiState = NetworkController.wifiState(wifiIface)
+        wifiEnabled = wifiState.enabled === undefined ? wifiEnabled : wifiState.enabled
     }
 
     function scanWifi() {
         wifiMessage = "Scanning..."
-        if (sendBackendCommand({"menuID":"wifiScan", "iface":wifiIface}))
+        if (sendBackendCommand({"menuID":"scan", "iface":wifiIface}))
             return
         wifiList = NetworkController.scanWifi(wifiIface)
         wifiMessage = wifiList.length > 0 ? ("Found " + wifiList.length + " network(s)") : "No WiFi networks found"
     }
 
     function refreshCellularConfig() {
+        if (!root.showCellularControls) {
+            cellularIface = ""
+            cellularApn = ""
+            cellularAutoConnect = false
+            return
+        }
+
         var cfg = NetworkController.loadCellularConfig()
         cellularIface = safeText(cfg.interface, "*")
         cellularApn = safeText(cfg.apn, "internet")
@@ -70,7 +88,14 @@ Item {
     }
 
     function refreshCellularStatus() {
-        if (sendBackendCommand({"menuID":"cellularStatus"}))
+        if (!root.showCellularControls) {
+            cellularState = ({})
+            modemList = []
+            cellularMessage = ""
+            return
+        }
+
+        if (sendBackendCommand({"menuID":"lte_state"}))
             return
         cellularState = NetworkController.cellularStatus()
         modemList = NetworkController.listModems()
@@ -81,8 +106,10 @@ Item {
             return
         refreshWifiConfig()
         refreshWifiStatus()
-        refreshCellularConfig()
-        refreshCellularStatus()
+        if (root.showCellularControls) {
+            refreshCellularConfig()
+            refreshCellularStatus()
+        }
     }
 
 
@@ -110,8 +137,10 @@ Item {
                 wifiAutoConnect = obj.wifiConfig.autoConnect === undefined ? wifiAutoConnect : obj.wifiConfig.autoConnect
             }
 
-            if (obj.wifiStatus)
+            if (obj.wifiStatus) {
                 wifiState = obj.wifiStatus
+                wifiEnabled = obj.wifiStatus.enabled === undefined ? wifiEnabled : obj.wifiStatus.enabled
+            }
 
             if (obj.cellularConfig) {
                 cellularIface = safeText(obj.cellularConfig.interface, cellularIface)
@@ -128,20 +157,49 @@ Item {
             return
         }
 
-        if (obj.menuID === "wifiScan") {
-            wifiList = obj.networks || []
+        if (obj.menuID === "wifiScan" || obj.menuID === "scan") {
+            var scanData = obj.data || obj
+            wifiEnabled = scanData.enabled === undefined ? wifiEnabled : scanData.enabled
+            wifiIface = safeText(scanData.device || scanData.interface || obj.device || obj.iface, wifiIface)
+            wifiList = scanData.rows || obj.rows || obj.networks || []
+            var nextWifiState = wifiState || {}
+            if (scanData.active_ssid !== undefined)
+                nextWifiState.ssid = scanData.active_ssid
+            if (scanData.active_ssid !== undefined)
+                nextWifiState.connected = String(scanData.active_ssid || "").length > 0
+            if (scanData.current_ip !== undefined)
+                nextWifiState.ip = scanData.current_ip
+            if (scanData.current_gateway !== undefined)
+                nextWifiState.gateway = scanData.current_gateway
+            if (scanData.current_netmask !== undefined)
+                nextWifiState.netmask = scanData.current_netmask
+            wifiState = nextWifiState
             wifiMessage = wifiList.length > 0 ? ("Found " + wifiList.length + " network(s)") : "No WiFi networks found"
             return
         }
 
-        if (obj.menuID === "wifiStatus") {
-            wifiState = obj.status || {}
+        if (obj.menuID === "wifiStatus" || obj.menuID === "wifi_state") {
+            wifiState = obj.status || obj.data || {}
+            wifiEnabled = wifiState.enabled === undefined ? wifiEnabled : wifiState.enabled
+            wifiIface = safeText(wifiState.device || wifiState.interface || obj.device || obj.iface, wifiIface)
             return
         }
 
-        if (obj.menuID === "cellularStatus") {
-            cellularState = obj.status || {}
+        if (obj.menuID === "cellularStatus" || obj.menuID === "lte_state") {
+            cellularState = obj.status || obj.data || {}
             modemList = obj.modems || modemList
+            return
+        }
+
+        if (obj.menuID === "wifi_toggle") {
+            var toggleData = obj.data || obj
+            wifiEnabled = toggleData.enabled === undefined ? wifiEnabled : toggleData.enabled
+            wifiMessage = safeText(obj.message || toggleData.message, "")
+            refreshWifiStatus()
+            if (wifiEnabled)
+                scanWifi()
+            else
+                wifiList = []
             return
         }
 
@@ -349,15 +407,18 @@ Item {
                     }
 
                     Text {
-                        text: "WiFi and 5G settings. Hardware version: " + root.hardwareVersionName
+                        text: root.showCellularControls
+                              ? "WiFi and 5G settings. Hardware version: " + root.hardwareVersionName
+                              : "WiFi settings. Hardware version: " + root.hardwareVersionName
                         color: ui.subText
                         font.pixelSize: 14
                     }
                 }
 
                 StatusBadge {
-                    textValue: root.hardwareHas5G ? "5G Hardware" : "No 5G Hardware"
-                    badgeColor: root.hardwareHas5G ? ui.accent : ui.warning
+                    visible: root.showCellularControls
+                    textValue: "5G Hardware"
+                    badgeColor: ui.accent
                 }
 
                 AppButton {
@@ -370,7 +431,7 @@ Item {
 
             GridLayout {
                 Layout.fillWidth: true
-                columns: root.width > 1200 ? 2 : 1
+                columns: root.networkGridColumns
                 columnSpacing: 18
                 rowSpacing: 18
 
@@ -379,7 +440,7 @@ Item {
                 // ========================================================
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 620
+                    Layout.preferredHeight: root.networkCardHeight
                     radius: 18
                     color: ui.panel
                     border.color: ui.border
@@ -403,8 +464,8 @@ Item {
                             }
 
                             StatusBadge {
-                                textValue: wifiState.connected ? "Connected" : "Disconnected"
-                                badgeColor: statusColor(wifiState.connected)
+                                textValue: !wifiEnabled ? "Off" : (wifiState.connected ? "Connected" : "Disconnected")
+                                badgeColor: !wifiEnabled ? ui.warning : statusColor(wifiState.connected)
                             }
                         }
 
@@ -448,7 +509,7 @@ Item {
                             FieldLabel { text: "WiFi Interface" }
                             DarkField {
                                 text: wifiIface
-                                placeholderText: "wlan0"
+                                placeholderText: "wlP9p1s0"
                                 onTextChanged: wifiIface = text
                                 Layout.fillWidth: true
                             }
@@ -487,18 +548,38 @@ Item {
                                 text: "Scan"
                                 baseColor: ui.panel2
                                 Layout.fillWidth: true
+                                enabled: wifiEnabled
                                 onClicked: scanWifi()
+                            }
+
+                            AppButton {
+                                text: wifiEnabled ? "WiFi Off" : "WiFi On"
+                                baseColor: wifiEnabled ? ui.warning : ui.accent
+                                Layout.fillWidth: true
+                                onClicked: {
+                                    wifiMessage = wifiEnabled ? "Turning WiFi off..." : "Turning WiFi on..."
+                                    if (!sendBackendCommand({"menuID":"wifi_toggle", "on":!wifiEnabled})) {
+                                        var r = NetworkController.wifiToggle(!wifiEnabled)
+                                        wifiEnabled = r.enabled === undefined ? !wifiEnabled : r.enabled
+                                        wifiMessage = safeText(r.message, "")
+                                        refreshWifiStatus()
+                                        if (wifiEnabled)
+                                            scanWifi()
+                                        else
+                                            wifiList = []
+                                    }
+                                }
                             }
 
                             AppButton {
                                 text: "Connect"
                                 baseColor: ui.accent
                                 Layout.fillWidth: true
-                                enabled: wifiSsid.length > 0
+                                enabled: wifiEnabled && wifiSsid.length > 0
                                 onClicked: {
                                     wifiMessage = "Connecting..."
-                                    if (!sendBackendCommand({"menuID":"wifiConnect", "iface":wifiIface, "ssid":wifiSsid, "password":wifiPassword, "autoConnect":wifiAutoConnect}))
-                                        NetworkController.connectWifi(wifiIface, wifiSsid, wifiPassword, wifiAutoConnect)
+                                    if (!sendBackendCommand({"menuID":"join", "iface":wifiIface, "ssid":wifiSsid, "password":wifiPassword, "bssid":wifiBssid, "autoConnect":wifiAutoConnect}))
+                                        NetworkController.connectWifi(wifiIface, wifiSsid, wifiPassword, wifiAutoConnect, wifiBssid)
                                 }
                             }
 
@@ -506,9 +587,10 @@ Item {
                                 text: "Disconnect"
                                 baseColor: ui.danger
                                 Layout.fillWidth: true
+                                enabled: wifiEnabled
                                 onClicked: {
                                     wifiMessage = "Disconnecting..."
-                                    if (!sendBackendCommand({"menuID":"wifiDisconnect", "iface":wifiIface}))
+                                    if (!sendBackendCommand({"menuID":"disconnect", "device":wifiIface}))
                                         NetworkController.disconnectWifi(wifiIface)
                                 }
                             }
@@ -564,7 +646,12 @@ Item {
                                             }
 
                                             Text {
-                                                text: safeText(modelData.security, "Open")
+                                                text: [
+                                                          modelData.known ? "Saved" : "",
+                                                          safeText(modelData.band, ""),
+                                                          modelData.channel ? ("CH " + modelData.channel) : "",
+                                                          safeText(modelData.security, "Open")
+                                                      ].filter(function(v) { return v !== "" }).join(" · ")
                                                 color: ui.subText
                                                 font.pixelSize: 12
                                                 elide: Text.ElideRight
@@ -589,6 +676,8 @@ Item {
                                         hoverEnabled: true
                                         onClicked: {
                                             wifiSsid = modelData.ssid || ""
+                                            wifiBssid = modelData.bssid || ""
+                                            wifiProfileName = modelData.profile_name || ""
                                         }
                                     }
                                 }
@@ -601,11 +690,13 @@ Item {
                 // 5G card
                 // ========================================================
                 Rectangle {
+                    visible: root.showCellularControls
+                    enabled: root.showCellularControls
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 620
+                    Layout.preferredHeight: root.showCellularControls ? 620 : 0
                     radius: 18
                     color: ui.panel
-                    border.color: root.hardwareHas5G ? ui.border : ui.warning
+                    border.color: ui.border
                     border.width: 1
 
                     ColumnLayout {
@@ -626,30 +717,8 @@ Item {
                             }
 
                             StatusBadge {
-                                textValue: root.hardwareHas5G
-                                           ? (cellularState.connected ? "Connected" : "Disconnected")
-                                           : "Disabled"
-                                badgeColor: root.hardwareHas5G
-                                            ? statusColor(cellularState.connected)
-                                            : ui.warning
-                            }
-                        }
-
-                        Rectangle {
-                            visible: !root.hardwareHas5G
-                            Layout.fillWidth: true
-                            Layout.preferredHeight: 96
-                            radius: 14
-                            color: Qt.rgba(ui.warning.r, ui.warning.g, ui.warning.b, 0.10)
-                            border.color: ui.warning
-
-                            Text {
-                                anchors.fill: parent
-                                anchors.margins: 16
-                                wrapMode: Text.WordWrap
-                                color: ui.warning
-                                font.pixelSize: 15
-                                text: "This build is HW_NONE_5G. Cellular controls are shown for layout consistency, but backend commands are disabled."
+                                textValue: cellularState.connected ? "Connected" : "Disconnected"
+                                badgeColor: statusColor(cellularState.connected)
                             }
                         }
 
@@ -669,7 +738,7 @@ Item {
 
                                 FieldLabel { text: "Modem" }
                                 Text {
-                                    text: safeText(cellularState.modemName, "—")
+                                    text: safeText(cellularState.modemName || cellularState.device || cellularState.interface, "—")
                                     color: ui.text
                                     font.pixelSize: 15
                                     elide: Text.ElideRight
@@ -687,7 +756,7 @@ Item {
 
                                 FieldLabel { text: "State" }
                                 Text {
-                                    text: safeText(cellularState.state, "—")
+                                    text: safeText(cellularState.state || cellularState.sim_status || cellularState.registration_state, "—")
                                     color: ui.text
                                     font.pixelSize: 15
                                     elide: Text.ElideRight
@@ -696,7 +765,7 @@ Item {
 
                                 FieldLabel { text: "Access Tech" }
                                 Text {
-                                    text: safeText(cellularState.accessTech, "—")
+                                    text: safeText(cellularState.accessTech || cellularState.access_technology, "—")
                                     color: ui.text
                                     font.pixelSize: 15
                                     elide: Text.ElideRight
@@ -724,7 +793,7 @@ Item {
                             DarkField {
                                 text: cellularIface
                                 placeholderText: "* or wwan0"
-                                enabled: root.hardwareHas5G
+                                enabled: root.showCellularControls
                                 onTextChanged: cellularIface = text
                                 Layout.fillWidth: true
                             }
@@ -733,7 +802,7 @@ Item {
                             DarkField {
                                 text: cellularApn
                                 placeholderText: "internet"
-                                enabled: root.hardwareHas5G
+                                enabled: root.showCellularControls
                                 onTextChanged: cellularApn = text
                                 Layout.fillWidth: true
                             }
@@ -741,7 +810,7 @@ Item {
                             FieldLabel { text: "Auto Connect" }
                             CheckBox {
                                 checked: cellularAutoConnect
-                                enabled: root.hardwareHas5G
+                                enabled: root.showCellularControls
                                 text: checked ? "Enabled" : "Disabled"
                                 onCheckedChanged: cellularAutoConnect = checked
                                 Layout.fillWidth: true
@@ -756,6 +825,7 @@ Item {
                                 text: "Refresh"
                                 baseColor: ui.panel2
                                 Layout.fillWidth: true
+                                enabled: root.showCellularControls
                                 onClicked: refreshCellularStatus()
                             }
 
@@ -763,7 +833,7 @@ Item {
                                 text: "Connect"
                                 baseColor: ui.accent
                                 Layout.fillWidth: true
-                                enabled: root.hardwareHas5G
+                                enabled: root.showCellularControls
                                 onClicked: {
                                     cellularMessage = "Connecting..."
                                     if (!sendBackendCommand({"menuID":"cellularConnect", "apn":cellularApn, "iface":cellularIface, "autoConnect":cellularAutoConnect}))
@@ -775,7 +845,7 @@ Item {
                                 text: "Disconnect"
                                 baseColor: ui.danger
                                 Layout.fillWidth: true
-                                enabled: root.hardwareHas5G
+                                enabled: root.showCellularControls
                                 onClicked: {
                                     cellularMessage = "Disconnecting..."
                                     if (!sendBackendCommand({"menuID":"cellularDisconnect", "connectionName":"cellular-5g"}))

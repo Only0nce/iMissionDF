@@ -8,11 +8,14 @@
 #include <QDebug>
 #include <QJsonArray>
 #include <QJsonValue>
+#include <QMap>
 #include <QThread>
 #include <QRegularExpression>
 #include <QTextStream>
 #include <QRegExp>
 #include <QDateTime>
+
+#include <algorithm>
 
 // ============================================================
 // Local helpers
@@ -36,7 +39,7 @@ static inline QString normalizeDnsForSave(const QString &in)
         return kDefaultDns;
 
     s.replace(',', ' ');
-    const QStringList parts = s.split(QRegularExpression("\\s+"), Qt::SkipEmptyParts);
+    const QStringList parts = s.split(QRegularExpression("\\s+"), QString::SkipEmptyParts);
 
     QStringList out;
     out.reserve(parts.size());
@@ -131,6 +134,534 @@ static bool runProcessBlocking(const QString &program,
     if (stdErr) *stdErr = QString::fromUtf8(p.readAllStandardError()).trimmed();
 
     return p.exitCode() == 0;
+}
+
+static QString preferredWifiInterface()
+{
+    // Mirrors /home/only/Documents/remote/api.php.
+    // resolveWifiInterface() still falls back to the first real WiFi device.
+    return QStringLiteral("wlP9p1s0");
+}
+
+static QStringList splitNmcliEscaped(const QString &line, int limit = 0)
+{
+    QStringList parts;
+    QString buffer;
+    bool escaped = false;
+
+    for (const QChar ch : line) {
+        if (escaped) {
+            buffer.append(ch);
+            escaped = false;
+            continue;
+        }
+
+        if (ch == QLatin1Char('\\')) {
+            escaped = true;
+            continue;
+        }
+
+        if (ch == QLatin1Char(':') && (limit <= 0 || parts.size() < limit - 1)) {
+            parts << buffer;
+            buffer.clear();
+            continue;
+        }
+
+        buffer.append(ch);
+    }
+
+    if (escaped)
+        buffer.append(QLatin1Char('\\'));
+
+    parts << buffer;
+    return parts;
+}
+
+static bool commandExists(const QString &command)
+{
+    QString out, err;
+    return runProcessBlocking("bash",
+                              {"-lc", QStringLiteral("command -v %1").arg(command)},
+                              &out, &err, 5000)
+           && !out.trimmed().isEmpty();
+}
+
+static QStringList wifiDevices()
+{
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-t", "-f", "DEVICE,TYPE", "device", "status"},
+                            &out, &err, 10000)) {
+        return {};
+    }
+
+    QStringList devices;
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 2);
+        const QString device = parts.value(0).trimmed();
+        const QString type = parts.value(1).trimmed();
+        if (device.isEmpty())
+            continue;
+
+        if (type == QStringLiteral("wifi") || type == QStringLiteral("802-11-wireless"))
+            devices << device;
+    }
+    return devices;
+}
+
+static QString resolveWifiInterface(const QString &preferred)
+{
+    const QString requested = preferred.trimmed().isEmpty()
+                                  ? preferredWifiInterface()
+                                  : preferred.trimmed();
+    const QStringList devices = wifiDevices();
+
+    for (const QString &device : devices) {
+        if (device == requested)
+            return device;
+    }
+
+    for (const QString &device : devices) {
+        if (device.compare(requested, Qt::CaseInsensitive) == 0)
+            return device;
+    }
+
+    return devices.isEmpty() ? requested : devices.first();
+}
+
+static bool wifiRadioEnabled(QString *message = nullptr)
+{
+    QString out, err;
+    if (!runProcessBlocking("nmcli", {"radio", "wifi"}, &out, &err, 10000)) {
+        if (message)
+            *message = err.isEmpty() ? out : err;
+        return false;
+    }
+
+    const QString value = out.trimmed().toLower();
+    return value == QStringLiteral("enabled") || value == QStringLiteral("on");
+}
+
+static QVariantMap activeWifiConnection(const QString &iface)
+{
+    QVariantMap result;
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-t", "-f", "GENERAL.CONNECTION,GENERAL.DEVICE",
+                             "device", "show", iface},
+                            &out, &err, 10000)) {
+        return result;
+    }
+
+    QString connectionName;
+    QString deviceName;
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 2);
+        const QString key = parts.value(0).trimmed();
+        const QString value = parts.value(1).trimmed();
+
+        if (key == QStringLiteral("GENERAL.CONNECTION"))
+            connectionName = value;
+        else if (key == QStringLiteral("GENERAL.DEVICE"))
+            deviceName = value;
+    }
+
+    if (connectionName.isEmpty() || connectionName == QStringLiteral("--"))
+        return result;
+
+    result[QStringLiteral("name")] = connectionName;
+    result[QStringLiteral("device")] = deviceName.isEmpty() ? iface : deviceName;
+    return result;
+}
+
+static QString activeConnectionSsid(const QString &connectionName)
+{
+    if (connectionName.trimmed().isEmpty())
+        return QString();
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-g", "802-11-wireless.ssid",
+                             "connection", "show", connectionName},
+                            &out, &err, 10000)) {
+        return QString();
+    }
+
+    return out.split('\n', QString::SkipEmptyParts).value(0).trimmed();
+}
+
+static QMap<QString, QString> wifiProfilesBySsid()
+{
+    QMap<QString, QString> profiles;
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-t", "-f", "NAME,TYPE", "connection", "show"},
+                            &out, &err, 10000)) {
+        return profiles;
+    }
+
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 2);
+        const QString name = parts.value(0).trimmed();
+        const QString type = parts.value(1).trimmed();
+        if (name.isEmpty())
+            continue;
+        if (type != QStringLiteral("802-11-wireless") && type != QStringLiteral("wifi"))
+            continue;
+
+        const QString ssid = activeConnectionSsid(name);
+        if (!ssid.isEmpty() && !profiles.contains(ssid))
+            profiles.insert(ssid, name);
+    }
+
+    return profiles;
+}
+
+static QString findWifiConnectionNameBySsid(const QString &ssid)
+{
+    const QString cleanSsid = ssid.trimmed();
+    if (cleanSsid.isEmpty())
+        return QString();
+
+    return wifiProfilesBySsid().value(cleanSsid);
+}
+
+static QString bandLabelFromFrequency(const QString &frequency)
+{
+    const int mhz = frequency.trimmed().toInt();
+    if (mhz >= 4900)
+        return QStringLiteral("5 GHz");
+    if (mhz >= 2400)
+        return QStringLiteral("2.4 GHz");
+    if (mhz > 0)
+        return QStringLiteral("%1 MHz").arg(mhz);
+    return QString();
+}
+
+static QString wifiRowKey(const QString &ssid,
+                          const QString &bssid,
+                          const QString &frequency,
+                          const QString &channel)
+{
+    const QString cleanBssid = bssid.trimmed();
+    if (!cleanBssid.isEmpty())
+        return cleanBssid.toLower();
+
+    return QStringLiteral("%1|%2|%3")
+        .arg(ssid.trimmed(), frequency.trimmed(), channel.trimmed())
+        .toLower();
+}
+
+static QString prefixToMask(int prefix)
+{
+    if (prefix < 0 || prefix > 32)
+        return QString();
+
+    QStringList octets;
+    for (int i = 0; i < 4; ++i) {
+        int value = 0;
+        if (prefix >= 8) {
+            value = 255;
+            prefix -= 8;
+        } else if (prefix > 0) {
+            value = 256 - (1 << (8 - prefix));
+            prefix = 0;
+        }
+        octets << QString::number(value);
+    }
+    return octets.join('.');
+}
+
+static int maskToPrefix(const QString &mask)
+{
+    const QStringList parts = mask.trimmed().split('.');
+    if (parts.size() != 4)
+        return -1;
+
+    QString bits;
+    for (const QString &part : parts) {
+        bool ok = false;
+        const int value = part.toInt(&ok);
+        if (!ok || value < 0 || value > 255)
+            return -1;
+        bits += QString::number(value, 2).rightJustified(8, QLatin1Char('0'));
+    }
+
+    if (!QRegularExpression(QStringLiteral("^1*0*$")).match(bits).hasMatch())
+        return -1;
+
+    return bits.count(QLatin1Char('1'));
+}
+
+static QVariantMap parseConnectionIpv4(const QString &connectionName, QString *error = nullptr)
+{
+    QVariantMap info;
+    info[QStringLiteral("ipv4_method")] = QStringLiteral("auto");
+    info[QStringLiteral("ipv4_addresses")] = QString();
+    info[QStringLiteral("ipv4_gateway")] = QString();
+    info[QStringLiteral("dns")] = QString();
+    info[QStringLiteral("dns_auto")] = true;
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-t", "-f",
+                             "ipv4.method,ipv4.addresses,ipv4.gateway,ipv4.dns,ipv4.ignore-auto-dns",
+                             "connection", "show", connectionName},
+                            &out, &err, 10000)) {
+        if (error)
+            *error = err.isEmpty() ? out : err;
+        return info;
+    }
+
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 2);
+        const QString key = parts.value(0).trimmed();
+        QString value = parts.value(1).trimmed();
+
+        if (key == QStringLiteral("ipv4.method")) {
+            info[QStringLiteral("ipv4_method")] = value.isEmpty() ? QStringLiteral("auto") : value;
+        } else if (key == QStringLiteral("ipv4.addresses")) {
+            info[QStringLiteral("ipv4_addresses")] = value;
+        } else if (key == QStringLiteral("ipv4.gateway")) {
+            info[QStringLiteral("ipv4_gateway")] = value;
+        } else if (key == QStringLiteral("ipv4.dns")) {
+            value.replace(QLatin1Char(';'), QStringLiteral(", "));
+            info[QStringLiteral("dns")] = value;
+        } else if (key == QStringLiteral("ipv4.ignore-auto-dns")) {
+            const QString lower = value.toLower();
+            info[QStringLiteral("dns_auto")] =
+                !(lower == QStringLiteral("yes")
+                  || lower == QStringLiteral("true")
+                  || lower == QStringLiteral("1"));
+        }
+    }
+
+    return info;
+}
+
+static QVariantMap parseDeviceIpv4(const QString &iface)
+{
+    QVariantMap info;
+    info[QStringLiteral("dev_ip4_address")] = QString();
+    info[QStringLiteral("dev_ip4_gateway")] = QString();
+    info[QStringLiteral("dev_ip4_plain")] = QString();
+    info[QStringLiteral("dev_ip4_prefix")] = QString();
+    info[QStringLiteral("dev_ip4_netmask")] = QString();
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli", {"-t", "device", "show", iface}, &out, &err, 10000))
+        return info;
+
+    QString ipWithPrefix;
+    QString gateway;
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 2);
+        const QString key = parts.value(0).trimmed();
+        const QString value = parts.value(1).trimmed();
+
+        if (key.startsWith(QStringLiteral("IP4.ADDRESS")) && ipWithPrefix.isEmpty())
+            ipWithPrefix = value;
+        else if (key == QStringLiteral("IP4.GATEWAY") && gateway.isEmpty())
+            gateway = value;
+    }
+
+    info[QStringLiteral("dev_ip4_address")] = ipWithPrefix;
+    info[QStringLiteral("dev_ip4_gateway")] = gateway;
+
+    if (!ipWithPrefix.isEmpty()) {
+        const QStringList parts = ipWithPrefix.split('/');
+        const QString plainIp = parts.value(0).trimmed();
+        const QString prefixText = parts.value(1).trimmed();
+        info[QStringLiteral("dev_ip4_plain")] = plainIp;
+        info[QStringLiteral("dev_ip4_prefix")] = prefixText;
+        if (!prefixText.isEmpty())
+            info[QStringLiteral("dev_ip4_netmask")] = prefixToMask(prefixText.toInt());
+    }
+
+    return info;
+}
+
+static QVariantMap parseKeyValueLines(const QStringList &lines)
+{
+    QVariantMap map;
+    for (const QString &line : lines) {
+        const int idx = line.indexOf(QLatin1Char(':'));
+        if (idx < 0)
+            continue;
+        const QString key = line.left(idx).trimmed();
+        const QString value = line.mid(idx + 1).trimmed();
+        if (!key.isEmpty())
+            map[key] = value;
+    }
+    return map;
+}
+
+static QString pickFirstValue(const QVariantMap &map, const QStringList &keys)
+{
+    for (const QString &key : keys) {
+        const QString value = map.value(key).toString().trimmed();
+        if (!value.isEmpty() && value != QStringLiteral("--"))
+            return value;
+    }
+    return QString();
+}
+
+static QVariantMap findLteNmDevice()
+{
+    QVariantMap fallback;
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-t", "-f", "DEVICE,TYPE,STATE,CONNECTION",
+                             "device", "status"},
+                            &out, &err, 10000)) {
+        return fallback;
+    }
+
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 4);
+        const QString type = parts.value(1).trimmed();
+        if (type != QStringLiteral("gsm")
+            && type != QStringLiteral("cdma")
+            && type != QStringLiteral("wwan")
+            && type != QStringLiteral("modem")) {
+            continue;
+        }
+
+        QVariantMap row;
+        row[QStringLiteral("device")] = parts.value(0).trimmed();
+        row[QStringLiteral("type")] = type;
+        row[QStringLiteral("state")] = parts.value(2).trimmed();
+        row[QStringLiteral("connection")] = parts.value(3).trimmed();
+
+        const QString state = row.value(QStringLiteral("state")).toString().toLower();
+        if (state == QStringLiteral("connected") || state == QStringLiteral("connecting"))
+            return row;
+
+        if (fallback.isEmpty())
+            fallback = row;
+    }
+
+    return fallback;
+}
+
+static QString findFirstModemId()
+{
+    if (!commandExists(QStringLiteral("mmcli")))
+        return QString();
+
+    QString out, err;
+    if (!runProcessBlocking("mmcli", {"-L"}, &out, &err, 10000))
+        return QString();
+
+    const QRegularExpression re(QStringLiteral("/Modem/(\\d+)"));
+    const QRegularExpressionMatch match = re.match(out);
+    return match.hasMatch() ? match.captured(1) : QString();
+}
+
+static QVariantMap parseIfaceSnapshot(const QString &iface)
+{
+    QVariantMap result;
+
+    QString out, err;
+    if (!runProcessBlocking("ifconfig", {iface}, &out, &err, 10000) || out.trimmed().isEmpty())
+        return result;
+
+    auto capture = [&out](const QString &pattern) -> QString {
+        const QRegularExpression re(pattern,
+                                    QRegularExpression::CaseInsensitiveOption
+                                    | QRegularExpression::MultilineOption);
+        const QRegularExpressionMatch match = re.match(out);
+        return match.hasMatch() ? match.captured(1).trimmed() : QString();
+    };
+
+    result[QStringLiteral("iface")] = iface;
+    result[QStringLiteral("interface")] = iface;
+    result[QStringLiteral("flags")] = capture(QStringLiteral("flags=\\d+<([^>]+)>"));
+    result[QStringLiteral("mtu")] = capture(QStringLiteral("\\bmtu\\s+(\\d+)"));
+    result[QStringLiteral("ipv4")] = capture(QStringLiteral("\\binet\\s+([0-9.]+)"));
+    result[QStringLiteral("ipv6")] = capture(QStringLiteral("\\binet6\\s+([0-9a-f:]+)"));
+    result[QStringLiteral("address")] =
+        capture(QStringLiteral("\\b(?:ether|unspec)\\s+([^\\n]+)"))
+            .replace(QRegularExpression(QStringLiteral("\\s+txqueuelen\\s+\\d+.*$")),
+                     QString());
+    result[QStringLiteral("tx_queue")] = capture(QStringLiteral("\\btxqueuelen\\s+(\\d+)"));
+    result[QStringLiteral("txqueuelen")] = result.value(QStringLiteral("tx_queue"));
+    result[QStringLiteral("rx_packets")] =
+        capture(QStringLiteral("RX packets\\s+(\\d+)\\s+bytes\\s+\\d+"));
+    result[QStringLiteral("rx_bytes")] =
+        capture(QStringLiteral("RX packets\\s+\\d+\\s+bytes\\s+(\\d+)"));
+    result[QStringLiteral("tx_packets")] =
+        capture(QStringLiteral("TX packets\\s+(\\d+)\\s+bytes\\s+\\d+"));
+    result[QStringLiteral("tx_bytes")] =
+        capture(QStringLiteral("TX packets\\s+\\d+\\s+bytes\\s+(\\d+)"));
+
+    QString routeOut, routeErr;
+    if (runProcessBlocking("ip",
+                           {"-4", "route", "show", "default", "dev", iface},
+                           &routeOut, &routeErr, 10000)) {
+        const QRegularExpression re(QStringLiteral("\\bvia\\s+([0-9.]+)"));
+        const QRegularExpressionMatch match = re.match(routeOut);
+        if (match.hasMatch())
+            result[QStringLiteral("gateway")] = match.captured(1).trimmed();
+    }
+
+    return result;
+}
+
+static QVariantMap readLteSignalFromCsq()
+{
+    QVariantMap result;
+    result[QStringLiteral("ok")] = false;
+    result[QStringLiteral("signal")] = QString();
+    result[QStringLiteral("csq")] = QString();
+    result[QStringLiteral("dbm")] = QString();
+    result[QStringLiteral("raw")] = QString();
+    result[QStringLiteral("error")] = QString();
+
+    if (!commandExists(QStringLiteral("socat"))) {
+        result[QStringLiteral("error")] = QStringLiteral("socat command not found");
+        return result;
+    }
+
+    if (!QFile::exists(QStringLiteral("/dev/mhi_DUN"))) {
+        result[QStringLiteral("error")] = QStringLiteral("/dev/mhi_DUN not found");
+        return result;
+    }
+
+    const QString shell = QStringLiteral("printf \"AT+CSQ\\r\" | socat - /dev/mhi_DUN,crnl");
+    QString out, err;
+    if (!runProcessBlocking("bash", {"-lc", shell}, &out, &err, 10000)) {
+        result[QStringLiteral("raw")] = out;
+        result[QStringLiteral("error")] = err.isEmpty() ? out : err;
+        return result;
+    }
+
+    result[QStringLiteral("raw")] = out;
+    const QRegularExpression re(QStringLiteral("\\+CSQ:\\s*(\\d+)\\s*,\\s*(\\d+)"),
+                                QRegularExpression::CaseInsensitiveOption);
+    const QRegularExpressionMatch match = re.match(out);
+    if (!match.hasMatch()) {
+        result[QStringLiteral("error")] = QStringLiteral("Unable to parse +CSQ response");
+        return result;
+    }
+
+    const int csq = match.captured(1).toInt();
+    if (csq >= 0 && csq <= 31) {
+        const int dbm = -113 + (2 * csq);
+        result[QStringLiteral("ok")] = true;
+        result[QStringLiteral("csq")] = QString::number(csq);
+        result[QStringLiteral("dbm")] = QString::number(dbm);
+        result[QStringLiteral("signal")] = QStringLiteral("%1 dBm").arg(dbm);
+    } else if (csq == 99) {
+        result[QStringLiteral("error")] = QStringLiteral("CSQ unknown");
+    } else {
+        result[QStringLiteral("error")] = QStringLiteral("CSQ out of range: %1").arg(csq);
+    }
+
+    return result;
 }
 
 static QVariantMap parseDeviceShow(const QString &iface)
@@ -424,7 +955,7 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
             dnsText = dnsVal.toString();
         }
 
-        const QStringList dnsParts = dnsText.split(',', Qt::SkipEmptyParts);
+        const QStringList dnsParts = dnsText.split(',', QString::SkipEmptyParts);
         result["dns"] = dnsParts.value(0).trimmed();
         result["dns2"] = dnsParts.value(1).trimmed();
         return result;
@@ -458,148 +989,456 @@ QVariantMap NetworkController::loadWifiConfig()
     const QJsonObject wifi = root.value("wifi").toObject();
 
     result["enabled"] = wifi.value("enabled").toBool(true);
-    result["interface"] = wifi.value("interface").toString("wlan0");
+    result["interface"] = resolveWifiInterface(wifi.value("interface").toString(preferredWifiInterface()));
+    result["preferredInterface"] = preferredWifiInterface();
     result["ssid"] = wifi.value("ssid").toString();
     result["mode"] = wifi.value("mode").toString("dhcp");
     result["autoConnect"] = wifi.value("autoConnect").toBool(true);
     return result;
 }
 
-QVariantList NetworkController::scanWifi(const QString &iface)
+QVariantMap NetworkController::wifiState(const QString &iface)
 {
-    QVariantList list;
+    const QString wifiIface = resolveWifiInterface(iface);
+    const bool enabled = wifiRadioEnabled();
+    const QVariantMap active = activeWifiConnection(wifiIface);
+    const QVariantMap live = active.isEmpty() ? QVariantMap() : parseDeviceIpv4(wifiIface);
+    const QString connectionName = active.value(QStringLiteral("name")).toString();
+    const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(connectionName);
 
-    runProcessBlocking("nmcli", {"radio", "wifi", "on"}, nullptr, nullptr, 10000);
-    runProcessBlocking("nmcli", {"device", "wifi", "rescan", "ifname", iface}, nullptr, nullptr, 15000);
+    QVariantMap result;
+    result[QStringLiteral("enabled")] = enabled;
+    result[QStringLiteral("device")] = wifiIface;
+    result[QStringLiteral("interface")] = wifiIface;
+    result[QStringLiteral("active")] = !active.isEmpty();
+    result[QStringLiteral("connection_name")] = connectionName;
+    result[QStringLiteral("connection")] = connectionName;
+    result[QStringLiteral("active_ssid")] = activeSsid;
+    result[QStringLiteral("ssid")] = activeSsid;
+    result[QStringLiteral("current_ip")] = live.value(QStringLiteral("dev_ip4_plain")).toString();
+    result[QStringLiteral("current_gateway")] = live.value(QStringLiteral("dev_ip4_gateway")).toString();
+    result[QStringLiteral("current_netmask")] = live.value(QStringLiteral("dev_ip4_netmask")).toString();
+    result[QStringLiteral("warning")] = QString();
+
+    // Backward-compatible keys used by the earlier QML.
+    result[QStringLiteral("connected")] = !active.isEmpty();
+    result[QStringLiteral("ip")] = result.value(QStringLiteral("current_ip"));
+    result[QStringLiteral("gateway")] = result.value(QStringLiteral("current_gateway"));
+    result[QStringLiteral("netmask")] = result.value(QStringLiteral("current_netmask"));
+    return result;
+}
+
+QVariantMap NetworkController::scanWifiPage(const QString &iface)
+{
+    const QString wifiIface = resolveWifiInterface(iface);
+    QVariantMap result;
+    result[QStringLiteral("enabled")] = wifiRadioEnabled();
+    result[QStringLiteral("device")] = wifiIface;
+    result[QStringLiteral("interface")] = wifiIface;
+    result[QStringLiteral("count")] = 0;
+    result[QStringLiteral("rows")] = QVariantList();
+    result[QStringLiteral("active_ssid")] = QString();
+    result[QStringLiteral("current_ip")] = QString();
+    result[QStringLiteral("current_gateway")] = QString();
+    result[QStringLiteral("current_netmask")] = QString();
+
+    if (!result.value(QStringLiteral("enabled")).toBool())
+        return result;
+
+    const QMap<QString, QString> profiles = wifiProfilesBySsid();
+    const QVariantMap active = activeWifiConnection(wifiIface);
+    const QString activeName = active.value(QStringLiteral("name")).toString();
+    const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(activeName);
+    const QVariantMap live = active.isEmpty() ? QVariantMap() : parseDeviceIpv4(wifiIface);
+
+    result[QStringLiteral("active_ssid")] = activeSsid;
+    result[QStringLiteral("current_ip")] = live.value(QStringLiteral("dev_ip4_plain")).toString();
+    result[QStringLiteral("current_gateway")] = live.value(QStringLiteral("dev_ip4_gateway")).toString();
+    result[QStringLiteral("current_netmask")] = live.value(QStringLiteral("dev_ip4_netmask")).toString();
 
     QString out, err;
-    bool ok = runProcessBlocking("nmcli",
-                                 {"-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "device", "wifi", "list", "ifname", iface},
-                                 &out, &err, 15000);
+    runProcessBlocking("nmcli",
+                       {"device", "wifi", "rescan", "ifname", wifiIface},
+                       nullptr, nullptr, 15000);
+    QThread::msleep(900);
+
+    const bool ok = runProcessBlocking("nmcli",
+                                       {"-t", "-f",
+                                        "IN-USE,BSSID,SSID,CHAN,FREQ,SIGNAL,SECURITY",
+                                        "device", "wifi", "list", "ifname", wifiIface},
+                                       &out, &err, 15000);
 
     if (!ok) {
-        QVariantMap row;
-        row["ssid"] = "";
-        row["signal"] = 0;
-        row["security"] = "";
-        row["active"] = false;
-        row["error"] = err.isEmpty() ? QStringLiteral("nmcli wifi scan failed") : err;
-        list << row;
-        return list;
+        result[QStringLiteral("error")] =
+            err.isEmpty() ? QStringLiteral("WiFi scan failed") : err;
+        return result;
     }
 
-    QSet<QString> seenSsid;
-
-    for (const QString &line : out.split('\n', Qt::SkipEmptyParts)) {
-        // nmcli -t escapes ':' as '\:'. This simple parser is enough for common SSID.
-        QStringList parts;
-        QString cur;
-        bool esc = false;
-
-        for (QChar ch : line) {
-            if (esc) {
-                cur.append(ch);
-                esc = false;
-            } else if (ch == '\\') {
-                esc = true;
-            } else if (ch == ':') {
-                parts << cur;
-                cur.clear();
-            } else {
-                cur.append(ch);
-            }
-        }
-        parts << cur;
-
-        if (parts.size() < 4)
-            continue;
-
-        const QString activeText = parts.value(0).trimmed();
-        const QString ssid = parts.value(1).trimmed();
+    QVariantList rows;
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+        const QStringList parts = splitNmcliEscaped(line, 7);
+        const QString inUse = parts.value(0).trimmed();
+        const QString bssid = parts.value(1).trimmed();
+        const QString ssid = parts.value(2).trimmed();
+        const QString channel = parts.value(3).trimmed();
+        const QString frequency = parts.value(4).trimmed();
+        const int signal = qBound(0, parts.value(5).trimmed().toInt(), 100);
+        const QString security = parts.value(6).trimmed();
         if (ssid.isEmpty())
             continue;
 
-        // Avoid duplicate SSIDs in UI.
-        if (seenSsid.contains(ssid))
-            continue;
-        seenSsid.insert(ssid);
-
         QVariantMap row;
-        row["active"] = (activeText == "*");
-        row["ssid"] = ssid;
-        row["signal"] = parts.value(2).toInt();
-        row["security"] = parts.value(3).trimmed();
-        list << row;
+        row[QStringLiteral("key")] = wifiRowKey(ssid, bssid, frequency, channel);
+        row[QStringLiteral("ssid")] = ssid;
+        row[QStringLiteral("bssid")] = bssid;
+        row[QStringLiteral("channel")] = channel;
+        row[QStringLiteral("frequency")] = frequency;
+        row[QStringLiteral("band")] = bandLabelFromFrequency(frequency);
+        row[QStringLiteral("signal")] = signal;
+        row[QStringLiteral("secure")] = !security.isEmpty() && security != QStringLiteral("--");
+        row[QStringLiteral("security")] = security;
+        row[QStringLiteral("active")] = (inUse == QStringLiteral("*"));
+        row[QStringLiteral("known")] = profiles.contains(ssid);
+        row[QStringLiteral("profile_name")] = profiles.value(ssid);
+        row[QStringLiteral("device")] = wifiIface;
+        rows << row;
     }
 
-    return list;
+    std::sort(rows.begin(), rows.end(), [](const QVariant &left, const QVariant &right) {
+        const QVariantMap a = left.toMap();
+        const QVariantMap b = right.toMap();
+
+        if (a.value(QStringLiteral("active")).toBool() != b.value(QStringLiteral("active")).toBool())
+            return a.value(QStringLiteral("active")).toBool();
+        if (a.value(QStringLiteral("known")).toBool() != b.value(QStringLiteral("known")).toBool())
+            return a.value(QStringLiteral("known")).toBool();
+        if (a.value(QStringLiteral("signal")).toInt() != b.value(QStringLiteral("signal")).toInt())
+            return a.value(QStringLiteral("signal")).toInt() > b.value(QStringLiteral("signal")).toInt();
+
+        const int ssidCompare = QString::compare(
+            a.value(QStringLiteral("ssid")).toString(),
+            b.value(QStringLiteral("ssid")).toString(),
+            Qt::CaseInsensitive);
+        if (ssidCompare != 0)
+            return ssidCompare < 0;
+
+        const int af = a.value(QStringLiteral("frequency")).toString().toInt();
+        const int bf = b.value(QStringLiteral("frequency")).toString().toInt();
+        if (af != bf)
+            return af > bf;
+
+        return QString::compare(
+                   a.value(QStringLiteral("bssid")).toString(),
+                   b.value(QStringLiteral("bssid")).toString(),
+                   Qt::CaseInsensitive) < 0;
+    });
+
+    result[QStringLiteral("count")] = rows.size();
+    result[QStringLiteral("rows")] = rows;
+    return result;
+}
+
+QVariantList NetworkController::scanWifi(const QString &iface)
+{
+    return scanWifiPage(iface).value(QStringLiteral("rows")).toList();
 }
 
 QVariantMap NetworkController::wifiStatus(const QString &iface)
 {
-    QVariantMap result = parseDeviceShow(iface);
-    result["interface"] = iface;
+    QVariantMap result = wifiState(iface);
+    const QVariantList wifiList = scanWifi(iface);
+    for (const QVariant &rowValue : wifiList) {
+        const QVariantMap row = rowValue.toMap();
+        if (!row.value(QStringLiteral("active")).toBool())
+            continue;
+
+        result[QStringLiteral("ssid")] = row.value(QStringLiteral("ssid")).toString();
+        result[QStringLiteral("active_ssid")] = row.value(QStringLiteral("ssid")).toString();
+        result[QStringLiteral("signal")] = row.value(QStringLiteral("signal")).toInt();
+        result[QStringLiteral("security")] = row.value(QStringLiteral("security")).toString();
+        result[QStringLiteral("bssid")] = row.value(QStringLiteral("bssid")).toString();
+        result[QStringLiteral("band")] = row.value(QStringLiteral("band")).toString();
+        break;
+    }
+    return result;
+}
+
+QVariantMap NetworkController::wifiToggle(bool enabled)
+{
+    QVariantMap result;
+    QString out, err;
+    const bool ok = runProcessBlocking("nmcli",
+                                       {"radio", "wifi", enabled ? "on" : "off"},
+                                       &out, &err, 30000);
+
+    result[QStringLiteral("ok")] = ok;
+    result[QStringLiteral("enabled")] = enabled;
+    result[QStringLiteral("device")] = resolveWifiInterface(QString());
+    result[QStringLiteral("output")] = out;
+    result[QStringLiteral("message")] =
+        ok ? (enabled ? QStringLiteral("WiFi radio turned on")
+                      : QStringLiteral("WiFi radio turned off"))
+           : (err.isEmpty() ? out : err);
+    return result;
+}
+
+QVariantMap NetworkController::forgetWifi(const QString &ssid)
+{
+    QVariantMap result;
+    const QString cleanSsid = ssid.trimmed();
+    result[QStringLiteral("ssid")] = cleanSsid;
+
+    if (cleanSsid.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] = QStringLiteral("Missing SSID");
+        return result;
+    }
+
+    const QString connectionName = findWifiConnectionNameBySsid(cleanSsid);
+    if (connectionName.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] =
+            QStringLiteral("Saved WiFi profile was not found for this SSID");
+        return result;
+    }
 
     QString out, err;
-    runProcessBlocking("nmcli",
-                       {"-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"},
-                       &out, &err, 10000);
+    const bool ok = runProcessBlocking("nmcli",
+                                       {"connection", "delete", connectionName},
+                                       &out, &err, 30000);
 
-    for (const QString &line : out.split('\n', Qt::SkipEmptyParts)) {
-        const QStringList p = line.split(':');
-        if (p.size() >= 4 && p.value(0) == iface) {
-            result["type"] = p.value(1);
-            result["deviceState"] = p.value(2);
-            result["connection"] = p.value(3);
-            result["connected"] = (p.value(2).toLower() == "connected");
-            break;
+    result[QStringLiteral("ok")] = ok;
+    result[QStringLiteral("connection_name")] = connectionName;
+    result[QStringLiteral("output")] = out;
+    result[QStringLiteral("message")] =
+        ok ? QStringLiteral("Removed saved WiFi profile")
+           : (err.isEmpty() ? out : err);
+    return result;
+}
+
+QVariantMap NetworkController::wifiAdvancedInfo(const QString &ssid, const QString &iface)
+{
+    const QString wifiIface = resolveWifiInterface(iface);
+    const QString cleanSsid = ssid.trimmed();
+    const QVariantMap active = activeWifiConnection(wifiIface);
+    const QString activeName = active.value(QStringLiteral("name")).toString();
+    const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(activeName);
+
+    QString connectionName;
+    if (!cleanSsid.isEmpty()) {
+        connectionName = findWifiConnectionNameBySsid(cleanSsid);
+        if (connectionName.isEmpty() && !activeName.isEmpty() && activeSsid == cleanSsid)
+            connectionName = activeName;
+    } else if (!activeName.isEmpty()) {
+        connectionName = activeName;
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("ssid")] = cleanSsid.isEmpty() ? activeSsid : cleanSsid;
+    result[QStringLiteral("device")] = wifiIface;
+    result[QStringLiteral("connection_name")] = connectionName;
+    result[QStringLiteral("active")] = !connectionName.isEmpty() && connectionName == activeName;
+
+    if (connectionName.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] =
+            QStringLiteral("No saved or active profile was found for this SSID");
+        return result;
+    }
+
+    QString error;
+    result.unite(parseConnectionIpv4(connectionName, &error));
+    if (!error.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] = error;
+        return result;
+    }
+
+    if (result.value(QStringLiteral("active")).toBool())
+        result.unite(parseDeviceIpv4(wifiIface));
+
+    result[QStringLiteral("ok")] = true;
+    return result;
+}
+
+QVariantMap NetworkController::applyWifiIpv4(const QString &ssid,
+                                             const QString &method,
+                                             const QString &ip,
+                                             const QString &mask,
+                                             const QString &gateway,
+                                             bool dnsAuto,
+                                             const QString &dns)
+{
+    const QString wifiIface = resolveWifiInterface(QString());
+    const QVariantMap active = activeWifiConnection(wifiIface);
+    const QString activeName = active.value(QStringLiteral("name")).toString();
+    const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(activeName);
+
+    QString cleanSsid = ssid.trimmed();
+    QString connectionName;
+    if (!cleanSsid.isEmpty()) {
+        connectionName = findWifiConnectionNameBySsid(cleanSsid);
+        if (connectionName.isEmpty() && activeSsid == cleanSsid)
+            connectionName = activeName;
+    } else if (!activeName.isEmpty()) {
+        connectionName = activeName;
+        cleanSsid = activeSsid;
+    }
+
+    QVariantMap result;
+    result[QStringLiteral("ssid")] = cleanSsid;
+    result[QStringLiteral("device")] = wifiIface;
+    result[QStringLiteral("connection_name")] = connectionName;
+
+    if (connectionName.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] =
+            QStringLiteral("Saved WiFi profile was not found for applying IPv4 settings");
+        return result;
+    }
+
+    const QString methodValue = method.trimmed().toLower() == QStringLiteral("manual")
+                                    ? QStringLiteral("manual")
+                                    : QStringLiteral("auto");
+
+    auto runApply = [&result](const QStringList &args) -> bool {
+        QString out, err;
+        const bool ok = runProcessBlocking("nmcli", args, &out, &err, 30000);
+        if (!ok) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("message")] = err.isEmpty() ? out : err;
+            return false;
+        }
+        return true;
+    };
+
+    if (methodValue == QStringLiteral("manual")) {
+        const QString cleanIp = ip.trimmed();
+        const QString cleanMask = mask.trimmed();
+        if (cleanIp.isEmpty() || cleanMask.isEmpty()) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("message")] =
+                QStringLiteral("Manual IPv4 requires both IP Address and Subnet Mask");
+            return result;
+        }
+
+        const int prefix = maskToPrefix(cleanMask);
+        if (prefix < 0) {
+            result[QStringLiteral("ok")] = false;
+            result[QStringLiteral("message")] = QStringLiteral("Invalid Subnet Mask format");
+            return result;
+        }
+
+        if (!runApply({"connection", "modify", connectionName,
+                       "ipv4.method", "manual",
+                       "ipv4.addresses", QStringLiteral("%1/%2").arg(cleanIp).arg(prefix)})) {
+            return result;
+        }
+
+        if (!runApply({"connection", "modify", connectionName,
+                       "ipv4.gateway", gateway.trimmed()})) {
+            return result;
+        }
+    } else {
+        if (!runApply({"connection", "modify", connectionName,
+                       "ipv4.method", "auto",
+                       "ipv4.addresses", "",
+                       "ipv4.gateway", ""})) {
+            return result;
         }
     }
 
-    // Try to get signal of active WiFi.
-    const QVariantList wifiList = scanWifi(iface);
-    for (const QVariant &v : wifiList) {
-        const QVariantMap row = v.toMap();
-        if (row.value("active").toBool()) {
-            result["ssid"] = row.value("ssid").toString();
-            result["signal"] = row.value("signal").toInt();
-            result["security"] = row.value("security").toString();
-            break;
+    if (dnsAuto || dns.trimmed().isEmpty()) {
+        if (!runApply({"connection", "modify", connectionName,
+                       "ipv4.dns", "",
+                       "ipv4.ignore-auto-dns", "no"})) {
+            return result;
+        }
+    } else {
+        if (!runApply({"connection", "modify", connectionName,
+                       "ipv4.dns", dns.trimmed(),
+                       "ipv4.ignore-auto-dns", "yes"})) {
+            return result;
         }
     }
 
+    const bool targetIsActive = (!activeName.isEmpty() && activeName == connectionName);
+    bool reapplied = false;
+    QString warning;
+    if (targetIsActive) {
+        QString out, err;
+        reapplied = runProcessBlocking("nmcli",
+                                       {"connection", "up", connectionName,
+                                        "ifname", wifiIface},
+                                       &out, &err, 45000);
+        if (!reapplied)
+            warning = err.isEmpty() ? out : err;
+    }
+
+    result[QStringLiteral("ok")] = true;
+    result[QStringLiteral("method")] = methodValue;
+    result[QStringLiteral("active")] = targetIsActive;
+    result[QStringLiteral("reapplied")] = reapplied;
+    result[QStringLiteral("warning")] = warning;
+    result[QStringLiteral("message")] =
+        warning.isEmpty() ? QStringLiteral("WiFi IPv4 settings saved")
+                          : QStringLiteral("WiFi IPv4 settings saved with warning");
     return result;
 }
 
 void NetworkController::connectWifi(const QString &iface,
                                     const QString &ssid,
                                     const QString &password,
-                                    bool autoConnect)
+                                    bool autoConnect,
+                                    const QString &bssid)
 {
     QPointer<NetworkController> self(this);
 
-    QThread *t = QThread::create([self, iface, ssid, password, autoConnect]() {
+    QThread *t = QThread::create([self, iface, ssid, password, autoConnect, bssid]() {
         bool ok = false;
         QString out, err;
 
+        const QString wifiIface = resolveWifiInterface(iface);
         const QString trimmedSsid = ssid.trimmed();
         if (trimmedSsid.isEmpty()) {
             err = QStringLiteral("SSID is empty");
         } else {
             runProcessBlocking("nmcli", {"radio", "wifi", "on"}, nullptr, nullptr, 10000);
 
-            QStringList args = {"device", "wifi", "connect", trimmedSsid, "ifname", iface};
+            QStringList args = {"device", "wifi", "connect", trimmedSsid};
+            const QString cleanBssid = bssid.trimmed();
+            if (!cleanBssid.isEmpty())
+                args << "bssid" << cleanBssid;
+            args << "ifname" << wifiIface;
             if (!password.isEmpty())
                 args << "password" << password;
 
             ok = runProcessBlocking("nmcli", args, &out, &err, 45000);
 
+            QString profileName = findWifiConnectionNameBySsid(trimmedSsid);
+            if (!ok && !profileName.isEmpty()) {
+                QString upOut, upErr;
+                ok = runProcessBlocking("nmcli",
+                                        {"connection", "up", profileName,
+                                         "ifname", wifiIface},
+                                        &upOut, &upErr, 45000);
+                if (ok) {
+                    out = upOut;
+                    err.clear();
+                } else if (err.isEmpty()) {
+                    err = upErr;
+                }
+            }
+
             if (ok) {
+                if (profileName.isEmpty())
+                    profileName = findWifiConnectionNameBySsid(trimmedSsid);
+
                 // Save safe WiFi config. Do not save password here.
                 QJsonObject root = readNetworkConfigRoot();
                 QJsonObject wifi;
                 wifi["enabled"] = true;
-                wifi["interface"] = iface;
+                wifi["interface"] = wifiIface;
                 wifi["ssid"] = trimmedSsid;
                 wifi["mode"] = "dhcp";
                 wifi["autoConnect"] = autoConnect;
@@ -608,8 +1447,9 @@ void NetworkController::connectWifi(const QString &iface,
                 writeNetworkConfigRoot(root, &saveMsg);
 
                 // Make active connection autoconnect setting best effort.
+                const QString conToModify = profileName.isEmpty() ? trimmedSsid : profileName;
                 runProcessBlocking("nmcli",
-                                   {"connection", "modify", trimmedSsid,
+                                   {"connection", "modify", conToModify,
                                     "connection.autoconnect", autoConnect ? "yes" : "no"},
                                    nullptr, nullptr, 10000);
             }
@@ -637,8 +1477,9 @@ void NetworkController::disconnectWifi(const QString &iface)
 
     QThread *t = QThread::create([self, iface]() {
         QString out, err;
+        const QString wifiIface = resolveWifiInterface(iface);
         const bool ok = runProcessBlocking("nmcli",
-                                           {"device", "disconnect", iface},
+                                           {"device", "disconnect", wifiIface},
                                            &out, &err, 30000);
 
         const QString msg = ok
@@ -705,7 +1546,7 @@ QVariantList NetworkController::listModems()
 
     QRegularExpression re("/org/freedesktop/ModemManager1/Modem/(\\d+)\\s+\\[(.*?)\\]\\s+(.+)$");
 
-    for (const QString &line : out.split('\n', Qt::SkipEmptyParts)) {
+    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
         QRegularExpressionMatch m = re.match(line.trimmed());
         if (!m.hasMatch())
             continue;
@@ -735,61 +1576,154 @@ QVariantMap NetworkController::cellularStatus()
     result["hardwareHas5G"] = bool(HARDWARE_HAS_5G);
 
 #if HARDWARE_HAS_5G
-    QVariantList modems = listModems();
-    if (modems.isEmpty()) {
-        result["connected"] = false;
-        result["state"] = "no modem";
-        result["message"] = "No modem found";
-        return result;
+    result[QStringLiteral("sim_status")] = QStringLiteral("No data");
+    result[QStringLiteral("operator")] = QString();
+    result[QStringLiteral("signal")] = QString();
+    result[QStringLiteral("registration_state")] = QString();
+    result[QStringLiteral("access_technology")] = QString();
+    result[QStringLiteral("imei")] = QString();
+    result[QStringLiteral("iccid")] = QString();
+    result[QStringLiteral("ip_address")] = QString();
+    result[QStringLiteral("gateway")] = QString();
+    result[QStringLiteral("device")] = QString();
+    result[QStringLiteral("note")] =
+        QStringLiteral("No LTE interface data available from backend yet.");
+
+    const QString primaryIface = QStringLiteral("rmnet_mhi0.1");
+    const QString fallbackIface = QStringLiteral("rmnet_mhi0");
+    QVariantMap snapshot = parseIfaceSnapshot(primaryIface);
+    if (snapshot.isEmpty())
+        snapshot = parseIfaceSnapshot(fallbackIface);
+
+    if (!snapshot.isEmpty()) {
+        const QString iface = snapshot.value(QStringLiteral("iface")).toString();
+        const QString flags = snapshot.value(QStringLiteral("flags")).toString();
+        result.unite(snapshot);
+        result[QStringLiteral("device")] = iface;
+        result[QStringLiteral("operator")] = iface;
+        result[QStringLiteral("registration_state")] = flags.isEmpty() ? QStringLiteral("--") : flags;
+        result[QStringLiteral("ip_address")] =
+            snapshot.value(QStringLiteral("ipv4")).toString().isEmpty()
+                ? QStringLiteral("No IPv4 assigned")
+                : snapshot.value(QStringLiteral("ipv4")).toString();
+        result[QStringLiteral("gateway")] =
+            snapshot.value(QStringLiteral("gateway")).toString().isEmpty()
+                ? QStringLiteral("--")
+                : snapshot.value(QStringLiteral("gateway")).toString();
+        result[QStringLiteral("access_technology")] =
+            snapshot.value(QStringLiteral("ipv6")).toString();
+
+        const QString lowerFlags = flags.toLower();
+        if (lowerFlags.contains(QStringLiteral("up"))
+            && lowerFlags.contains(QStringLiteral("running"))) {
+            result[QStringLiteral("sim_status")] = QStringLiteral("Ready");
+        } else if (!lowerFlags.isEmpty()) {
+            result[QStringLiteral("sim_status")] = QStringLiteral("Not found");
+        }
+
+        QStringList noteParts;
+        noteParts << QStringLiteral("Using interface %1 (fallback %2)").arg(iface, fallbackIface);
+        if (!snapshot.value(QStringLiteral("ipv6")).toString().isEmpty())
+            noteParts << QStringLiteral("IPv6 %1").arg(snapshot.value(QStringLiteral("ipv6")).toString());
+        if (!snapshot.value(QStringLiteral("mtu")).toString().isEmpty())
+            noteParts << QStringLiteral("MTU %1").arg(snapshot.value(QStringLiteral("mtu")).toString());
+        if (!snapshot.value(QStringLiteral("tx_queue")).toString().isEmpty())
+            noteParts << QStringLiteral("Queue %1").arg(snapshot.value(QStringLiteral("tx_queue")).toString());
+        result[QStringLiteral("note")] = noteParts.join(QStringLiteral(" · "));
     }
 
-    const QVariantMap first = modems.first().toMap();
-    const int modemIndex = first.value("index", -1).toInt();
-    result["modemIndex"] = modemIndex;
-    result["modemName"] = first.value("name").toString();
-    result["vendor"] = first.value("vendor").toString();
-
-    if (modemIndex < 0) {
-        result["connected"] = false;
-        result["state"] = "no modem";
-        return result;
+    const QVariantMap nmDevice = findLteNmDevice();
+    if (!nmDevice.isEmpty()) {
+        if (result.value(QStringLiteral("device")).toString().isEmpty()) {
+            const QString device = nmDevice.value(QStringLiteral("device")).toString();
+            result[QStringLiteral("device")] = device;
+            const QVariantMap live = parseDeviceIpv4(device);
+            if (!live.value(QStringLiteral("dev_ip4_plain")).toString().isEmpty())
+                result[QStringLiteral("ip_address")] =
+                    live.value(QStringLiteral("dev_ip4_plain")).toString();
+            if (!live.value(QStringLiteral("dev_ip4_gateway")).toString().isEmpty())
+                result[QStringLiteral("gateway")] =
+                    live.value(QStringLiteral("dev_ip4_gateway")).toString();
+        }
+        if (!nmDevice.value(QStringLiteral("connection")).toString().isEmpty()
+            && result.value(QStringLiteral("operator")).toString().isEmpty()) {
+            result[QStringLiteral("operator")] =
+                nmDevice.value(QStringLiteral("connection")).toString();
+        }
+        result[QStringLiteral("connection")] =
+            nmDevice.value(QStringLiteral("connection")).toString();
     }
 
-    QString out, err;
-    runProcessBlocking("mmcli", {"-m", QString::number(modemIndex)}, &out, &err, 10000);
-    result["raw"] = out;
+    const QVariantMap csqSignal = readLteSignalFromCsq();
+    if (csqSignal.value(QStringLiteral("ok")).toBool())
+        result[QStringLiteral("signal")] = csqSignal.value(QStringLiteral("signal")).toString();
 
-    auto capture = [&out](const QString &pattern) -> QString {
-        QRegularExpression re(pattern, QRegularExpression::MultilineOption);
-        QRegularExpressionMatch m = re.match(out);
-        return m.hasMatch() ? m.captured(1).trimmed() : QString();
-    };
+    if (commandExists(QStringLiteral("mmcli"))) {
+        const QString modemId = findFirstModemId();
+        if (!modemId.isEmpty()) {
+            QString out, err;
+            if (runProcessBlocking("mmcli", {"-m", modemId, "-K"}, &out, &err, 10000)) {
+                const QVariantMap modem = parseKeyValueLines(out.split('\n', QString::SkipEmptyParts));
+                const QString simPath = pickFirstValue(modem, {
+                    QStringLiteral("modem.generic.sim"),
+                    QStringLiteral("modem.3gpp.sim")
+                });
+                const QString operatorName = pickFirstValue(modem, {
+                    QStringLiteral("modem.3gpp.operator-name"),
+                    QStringLiteral("modem.3gpp.operator-code")
+                });
+                const QString signal = pickFirstValue(modem, {
+                    QStringLiteral("modem.generic.signal-quality.value"),
+                    QStringLiteral("modem.signal-quality.value")
+                });
+                const QString access = pickFirstValue(modem, {
+                    QStringLiteral("modem.generic.access-technologies"),
+                    QStringLiteral("modem.3gpp.packet-service-state")
+                });
+                const QString imei = pickFirstValue(modem, {
+                    QStringLiteral("modem.3gpp.imei"),
+                    QStringLiteral("modem.generic.equipment-identifier")
+                });
 
-    result["state"] = capture("\\|\\s+state:\\s+'?([^'\\n]+)'?");
-    result["accessTech"] = capture("\\|\\s+access tech:\\s+'?([^'\\n]+)'?");
-    result["operator"] = capture("\\|\\s+operator name:\\s+'?([^'\\n]+)'?");
-    result["signal"] = capture("\\|\\s+signal quality:\\s+'?([^'\\n]+)'?");
+                if (!operatorName.isEmpty() && result.value(QStringLiteral("operator")).toString().isEmpty())
+                    result[QStringLiteral("operator")] = operatorName;
+                if (result.value(QStringLiteral("signal")).toString().isEmpty() && !signal.isEmpty())
+                    result[QStringLiteral("signal")] = signal.endsWith(QLatin1Char('%')) ? signal : signal + "%";
+                if (result.value(QStringLiteral("access_technology")).toString().isEmpty() && !access.isEmpty())
+                    result[QStringLiteral("access_technology")] = access;
+                if (!imei.isEmpty())
+                    result[QStringLiteral("imei")] = imei;
+                result[QStringLiteral("modemIndex")] = modemId.toInt();
+                result[QStringLiteral("modemName")] =
+                    pickFirstValue(modem, {QStringLiteral("modem.generic.model"),
+                                           QStringLiteral("modem.generic.manufacturer")});
 
-    QString devOut, devErr;
-    runProcessBlocking("nmcli",
-                       {"-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"},
-                       &devOut, &devErr, 10000);
-
-    bool connected = false;
-    QString connection;
-    for (const QString &line : devOut.split('\n', Qt::SkipEmptyParts)) {
-        const QStringList p = line.split(':');
-        if (p.size() >= 4 && (p.value(1) == "gsm" || p.value(1) == "wwan")) {
-            if (p.value(2).toLower() == "connected") {
-                connected = true;
-                connection = p.value(3);
-                break;
+                if (!simPath.isEmpty()) {
+                    QString simOut, simErr;
+                    if (runProcessBlocking("mmcli", {"-i", simPath, "-K"}, &simOut, &simErr, 10000)) {
+                        const QVariantMap sim = parseKeyValueLines(simOut.split('\n', QString::SkipEmptyParts));
+                        const QString iccid = pickFirstValue(sim, {
+                            QStringLiteral("sim.properties.iccid"),
+                            QStringLiteral("sim.iccid")
+                        });
+                        if (!iccid.isEmpty())
+                            result[QStringLiteral("iccid")] = iccid;
+                    }
+                }
             }
         }
     }
 
-    result["connected"] = connected;
-    result["connection"] = connection;
+    if (result.value(QStringLiteral("signal")).toString().isEmpty())
+        result[QStringLiteral("signal")] = QStringLiteral("--");
+
+    const QString simStatus = result.value(QStringLiteral("sim_status")).toString();
+    const bool connected =
+        simStatus == QStringLiteral("Ready")
+        || !result.value(QStringLiteral("ip_address")).toString().isEmpty();
+    result[QStringLiteral("connected")] = connected;
+    result[QStringLiteral("state")] = result.value(QStringLiteral("registration_state")).toString();
+    result[QStringLiteral("accessTech")] = result.value(QStringLiteral("access_technology")).toString();
 #else
     result["connected"] = false;
     result["state"] = "disabled";
