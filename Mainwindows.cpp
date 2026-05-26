@@ -24,7 +24,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     socketClientReconnectTimer = new QTimer(this);
     // wsClient = new WebSocketClient;
     myDatabase = new Database("ScanRF","orinnx","Ifz8zean6868**","127.0.0.1");
-    qDebug() << "MYDATABASE ONLYONE";
+    qWarning() << "MYDATABASE ONLYONE";
     // wsClient.connectToServer(QUrl("ws://192.168.10.58:8073/ws/"));
     wsClient.connectToServer(QUrl("ws://127.0.0.1:8073/ws/"));
     // wsClient.connectToServer(QUrl("ws://192.168.10.26:8073/ws/"));
@@ -156,7 +156,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     connect(watcher, &LogWatcher::stateChanged, this,
             [this](const QString &id, const QString &conn, const QString &state)
     {
-        qDebug() << "[LogWatcher] stateChanged id=" << id
+        qWarning() << "[LogWatcher] stateChanged id=" << id
                  << "conn=" << conn
                  << "state=" << state;
 
@@ -2417,7 +2417,7 @@ void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
         const bool v = pThis->m_lastRecIsRecord;
 
         QMetaObject::invokeMethod(pThis, [pThis, v]() {
-            qDebug() << "[ThreadFuncSqlWatcher] emit invokeMethod =";
+            qDebug() << "[ThreadFuncSqlWatcher] emit invokeMethod =" << v;
             emit pThis->onRecStatusChanged(v);
             if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
                 pThis->onSQLChanged(pThis->currentSQLValue);

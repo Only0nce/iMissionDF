@@ -450,5 +450,6 @@
         <file>iRecordManage/UpTimeUsed.qml</file>
         <file>iScreenDFqml/images/file.png</file>
         <file>iScreenDFqml/sidepanels/SideLogsFile.qml</file>
+        <file>Wifi5GSetting.qml</file>
     </qresource>
 </RCC>

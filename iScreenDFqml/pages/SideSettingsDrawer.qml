@@ -1,5 +1,6 @@
 // /pages/SideSettingsDrawer.qml  (FULL FILE)
 // 1920x1080 overlay + drawer width เดิม 500
+// ✅ ADD: WIFI/5G toolbar icon opens qrc:/Wifi5GSetting.qml directly
 // click นอก drawer => close (ชัวร์สุด)
 //
 // ✅ ADD: ONLINE/OFFLINE button next to LOCAL/REMOTES
@@ -205,6 +206,7 @@ Item {
 
     property string mapSourceUrl: "qrc:/iScreenDFqml/pages/QMLMap.qml"
     property string sideLogsSourceUrl: "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
+    property string wifi5gSourceUrl: "qrc:/Wifi5GSetting.qml"
 
     property string _pendingSideLogsReloadReason: ""
     property string _pendingBridgeReloadReason: ""
@@ -660,7 +662,7 @@ Item {
 
                 Row {
                     id: toolbar
-                    spacing: 16
+                    spacing: pages.length > 5 ? 8 : 16
                     anchors.margins: 10
                     anchors.horizontalCenter: parent.horizontalCenter
 
@@ -683,6 +685,12 @@ Item {
                             source: "qrc:/DoaViewer/ViewerPage.qml"
                         },
                         {
+                            title: "WIFI\n5G",
+                            icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
+                            source: "qrc:/Wifi5GSetting.qml"
+                            // source: settingsPanel.wifi5gSourceUrl
+                        },
+                        {
                             title: "RECORDER",
                             icon: "qrc:/iRecordManage/images/IconRec.png",
                             source: "qrc:/iRecordManage/TapBarRecordFiles.qml"
@@ -695,14 +703,17 @@ Item {
                     ]
 
                     property int currentIndex: 0
+                    property int buttonSize: pages.length > 5 ? 70 : 80
+                    property int iconSize: pages.length > 5 ? 34 : 40
+                    property int labelSize: pages.length > 5 ? 9 : 10
 
                     Repeater {
                         model: toolbar.pages
 
                         ToolButton {
                             id: btn
-                            width: 80
-                            height: 80
+                            width: toolbar.buttonSize
+                            height: toolbar.buttonSize
                             checkable: true
                             checked: index === toolbar.currentIndex
                             hoverEnabled: true
@@ -714,8 +725,8 @@ Item {
                                 Image {
                                     anchors.horizontalCenter: parent.horizontalCenter
                                     source: modelData.icon
-                                    width: 40
-                                    height: 40
+                                    width: toolbar.iconSize
+                                    height: toolbar.iconSize
                                     fillMode: Image.PreserveAspectFit
                                 }
 
@@ -724,7 +735,7 @@ Item {
                                     text: modelData.title
                                     color: (btn.checked || index === toolbar.hoveredIndex)
                                            ? "#FFFFFF" : "#AAAAAA"
-                                    font.pixelSize: 10
+                                    font.pixelSize: toolbar.labelSize
                                     horizontalAlignment: Text.AlignHCenter
                                 }
                             }

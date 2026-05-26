@@ -16,6 +16,34 @@ INCLUDEPATH += $$PWD/iScreenDF $$PWD/iRecordManage $$PWD/DoaViewer
 DEFINES += QT_DEPRECATED_WARNINGS
 DEFINES += QT_NO_DEBUG_OUTPUT
 
+# ============================================================
+# Hardware version selector
+#
+# Build 5G hardware:
+#   qmake iScanMR10.pro CONFIG+=HW_5G
+#
+# Build non-5G hardware:
+#   qmake iScanMR10.pro CONFIG+=HW_NONE_5G
+#
+# Default is NONE_5G for safety.
+# ============================================================
+CONFIG+=HW_5G
+contains(CONFIG, HW_5G) {
+    message("Hardware version: 5G")
+    DEFINES += HARDWARE_VERSION_5G
+    DEFINES += HARDWARE_HAS_5G=1
+} else {
+    contains(CONFIG, HW_NONE_5G) {
+        message("Hardware version: NONE_5G")
+        DEFINES += HARDWARE_VERSION_NONE_5G
+        DEFINES += HARDWARE_HAS_5G=0
+    } else {
+        message("Hardware version not selected. Default: NONE_5G")
+        DEFINES += HARDWARE_VERSION_NONE_5G
+        DEFINES += HARDWARE_HAS_5G=0
+    }
+}
+
 # RESOURCES += qml.qrc
 
 RESOURCES += qml.qrc
