@@ -279,7 +279,7 @@ Wifi5GController.cpp
 เป็น adapter สำหรับหน้า:
 
 ```text
-Wifi5GSetting.qml
+Wifi5GPage.qml
 ```
 
 หน้าที่คือรับ `menuID` จาก QML แล้วเรียก `NetworkController` เพื่อส่ง JSON response กลับ QML ผ่าน `Mainwindows::cppCommand`.
@@ -296,14 +296,31 @@ Root QML window ของแอป
 
 หน้า container หลัก ใช้ `StackView` สำหรับเปลี่ยนหน้า radio/map/DoA/WiFi/recorder
 
-### Wifi5GSetting.qml
+### Wifi5GView.qml
 
-หน้า WiFi และ 5G settings
+Pure UI สำหรับหน้า WiFi/5G:
+
+- ไม่มี `Connections`
+- ไม่เรียก `networkController`, `mainWindows`, หรือ context property ใดๆ
+- รับข้อมูลผ่าน property และส่ง event ออกด้วย signal เท่านั้น
+- มี mock default เพื่อเปิดใน Qt Creator Design mode ได้
+
+### Wifi5GPage.qml
+
+Runtime wrapper สำหรับหน้า WiFi และ 5G settings
+
+ไฟล์นี้เป็นจุดที่ bind backend เข้ากับ `Wifi5GView.qml`:
 
 ใช้ contract แบบ JSON ผ่าน `mainWindows.cppSubmitTextFiled()` และรอ response ผ่าน `mainWindows.cppCommand`.
 
-QML รับค่า `HardwareHas5G` / `HardwareVersionName` จาก `main.cpp` และรับซ้ำจาก `Wifi5GController` ตอน `getWifi5GPage`.
+QML รับค่า `HardwareHas5G` / `HardwareVersionName` และ `networkController` จาก `main.cpp` และรับซ้ำจาก `Wifi5GController` ตอน `getWifi5GPage`.
 ถ้า `HardwareHas5G=false` หน้า QML จะซ่อน section 5G/Cellular และปรับ grid ให้ WiFi ใช้พื้นที่เต็มแถว.
+
+ถ้าเปิดผ่าน Qt Creator Design mode แล้วไม่มี `networkController` / `mainWindows`, wrapper จะใช้ mock data แทนเพื่อไม่ให้ QML Puppet preview พัง.
+
+### Wifi5GSetting.qml
+
+Compatibility wrapper ที่ยังคงชื่อ component เดิมไว้ให้จุดเรียกเดิมในโปรเจคใช้งานต่อได้ โดยภายในโหลด `Wifi5GPage`.
 
 menuID หลัก:
 

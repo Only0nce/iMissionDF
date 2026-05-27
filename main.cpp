@@ -226,6 +226,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("HardwareHas5G", false);
     engine.rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("NONE_5G"));
 #endif
+    // Runtime QML pages use this context property, while Design mode can omit it.
+    engine.rootContext()->setContextProperty("networkController", netCtrl);
 
     ImageProviderDF *imageProviderDF = new ImageProviderDF();
     iScreenDF *kraken = new iScreenDF(imageProviderDF);
