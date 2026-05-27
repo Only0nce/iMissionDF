@@ -328,6 +328,48 @@ static QString findWifiConnectionNameBySsid(const QString &ssid)
     return wifiProfilesBySsid().value(cleanSsid);
 }
 
+static bool isWifiConnectionProfile(const QString &connectionName,
+                                    const QString &expectedSsid = QString())
+{
+    const QString cleanName = connectionName.trimmed();
+    if (cleanName.isEmpty())
+        return false;
+
+    QString out, err;
+    if (!runProcessBlocking("nmcli",
+                            {"-g", "connection.type,802-11-wireless.ssid",
+                             "connection", "show", cleanName},
+                            &out, &err, 10000)) {
+        return false;
+    }
+
+    const QStringList values = out.split('\n');
+    const QString type = values.value(0).trimmed();
+    const QString ssid = values.value(1).trimmed();
+    if (type != QStringLiteral("802-11-wireless") && type != QStringLiteral("wifi"))
+        return false;
+
+    const QString cleanExpectedSsid = expectedSsid.trimmed();
+    return cleanExpectedSsid.isEmpty() || ssid == cleanExpectedSsid;
+}
+
+static QString findWifiConnectionNameByProfileOrSsid(const QString &profileName,
+                                                     const QString &ssid)
+{
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanSsid = ssid.trimmed();
+
+    if (!cleanProfileName.isEmpty()
+            && isWifiConnectionProfile(cleanProfileName, cleanSsid)) {
+        return cleanProfileName;
+    }
+
+    if (!cleanSsid.isEmpty())
+        return findWifiConnectionNameBySsid(cleanSsid);
+
+    return QString();
+}
+
 static QString bandLabelFromFrequency(const QString &frequency)
 {
     const int mhz = frequency.trimmed().toInt();
@@ -1184,21 +1226,34 @@ QVariantMap NetworkController::wifiToggle(bool enabled)
 
 QVariantMap NetworkController::forgetWifi(const QString &ssid)
 {
-    QVariantMap result;
-    const QString cleanSsid = ssid.trimmed();
-    result[QStringLiteral("ssid")] = cleanSsid;
+    return forgetWifiProfile(QString(), ssid, QString());
+}
 
-    if (cleanSsid.isEmpty()) {
+QVariantMap NetworkController::forgetWifiProfile(const QString &profileName,
+                                                 const QString &ssid,
+                                                 const QString &bssid)
+{
+    QVariantMap result;
+    Q_UNUSED(bssid)
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanSsid = ssid.trimmed();
+    const QString connectionName =
+        findWifiConnectionNameByProfileOrSsid(cleanProfileName, cleanSsid);
+
+    result[QStringLiteral("ssid")] = cleanSsid;
+    result[QStringLiteral("connection_name")] = connectionName;
+
+    if (cleanSsid.isEmpty() && cleanProfileName.isEmpty()) {
         result[QStringLiteral("ok")] = false;
-        result[QStringLiteral("message")] = QStringLiteral("Missing SSID");
+        result[QStringLiteral("message")] = QStringLiteral("Missing WiFi profile");
         return result;
     }
 
-    const QString connectionName = findWifiConnectionNameBySsid(cleanSsid);
     if (connectionName.isEmpty()) {
         result[QStringLiteral("ok")] = false;
         result[QStringLiteral("message")] =
-            QStringLiteral("Saved WiFi profile was not found for this SSID");
+            QStringLiteral("Saved WiFi profile was not found");
         return result;
     }
 
@@ -1216,25 +1271,86 @@ QVariantMap NetworkController::forgetWifi(const QString &ssid)
     return result;
 }
 
+QVariantMap NetworkController::wifiSavedPassword(const QString &profileName,
+                                                 const QString &ssid,
+                                                 const QString &bssid)
+{
+    QVariantMap result;
+    Q_UNUSED(bssid)
+
+    const QString cleanProfileName = profileName.trimmed();
+    const QString cleanSsid = ssid.trimmed();
+    const QString connectionName =
+        findWifiConnectionNameByProfileOrSsid(cleanProfileName, cleanSsid);
+
+    result[QStringLiteral("ssid")] = cleanSsid;
+    result[QStringLiteral("connection_name")] = connectionName;
+    result[QStringLiteral("password")] = QString();
+    result[QStringLiteral("has_password")] = false;
+
+    if (connectionName.isEmpty()) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] =
+            QStringLiteral("Saved WiFi profile was not found");
+        return result;
+    }
+
+    QString out, err;
+    const bool ok = runProcessBlocking("nmcli",
+                                       {"-s", "-g", "802-11-wireless-security.psk",
+                                        "connection", "show", connectionName},
+                                       &out, &err, 10000);
+
+    if (!ok) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("message")] =
+            err.isEmpty() ? QStringLiteral("Saved WiFi password is not available") : err;
+        return result;
+    }
+
+    const QString password = out.split('\n', QString::SkipEmptyParts).value(0).trimmed();
+    result[QStringLiteral("ok")] = true;
+    result[QStringLiteral("password")] = password;
+    result[QStringLiteral("has_password")] = !password.isEmpty();
+    result[QStringLiteral("message")] =
+        password.isEmpty()
+            ? QStringLiteral("Saved WiFi password is empty or not available")
+            : QStringLiteral("Saved WiFi password loaded");
+    return result;
+}
+
 QVariantMap NetworkController::wifiAdvancedInfo(const QString &ssid, const QString &iface)
 {
+    return wifiAdvancedInfoForProfile(QString(), ssid, iface);
+}
+
+QVariantMap NetworkController::wifiAdvancedInfoForProfile(const QString &profileName,
+                                                          const QString &ssid,
+                                                          const QString &iface)
+{
     const QString wifiIface = resolveWifiInterface(iface);
+    const QString cleanProfileName = profileName.trimmed();
     const QString cleanSsid = ssid.trimmed();
     const QVariantMap active = activeWifiConnection(wifiIface);
     const QString activeName = active.value(QStringLiteral("name")).toString();
     const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(activeName);
 
     QString connectionName;
-    if (!cleanSsid.isEmpty()) {
-        connectionName = findWifiConnectionNameBySsid(cleanSsid);
+    if (!cleanProfileName.isEmpty() || !cleanSsid.isEmpty()) {
+        connectionName = findWifiConnectionNameByProfileOrSsid(cleanProfileName, cleanSsid);
         if (connectionName.isEmpty() && !activeName.isEmpty() && activeSsid == cleanSsid)
             connectionName = activeName;
     } else if (!activeName.isEmpty()) {
         connectionName = activeName;
     }
 
+    const QString resolvedSsid =
+        cleanSsid.isEmpty() && !connectionName.isEmpty()
+            ? activeConnectionSsid(connectionName)
+            : cleanSsid;
+
     QVariantMap result;
-    result[QStringLiteral("ssid")] = cleanSsid.isEmpty() ? activeSsid : cleanSsid;
+    result[QStringLiteral("ssid")] = resolvedSsid.isEmpty() ? activeSsid : resolvedSsid;
     result[QStringLiteral("device")] = wifiIface;
     result[QStringLiteral("connection_name")] = connectionName;
     result[QStringLiteral("active")] = !connectionName.isEmpty() && connectionName == activeName;
@@ -1269,21 +1385,39 @@ QVariantMap NetworkController::applyWifiIpv4(const QString &ssid,
                                              bool dnsAuto,
                                              const QString &dns)
 {
-    const QString wifiIface = resolveWifiInterface(QString());
+    return applyWifiIpv4ForProfile(QString(), ssid, QString(), method, ip, mask,
+                                   gateway, dnsAuto, dns);
+}
+
+QVariantMap NetworkController::applyWifiIpv4ForProfile(const QString &profileName,
+                                                       const QString &ssid,
+                                                       const QString &iface,
+                                                       const QString &method,
+                                                       const QString &ip,
+                                                       const QString &mask,
+                                                       const QString &gateway,
+                                                       bool dnsAuto,
+                                                       const QString &dns)
+{
+    const QString wifiIface = resolveWifiInterface(iface);
     const QVariantMap active = activeWifiConnection(wifiIface);
     const QString activeName = active.value(QStringLiteral("name")).toString();
     const QString activeSsid = active.isEmpty() ? QString() : activeConnectionSsid(activeName);
 
+    const QString cleanProfileName = profileName.trimmed();
     QString cleanSsid = ssid.trimmed();
     QString connectionName;
-    if (!cleanSsid.isEmpty()) {
-        connectionName = findWifiConnectionNameBySsid(cleanSsid);
+    if (!cleanProfileName.isEmpty() || !cleanSsid.isEmpty()) {
+        connectionName = findWifiConnectionNameByProfileOrSsid(cleanProfileName, cleanSsid);
         if (connectionName.isEmpty() && activeSsid == cleanSsid)
             connectionName = activeName;
     } else if (!activeName.isEmpty()) {
         connectionName = activeName;
         cleanSsid = activeSsid;
     }
+
+    if (cleanSsid.isEmpty() && !connectionName.isEmpty())
+        cleanSsid = activeConnectionSsid(connectionName);
 
     QVariantMap result;
     result[QStringLiteral("ssid")] = cleanSsid;

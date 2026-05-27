@@ -457,5 +457,6 @@
         <file>SignalBar.qml</file>
         <file>Wifi5GView.qml</file>
         <file>Wifi5GPage.qml</file>
+        <file>Wifi5GSetting.qml</file>
     </qresource>
 </RCC>

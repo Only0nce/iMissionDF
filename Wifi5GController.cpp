@@ -103,8 +103,10 @@ bool Wifi5GController::canHandle(const QString &menuId) const
            || menuId == QStringLiteral("join")
            || menuId == QStringLiteral("disconnect")
            || menuId == QStringLiteral("forget")
+           || menuId == QStringLiteral("wifi_password")
            || menuId == QStringLiteral("advinfo")
            || menuId == QStringLiteral("apply_ipv4")
+           || menuId == QStringLiteral("wifi_advanced_save")
            || menuId == QStringLiteral("wifi_toggle")
            || menuId == QStringLiteral("lte_state")
            || menuId == QStringLiteral("wifiScan")
@@ -146,12 +148,22 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
             stringValue(command, QStringLiteral("device"),
                         stringValue(command, QStringLiteral("iface"))));
     } else if (menuId == QStringLiteral("forget")) {
-        sendWifiForget(stringValue(command, QStringLiteral("ssid")), menuId);
+        sendWifiForget(stringValue(command, QStringLiteral("profileName")),
+                       stringValue(command, QStringLiteral("ssid")),
+                       stringValue(command, QStringLiteral("bssid")),
+                       menuId);
+    } else if (menuId == QStringLiteral("wifi_password")) {
+        sendWifiPassword(stringValue(command, QStringLiteral("profileName")),
+                         stringValue(command, QStringLiteral("ssid")),
+                         stringValue(command, QStringLiteral("bssid")),
+                         menuId);
     } else if (menuId == QStringLiteral("advinfo")) {
-        sendWifiAdvancedInfo(stringValue(command, QStringLiteral("ssid")),
+        sendWifiAdvancedInfo(stringValue(command, QStringLiteral("profileName")),
+                             stringValue(command, QStringLiteral("ssid")),
                              stringValue(command, QStringLiteral("iface")),
                              menuId);
-    } else if (menuId == QStringLiteral("apply_ipv4")) {
+    } else if (menuId == QStringLiteral("apply_ipv4")
+               || menuId == QStringLiteral("wifi_advanced_save")) {
         sendWifiApplyIpv4(command, menuId);
     } else if (menuId == QStringLiteral("wifi_toggle")) {
         sendWifiToggle(boolValue(command, QStringLiteral("on"), true), menuId);
@@ -293,10 +305,13 @@ void Wifi5GController::sendWifiToggle(bool enabled, const QString &menuId)
     });
 }
 
-void Wifi5GController::sendWifiForget(const QString &ssid, const QString &menuId)
+void Wifi5GController::sendWifiForget(const QString &profileName,
+                                      const QString &ssid,
+                                      const QString &bssid,
+                                      const QString &menuId)
 {
-    runNetworkQuery(this, [ssid, menuId](NetworkController &network) {
-        const QVariantMap data = network.forgetWifi(ssid);
+    runNetworkQuery(this, [profileName, ssid, bssid, menuId](NetworkController &network) {
+        const QVariantMap data = network.forgetWifiProfile(profileName, ssid, bssid);
         QJsonObject obj;
         obj[QStringLiteral("menuID")] = menuId;
         obj[QStringLiteral("ok")] = data.value(QStringLiteral("ok")).toBool();
@@ -310,12 +325,36 @@ void Wifi5GController::sendWifiForget(const QString &ssid, const QString &menuId
     });
 }
 
-void Wifi5GController::sendWifiAdvancedInfo(const QString &ssid,
+void Wifi5GController::sendWifiPassword(const QString &profileName,
+                                        const QString &ssid,
+                                        const QString &bssid,
+                                        const QString &menuId)
+{
+    runNetworkQuery(this, [profileName, ssid, bssid, menuId](NetworkController &network) {
+        const QVariantMap data = network.wifiSavedPassword(profileName, ssid, bssid);
+        QJsonObject obj;
+        obj[QStringLiteral("menuID")] = menuId;
+        obj[QStringLiteral("ok")] = data.value(QStringLiteral("ok")).toBool();
+        obj[QStringLiteral("data")] = toObject(data);
+        obj[QStringLiteral("ssid")] = data.value(QStringLiteral("ssid")).toString();
+        obj[QStringLiteral("profileName")] =
+            data.value(QStringLiteral("connection_name")).toString();
+        obj[QStringLiteral("hasPassword")] =
+            data.value(QStringLiteral("has_password")).toBool();
+        obj[QStringLiteral("password")] = data.value(QStringLiteral("password")).toString();
+        obj[QStringLiteral("message")] =
+            data.value(QStringLiteral("message")).toString();
+        return obj;
+    });
+}
+
+void Wifi5GController::sendWifiAdvancedInfo(const QString &profileName,
+                                            const QString &ssid,
                                             const QString &iface,
                                             const QString &menuId)
 {
-    runNetworkQuery(this, [ssid, iface, menuId](NetworkController &network) {
-        const QVariantMap data = network.wifiAdvancedInfo(ssid, iface);
+    runNetworkQuery(this, [profileName, ssid, iface, menuId](NetworkController &network) {
+        const QVariantMap data = network.wifiAdvancedInfoForProfile(profileName, ssid, iface);
         QJsonObject obj;
         obj[QStringLiteral("menuID")] = menuId;
         obj[QStringLiteral("ok")] = data.value(QStringLiteral("ok"), true).toBool();
@@ -330,18 +369,28 @@ void Wifi5GController::sendWifiAdvancedInfo(const QString &ssid,
 void Wifi5GController::sendWifiApplyIpv4(const QJsonObject &command,
                                          const QString &menuId)
 {
+    const QString profileName = stringValue(command, QStringLiteral("profileName"));
     const QString ssid = stringValue(command, QStringLiteral("ssid"));
-    const QString method = stringValue(command, QStringLiteral("method"), QStringLiteral("auto"));
-    const QString ip = stringValue(command, QStringLiteral("ip"));
-    const QString mask = stringValue(command, QStringLiteral("mask"));
+    const QString iface = stringValue(command, QStringLiteral("iface"));
+    QString method = stringValue(command, QStringLiteral("method"),
+                                 stringValue(command, QStringLiteral("ipv4Mode"),
+                                             QStringLiteral("auto")));
+    if (method == QStringLiteral("dhcp"))
+        method = QStringLiteral("auto");
+    const QString ip = stringValue(command, QStringLiteral("ip"),
+                                   stringValue(command, QStringLiteral("ipAddress")));
+    const QString mask = stringValue(command, QStringLiteral("mask"),
+                                     stringValue(command, QStringLiteral("subnetMask")));
     const QString gateway = stringValue(command, QStringLiteral("gw"),
                                         stringValue(command, QStringLiteral("gateway")));
     const bool dnsAuto = boolValue(command, QStringLiteral("dns_auto"),
-                                   boolValue(command, QStringLiteral("dnsAuto"), true));
-    const QString dns = stringValue(command, QStringLiteral("dns"));
+                                   boolValue(command, QStringLiteral("dnsAuto"),
+                                             boolValue(command, QStringLiteral("dnsAutomatic"), true)));
+    const QString dns = stringValue(command, QStringLiteral("dns"),
+                                    stringValue(command, QStringLiteral("dnsServers")));
 
-    runNetworkQuery(this, [ssid, method, ip, mask, gateway, dnsAuto, dns, menuId](NetworkController &network) {
-        const QVariantMap data = network.applyWifiIpv4(ssid, method, ip, mask, gateway, dnsAuto, dns);
+    runNetworkQuery(this, [profileName, ssid, iface, method, ip, mask, gateway, dnsAuto, dns, menuId](NetworkController &network) {
+        const QVariantMap data = network.applyWifiIpv4ForProfile(profileName, ssid, iface, method, ip, mask, gateway, dnsAuto, dns);
         QJsonObject obj;
         obj[QStringLiteral("menuID")] = menuId;
         obj[QStringLiteral("ok")] = data.value(QStringLiteral("ok")).toBool();

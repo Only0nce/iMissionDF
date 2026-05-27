@@ -14,7 +14,13 @@ INCLUDEPATH += $$PWD/iScreenDF $$PWD/iRecordManage $$PWD/DoaViewer
 
 
 DEFINES += QT_DEPRECATED_WARNINGS
-DEFINES += QT_NO_DEBUG_OUTPUT
+CONFIG(debug, debug|release) {
+    DEFINES -= QT_NO_DEBUG_OUTPUT
+    DEFINES += QT_MESSAGELOGCONTEXT
+}
+CONFIG(release, debug|release) {
+    DEFINES += QT_NO_DEBUG_OUTPUT
+}
 
 # ============================================================
 # Hardware version selector
@@ -27,8 +33,8 @@ DEFINES += QT_NO_DEBUG_OUTPUT
 #
 # Default is NONE_5G for safety.
 # ============================================================
-CONFIG+=HW_5G
-# CONFIG+=HW_NONE_5G
+# CONFIG+=HW_5G
+CONFIG+=HW_NONE_5G
 contains(CONFIG, HW_5G) {
     message("Hardware version: 5G")
     DEFINES += HARDWARE_VERSION_5G

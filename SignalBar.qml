@@ -9,9 +9,14 @@ Item {
     property color dangerColor: "#ef4444"
     property color inactiveColor: "#273243"
     property color borderColor: "#334155"
+    property int barWidth: 150
+    property int barHeight: 16
+    property int itemWidth: 22
+    property int itemSpacing: 4
+    property int itemRadius: 4
 
-    implicitWidth: 150
-    implicitHeight: 16
+    implicitWidth: barWidth
+    implicitHeight: barHeight
 
     function levelColor(signalValue) {
         if (signalValue >= 70)
@@ -23,15 +28,15 @@ Item {
 
     Row {
         anchors.fill: parent
-        spacing: 4
+        spacing: root.itemSpacing
 
         Repeater {
             model: 5
 
             Rectangle {
-                width: 22
+                width: root.itemWidth
                 height: parent.height
-                radius: 4
+                radius: root.itemRadius
                 color: root.value >= ((index + 1) * 20) ? root.levelColor(root.value) : root.inactiveColor
                 border.color: root.borderColor
                 border.width: 1

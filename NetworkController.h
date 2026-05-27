@@ -32,8 +32,17 @@ public:
     Q_INVOKABLE QVariantMap wifiStatus(const QString &iface = QString());
     Q_INVOKABLE QVariantMap wifiToggle(bool enabled);
     Q_INVOKABLE QVariantMap forgetWifi(const QString &ssid);
+    Q_INVOKABLE QVariantMap forgetWifiProfile(const QString &profileName,
+                                              const QString &ssid = QString(),
+                                              const QString &bssid = QString());
+    Q_INVOKABLE QVariantMap wifiSavedPassword(const QString &profileName,
+                                              const QString &ssid = QString(),
+                                              const QString &bssid = QString());
     Q_INVOKABLE QVariantMap wifiAdvancedInfo(const QString &ssid = QString(),
                                              const QString &iface = QString());
+    Q_INVOKABLE QVariantMap wifiAdvancedInfoForProfile(const QString &profileName,
+                                                       const QString &ssid = QString(),
+                                                       const QString &iface = QString());
     Q_INVOKABLE QVariantMap applyWifiIpv4(const QString &ssid,
                                           const QString &method,
                                           const QString &ip,
@@ -41,6 +50,15 @@ public:
                                           const QString &gateway,
                                           bool dnsAuto,
                                           const QString &dns);
+    Q_INVOKABLE QVariantMap applyWifiIpv4ForProfile(const QString &profileName,
+                                                    const QString &ssid,
+                                                    const QString &iface,
+                                                    const QString &method,
+                                                    const QString &ip,
+                                                    const QString &mask,
+                                                    const QString &gateway,
+                                                    bool dnsAuto,
+                                                    const QString &dns);
     Q_INVOKABLE void connectWifi(const QString &iface,
                                  const QString &ssid,
                                  const QString &password,

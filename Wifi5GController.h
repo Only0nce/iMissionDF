@@ -34,8 +34,16 @@ private:
                       const QString &menuId = QStringLiteral("wifiScan"));
     void sendWifiState(const QString &iface, const QString &menuId);
     void sendWifiToggle(bool enabled, const QString &menuId);
-    void sendWifiForget(const QString &ssid, const QString &menuId);
-    void sendWifiAdvancedInfo(const QString &ssid,
+    void sendWifiForget(const QString &profileName,
+                        const QString &ssid,
+                        const QString &bssid,
+                        const QString &menuId);
+    void sendWifiPassword(const QString &profileName,
+                          const QString &ssid,
+                          const QString &bssid,
+                          const QString &menuId);
+    void sendWifiAdvancedInfo(const QString &profileName,
+                              const QString &ssid,
                               const QString &iface,
                               const QString &menuId);
     void sendWifiApplyIpv4(const QJsonObject &command, const QString &menuId);
