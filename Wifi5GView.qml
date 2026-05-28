@@ -127,8 +127,8 @@ Item {
         // INLINE ADVANCED WIFI SETTINGS PANEL
         // Tune the IPv4/DNS config area that expands inside the WiFi card.
         // ============================================================
-        readonly property int wifiAdvancedPanelHeight: 360
-        readonly property int wifiAdvancedPanelMinHeight: 260
+        readonly property int wifiAdvancedPanelHeight: 560
+        readonly property int wifiAdvancedPanelMinHeight: 520
         readonly property int wifiAdvancedPanelRadius: 8
         readonly property int wifiAdvancedPanelPadding: 6
         readonly property int wifiAdvancedPanelSpacing: 8
@@ -161,6 +161,7 @@ Item {
     property string wifiBssid: "00:11:22:33:44:55"
     property string wifiProfileName: "Office-WiFi"
     property string wifiPassword: ""
+    property string initialWifiPasswordRequestKey: ""
     property bool wifiAutoConnect: true
     property bool wifiSelectedKnown: true
     property bool selectedWifiConnected: true
@@ -171,7 +172,7 @@ Item {
     property bool wifiForgetBusy: false
     property bool wifiAdvancedBusy: false
     property string pendingWifiAction: ""
-    property bool wifiAdvancedVisible: false
+    property bool wifiAdvancedVisible: true
     property string wifiAdvancedMessage: ""
     property string wifiAdvancedIpv4Mode: "dhcp"
     property string wifiAdvancedIpAddress: "192.168.10.24"
@@ -283,34 +284,91 @@ Item {
     }
 
     onSelectedNetworkPageChanged: {
-        if (selectedNetworkPage !== "wifi")
-            wifiAdvancedVisible = false
+        // Advanced panel is always visible on the WiFi page.
     }
 
     onSelectedWifiConnectedChanged: {
-        if (!selectedWifiConnected)
-            wifiAdvancedVisible = false
+        // Advanced panel is always visible on the WiFi page.
     }
 
     onWifiAdvancedAvailableChanged: {
-        if (!wifiAdvancedAvailable)
-            wifiAdvancedVisible = false
+        // Advanced panel is always visible on the WiFi page.
     }
 
     onWifiEnabledChanged: {
-        if (!wifiEnabled)
-            wifiAdvancedVisible = false
+        // Advanced panel is always visible on the WiFi page.
+    }
+
+    onWifiStateChanged: {
+        Qt.callLater(function() {
+            root.syncGatewayFromWifiState()
+            root.requestInitialWifiPassword(false)
+        })
+    }
+
+    onWifiListChanged: {
+        Qt.callLater(function() {
+            root.requestInitialWifiPassword(false)
+        })
     }
 
     Component.onCompleted: {
         if (!showCellularControls && selectedNetworkPage === "cellular")
             selectedNetworkPage = "wifi"
+
+        Qt.callLater(function() {
+            root.syncGatewayFromWifiState()
+            root.requestInitialWifiPassword(false)
+        })
     }
 
     function safeText(value, fallback) {
         if (value === undefined || value === null || value === "")
             return fallback
         return String(value)
+    }
+
+    function syncGatewayFromWifiState() {
+        if (!wifiState)
+            return
+
+        var gw = root.safeText(
+                    wifiState.ip_gateway ||
+                    wifiState.ipGateway ||
+                    wifiState.current_gateway ||
+                    wifiState.gateway ||
+                    wifiState.default_gateway ||
+                    "",
+                    "")
+
+        if (gw.length > 0) {
+            wifiAdvancedGateway = gw
+            wifiAdvancedCurrentGateway = gw
+        }
+
+        var ip = root.safeText(
+                    wifiState.current_ip ||
+                    wifiState.ip ||
+                    wifiState.ip_address ||
+                    wifiState.ipAddress ||
+                    "",
+                    "")
+
+        if (ip.length > 0) {
+            wifiAdvancedIpAddress = ip
+            wifiAdvancedCurrentIp = ip
+        }
+
+        var mask = root.safeText(
+                    wifiState.current_netmask ||
+                    wifiState.netmask ||
+                    wifiState.subnet_mask ||
+                    wifiState.subnetMask ||
+                    "",
+                    "")
+
+        if (mask.length > 0)
+            wifiAdvancedSubnetMask = mask
     }
 
     function statusColor(connected) {
@@ -354,13 +412,87 @@ Item {
             wifiPassword = savedPassword
             selectedWifiHasPassword = savedPassword.length > 0
             wifiSavedPasswordRequested(wifiIface, wifiSsid, wifiBssid, wifiProfileName)
+            if (selectedWifiConnected)
+                wifiAdvancedOpenRequested(wifiIface, wifiSsid, wifiBssid, wifiProfileName)
         } else {
             wifiPassword = ""
             wifiPasswordVisible = false
         }
 
-        if (!selectedWifiConnected)
-            wifiAdvancedVisible = false
+        // Advanced panel stays visible. Do not hide it when selecting another row.
+        wifiAdvancedVisible = true
+    }
+
+    function requestInitialWifiPassword(force) {
+        var ssid = ""
+        var bssid = ""
+        var profileName = ""
+        var known = false
+        var connected = false
+
+        // 1) Prefer the currently connected WiFi reported by backend.
+        if (wifiState) {
+            ssid = root.safeText(wifiState.ssid || wifiState.active_ssid || wifiState.connection, "")
+            profileName = root.safeText(wifiState.connection, "")
+            connected = !!wifiState.connected
+        }
+
+        // 2) Fallback to current page selection.
+        if (ssid.length === 0)
+            ssid = root.safeText(wifiSsid, "")
+
+        if (profileName.length === 0)
+            profileName = root.safeText(wifiProfileName, ssid)
+
+        bssid = root.safeText(wifiBssid, "")
+
+        // 3) Find the matching row for bssid/profile/known state.
+        if (wifiList && ssid.length > 0) {
+            for (var i = 0; i < wifiList.length; ++i) {
+                var row = wifiList[i]
+                if (!row)
+                    continue
+
+                var rowSsid = root.safeText(row.ssid, "")
+                var rowProfile = root.safeText(row.profile_name || row.connection, "")
+
+                if (rowSsid === ssid || rowProfile === ssid || rowProfile === profileName) {
+                    bssid = root.safeText(row.bssid, bssid)
+                    profileName = root.safeText(row.profile_name || row.connection, profileName)
+                    known = root.isSavedWifi(row)
+                    connected = root.isConnectedWifi(row)
+                    break
+                }
+            }
+        }
+
+        if (ssid.length === 0)
+            return
+
+        if (!known && profileName.length === 0 && !wifiSelectedKnown)
+            return
+
+        var requestKey = wifiIface + "|" + ssid + "|" + bssid + "|" + profileName
+        if (!force && initialWifiPasswordRequestKey === requestKey)
+            return
+
+        initialWifiPasswordRequestKey = requestKey
+
+        wifiSsid = ssid
+        wifiBssid = bssid
+        wifiProfileName = profileName
+        wifiSelectedKnown = true
+        selectedWifiConnected = connected
+        wifiAdvancedVisible = true
+
+        root.syncGatewayFromWifiState()
+
+        // Request saved password immediately, without waiting for card selection.
+        wifiSavedPasswordRequested(wifiIface, wifiSsid, wifiBssid, wifiProfileName)
+
+        // Since Advanced is now always visible, request its current settings too.
+        if (selectedWifiConnected)
+            wifiAdvancedOpenRequested(wifiIface, wifiSsid, wifiBssid, wifiProfileName)
     }
 
     function wifiMetaText(row) {
@@ -387,7 +519,8 @@ Item {
     }
 
     function closeWifiAdvancedPanel() {
-        wifiAdvancedVisible = false
+        // Advanced panel is always visible in this layout.
+        wifiAdvancedVisible = true
     }
 
     function advancedSettingsPayload() {
@@ -400,10 +533,12 @@ Item {
             "ipAddress": wifiAdvancedIpAddress,
             "subnetMask": wifiAdvancedSubnetMask,
             "gateway": wifiAdvancedGateway,
+            "ip_gateway": wifiAdvancedGateway,
             "dnsAutomatic": wifiAdvancedDnsAutomatic,
             "dnsServers": wifiAdvancedDnsServers
         }
     }
+
 
     Rectangle {
         anchors.fill: parent
@@ -478,6 +613,11 @@ Item {
                 columnSpacing: layoutConfig.mainSpacing
                 rowSpacing: layoutConfig.mainSpacing
 
+                // ============================================================
+                // LEFT CARD
+                // WiFi page: Advanced Wi-Fi Settings only, always visible.
+                // 5G page : Cellular controls.
+                // ============================================================
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredWidth: layoutConfig.leftPanelPreferredWidth
@@ -509,7 +649,7 @@ Item {
                                 spacing: layoutConfig.headerTextSpacing
 
                                 Text {
-                                    text: root.selectedNetworkPage === "wifi" ? "WiFi" : "5G / Cellular"
+                                    text: root.selectedNetworkPage === "wifi" ? "Advanced Wi-Fi Settings" : "5G / Cellular"
                                     color: ui.text
                                     font.pixelSize: layoutConfig.sectionTitleFontSize
                                     font.bold: true
@@ -518,7 +658,7 @@ Item {
 
                                 Text {
                                     text: root.selectedNetworkPage === "wifi"
-                                          ? "Basic settings and actions"
+                                          ? "IPv4 and DNS configuration"
                                           : "Cellular interface and APN"
                                     color: ui.subText
                                     font.pixelSize: layoutConfig.smallTextFontSize
@@ -541,277 +681,28 @@ Item {
                             }
                         }
 
-                        ColumnLayout {
+                        Loader {
+                            id: wifiAdvancedConfigPanel
+                            active: root.selectedNetworkPage === "wifi"
                             visible: root.selectedNetworkPage === "wifi"
+                            clip: true
+
                             Layout.fillWidth: true
                             Layout.fillHeight: true
-                            spacing: layoutConfig.wifiSectionSpacing
+                            Layout.minimumHeight: layoutConfig.wifiAdvancedPanelMinHeight
+                            Layout.preferredHeight: layoutConfig.wifiAdvancedPanelHeight
 
-                            // Text {
-                            //     text: "Basic WiFi Settings"
-                            //     color: ui.text
-                            //     font.pixelSize: layoutConfig.valueFontSize
-                            //     font.bold: true
-                            //     Layout.fillWidth: true
-                            // }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: wifiBasicForm.implicitHeight
-                                                        + layoutConfig.wifiAdvancedPanelPadding * 2
-                                radius: layoutConfig.wifiStatusBoxRadius
-                                color: ui.panel2
-                                border.color: ui.border
-                                border.width: layoutConfig.cardBorderWidth
-
-                                GridLayout {
-                                    id: wifiBasicForm
-                                    anchors.fill: parent
-                                    anchors.margins: layoutConfig.wifiAdvancedPanelPadding
-                                    anchors.topMargin: 6
-                                    anchors.bottomMargin: 6
-                                    columnSpacing: 2
-                                    rowSpacing: 0
-                                    columns: 2
-
-                                    FieldLabel {
-                                        text: "WiFi Interface"
-                                        textColor: ui.subText
-                                        labelFontSize: layoutConfig.labelFontSize
-                                        Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
-                                    }
-
-                                    Text {
-                                        text: root.safeText(root.wifiIface, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        verticalAlignment: Text.AlignVCenter
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: layoutConfig.textFieldHeight
-                                    }
-
-                                    FieldLabel {
-                                        text: "SSID"
-                                        textColor: ui.subText
-                                        labelFontSize: layoutConfig.labelFontSize
-                                        Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
-                                    }
-
-                                    Text {
-                                        text: root.safeText(root.wifiSsid, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        font.bold: true
-                                        elide: Text.ElideRight
-                                        verticalAlignment: Text.AlignVCenter
-                                        Layout.fillWidth: true
-                                        Layout.preferredHeight: layoutConfig.textFieldHeight
-                                    }
-                                    FieldLabel {
-                                        text: "Password"
-                                        textColor: ui.subText
-                                        labelFontSize: layoutConfig.labelFontSize
-                                        Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
-                                    }
-                                    DarkField {
-                                        text: root.wifiPassword
-                                        placeholderText: "WiFi password"
-                                        echoMode: root.wifiPasswordVisible ? TextInput.Normal : TextInput.Password
-                                        textColor: ui.text
-                                        accentColor: ui.accent
-                                        borderColor: ui.border
-                                        fillColor: ui.field
-                                        fieldHeight: layoutConfig.textFieldHeight
-                                        fieldRadius: layoutConfig.textFieldRadius
-                                        fieldFontSize: layoutConfig.valueFontSize
-                                        fieldPadding: layoutConfig.textFieldPadding
-                                        actionVisible: true
-                                        actionText: root.wifiPasswordVisible ? "Hide" : "Show"
-                                        actionButtonWidth: layoutConfig.passwordEyeButtonWidth
-                                        actionFontSize: layoutConfig.smallTextFontSize
-                                        Layout.fillWidth: true
-                                        onTextEdited: {
-                                            root.wifiPassword = text
-                                            root.selectedWifiHasPassword = text.length > 0
-                                        }
-                                        onActionClicked: root.wifiPasswordVisible = !root.wifiPasswordVisible
-                                    }
-
-                                    FieldLabel {
-                                        text: "Auto Connect"
-                                        textColor: ui.subText
-                                        labelFontSize: layoutConfig.labelFontSize
-                                        Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
-                                    }
-                                    CheckBox {
-                                        checked: root.wifiAutoConnect
-                                        text: checked ? "Enabled" : "Disabled"
-                                        Layout.fillWidth: true
-                                        onToggled: root.wifiAutoConnect = checked
-                                    }
-                                }
-                            }
-
-                            // Text {
-                            //     text: "Actions"
-                            //     color: ui.text
-                            //     font.pixelSize: layoutConfig.valueFontSize
-                            //     font.bold: true
-                            //     Layout.fillWidth: true
-                            // }
-
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: 2
-                                columnSpacing: layoutConfig.wifiButtonColumnSpacing
-                                rowSpacing: layoutConfig.wifiButtonRowSpacing
-
-                                AppButton {
-                                    text: "Scan"
-                                    baseColor: ui.panel2
-                                    buttonHeight: layoutConfig.wifiActionButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
-                                    enabled: root.wifiEnabled && !root.wifiConnectBusy && !root.wifiToggleBusy && !root.wifiForgetBusy
-                                    onClicked: root.wifiScanRequested()
-                                }
-
-                                AppButton {
-                                    text: root.wifiToggleBusy
-                                          ? (root.pendingWifiAction === "wifi_on" ? "Turning WiFi On..." : "Turning WiFi Off...")
-                                          : (root.wifiEnabled ? "WiFi Off" : "WiFi On")
-                                    baseColor: root.wifiEnabled ? ui.warning : ui.accent
-                                    buttonHeight: layoutConfig.wifiActionButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    busy: root.wifiToggleBusy
-                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
-                                    enabled: !root.wifiToggleBusy && !root.wifiConnectBusy && !root.wifiForgetBusy
-                                    onClicked: root.wifiToggleRequested(!root.wifiEnabled)
-                                }
-
-                                AppButton {
-                                    text: !root.hasSelectedWifi
-                                          ? "Select Network"
-                                          : (root.wifiConnectBusy
-                                             ? (root.pendingWifiAction === "disconnect" ? "Disconnecting..." : "Connecting...")
-                                             : (root.selectedWifiConnected ? "Disconnect" : "Connect"))
-                                    baseColor: root.selectedWifiConnected ? ui.danger : ui.accent
-                                    buttonHeight: layoutConfig.wifiActionButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    busy: root.wifiConnectBusy
-                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
-                                    enabled: root.wifiEnabled && root.hasSelectedWifi
-                                             && !root.wifiConnectBusy
-                                             && !root.wifiToggleBusy
-                                             && !root.wifiForgetBusy
-                                    onClicked: {
-                                        if (root.selectedWifiConnected)
-                                            root.wifiDisconnectRequested(root.wifiIface)
-                                        else
-                                            root.wifiConnectRequested(root.wifiIface,
-                                                                      root.wifiSsid,
-                                                                      root.wifiPassword,
-                                                                      root.wifiBssid,
-                                                                      root.wifiAutoConnect)
-                                    }
-                                }
-
-                                AppButton {
-                                    text: root.wifiForgetBusy ? "Forgetting..." : "Forget"
-                                    baseColor: root.selectedWifiSaved ? ui.warning : ui.panel2
-                                    buttonHeight: layoutConfig.wifiActionButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    busy: root.wifiForgetBusy
-                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
-                                    Layout.fillWidth: true
-                                    Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
-                                    enabled: root.selectedWifiSaved && root.wifiSsid.length > 0
-                                             && !root.wifiForgetBusy
-                                             && !root.wifiConnectBusy
-                                             && !root.wifiToggleBusy
-                                    onClicked: root.wifiForgetRequested(root.wifiIface,
-                                                                        root.wifiSsid,
-                                                                        root.wifiBssid,
-                                                                        root.wifiProfileName)
-                                }
-
-                                AppButton {
-                                    text: root.wifiAdvancedVisible ? "Hide Advanced Settings" : "Advanced Settings"
-                                    baseColor: ui.panel2
-                                    buttonHeight: layoutConfig.wifiActionButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    busy: root.wifiAdvancedBusy
-                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
-                                    Layout.fillWidth: true
-                                    Layout.columnSpan: 2
-                                    Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
-                                    enabled: root.wifiAdvancedAvailable && !root.wifiAdvancedBusy
-                                    onClicked: {
-                                        if (root.wifiAdvancedVisible) {
-                                            root.closeWifiAdvancedPanel()
-                                        } else {
-                                            root.wifiAdvancedOpenRequested(root.wifiIface,
-                                                                          root.wifiSsid,
-                                                                          root.wifiBssid,
-                                                                          root.wifiProfileName)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Loader {
-                                id: wifiAdvancedConfigPanel
-                                active: root.wifiAdvancedVisible
-                                visible: root.wifiAdvancedVisible
-                                clip: true
-
-                                Layout.fillWidth: true
-
-                                // สำคัญ: ให้ Advanced Panel กินพื้นที่ว่างด้านล่างทั้งหมด
-                                Layout.fillHeight: root.wifiAdvancedVisible
-                                Layout.minimumHeight: root.wifiAdvancedVisible ? layoutConfig.wifiAdvancedPanelMinHeight : 0
-                                Layout.preferredHeight: root.wifiAdvancedVisible ? layoutConfig.wifiAdvancedPanelHeight : 0
-
-                                sourceComponent: wifiAdvancedPanelComponent
-                            }
-
-                            Text {
-                                text: root.wifiMessage
-                                color: ui.subText
-                                font.pixelSize: layoutConfig.messageFontSize
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-
-                            Item {
-                                // ตอนเปิด Advanced Panel ห้ามตัวนี้แย่งพื้นที่
-                                Layout.fillHeight: !root.wifiAdvancedVisible
-                                Layout.preferredHeight: root.wifiAdvancedVisible ? 0 : 1
-                            }
+                            sourceComponent: wifiAdvancedPanelComponent
                         }
 
                         ColumnLayout {
-                            height: 55
                             visible: root.selectedNetworkPage === "cellular"
                             enabled: root.showCellularControls
                             Layout.fillWidth: true
+                            Layout.fillHeight: true
                             spacing: layoutConfig.cardSpacing
 
                             Text {
-                                height: 55
                                 text: "5G / Cellular"
                                 color: ui.text
                                 font.pixelSize: layoutConfig.cellularTitleFontSize
@@ -830,6 +721,7 @@ Item {
                                     textColor: ui.subText
                                     labelFontSize: layoutConfig.labelFontSize
                                 }
+
                                 DarkField {
                                     text: root.cellularIface
                                     placeholderText: "* or wwan0"
@@ -851,6 +743,7 @@ Item {
                                     textColor: ui.subText
                                     labelFontSize: layoutConfig.labelFontSize
                                 }
+
                                 DarkField {
                                     text: root.cellularApn
                                     placeholderText: "internet"
@@ -872,6 +765,7 @@ Item {
                                     textColor: ui.subText
                                     labelFontSize: layoutConfig.labelFontSize
                                 }
+
                                 CheckBox {
                                     checked: root.cellularAutoConnect
                                     enabled: root.showCellularControls
@@ -941,10 +835,19 @@ Item {
                                 Layout.fillWidth: true
                                 elide: Text.ElideRight
                             }
+
+                            Item {
+                                Layout.fillHeight: true
+                            }
                         }
                     }
                 }
 
+                // ============================================================
+                // RIGHT CARD
+                // WiFi page: Basic WiFi settings/actions moved here,
+                // replacing the old WiFi Status box.
+                // ============================================================
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredWidth: layoutConfig.rightPanelPreferredWidth
@@ -963,7 +866,7 @@ Item {
                             Layout.fillWidth: true
 
                             Text {
-                                text: root.selectedNetworkPage === "wifi" ? "WiFi Status / Results" : "5G Status / Results"
+                                text: root.selectedNetworkPage === "wifi" ? "WiFi Settings / Results" : "5G Status / Results"
                                 color: ui.text
                                 font.pixelSize: layoutConfig.sectionTitleFontSize
                                 font.bold: true
@@ -991,64 +894,205 @@ Item {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: layoutConfig.wifiStatusBoxHeight
+                                Layout.preferredHeight: 264
                                 radius: layoutConfig.wifiStatusBoxRadius
                                 color: ui.panel2
                                 border.color: ui.border
+                                border.width: layoutConfig.cardBorderWidth
 
-                                GridLayout {
+                                ColumnLayout {
                                     anchors.fill: parent
-                                    anchors.margins: layoutConfig.wifiStatusBoxPadding
-                                    columns: 2
-                                    rowSpacing: layoutConfig.wifiStatusGridSpacing
-                                    columnSpacing: layoutConfig.wifiStatusGridSpacing
+                                    anchors.margins: layoutConfig.wifiAdvancedPanelPadding
+                                    spacing: 10
 
-                                    FieldLabel { text: "Interface"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-                                    Text { text: root.wifiIface; color: ui.text; font.pixelSize: layoutConfig.valueFontSize }
-
-                                    FieldLabel { text: "Current SSID"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-                                    Text {
-                                        text: root.safeText(root.wifiState.ssid || root.wifiState.connection || root.wifiState.active_ssid, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
+                                    GridLayout {
+                                        id: wifiBasicFormRight
                                         Layout.fillWidth: true
-                                    }
+                                        columns: 2
+                                        columnSpacing: 2
+                                        rowSpacing: 0
 
-                                    FieldLabel { text: "IP / Gateway"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-                                    Text {
-                                        text: root.safeText(root.wifiState.current_ip || root.wifiState.ip, "-")
-                                              + " / "
-                                              + root.safeText(root.wifiState.current_gateway || root.wifiState.gateway, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    FieldLabel { text: "Netmask / Signal"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-                                    RowLayout {
-                                        Text {
-                                            text: root.safeText(root.wifiState.current_netmask || root.wifiState.netmask, "-")
-                                            color: ui.text
-                                            font.pixelSize: layoutConfig.valueFontSize
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
+                                        FieldLabel {
+                                            text: "WiFi Interface"
+                                            textColor: ui.subText
+                                            labelFontSize: layoutConfig.labelFontSize
+                                            Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
                                         }
 
-                                        SignalBar {
-                                            value: Number(root.wifiState.signal || 0)
-                                            goodColor: ui.accent
-                                            warningColor: ui.warning
-                                            dangerColor: ui.danger
-                                            barWidth: layoutConfig.signalBarWidth
-                                            barHeight: layoutConfig.signalBarHeight
-                                            itemWidth: layoutConfig.signalBarItemWidth
-                                            itemSpacing: layoutConfig.signalBarSpacing
-                                            itemRadius: layoutConfig.signalBarItemRadius
+                                        Text {
+                                            text: root.safeText(root.wifiIface, "-")
+                                            color: ui.text
+                                            font.pixelSize: layoutConfig.valueFontSize
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                            verticalAlignment: Text.AlignVCenter
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: layoutConfig.textFieldHeight
+                                        }
+
+                                        FieldLabel {
+                                            text: "SSID"
+                                            textColor: ui.subText
+                                            labelFontSize: layoutConfig.labelFontSize
+                                            Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
+                                        }
+
+                                        Text {
+                                            text: root.safeText(root.wifiSsid, "-")
+                                            color: ui.text
+                                            font.pixelSize: layoutConfig.valueFontSize
+                                            font.bold: true
+                                            elide: Text.ElideRight
+                                            verticalAlignment: Text.AlignVCenter
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: layoutConfig.textFieldHeight
+                                        }
+
+                                        FieldLabel {
+                                            text: "Password"
+                                            textColor: ui.subText
+                                            labelFontSize: layoutConfig.labelFontSize
+                                            Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
+                                        }
+
+                                        DarkField {
+                                            text: root.wifiPassword
+                                            placeholderText: "WiFi password"
+                                            echoMode: root.wifiPasswordVisible ? TextInput.Normal : TextInput.Password
+                                            textColor: ui.text
+                                            accentColor: ui.accent
+                                            borderColor: ui.border
+                                            fillColor: ui.field
+                                            fieldHeight: layoutConfig.textFieldHeight
+                                            fieldRadius: layoutConfig.textFieldRadius
+                                            fieldFontSize: layoutConfig.valueFontSize
+                                            fieldPadding: layoutConfig.textFieldPadding
+                                            actionVisible: true
+                                            actionText: root.wifiPasswordVisible ? "Hide" : "Show"
+                                            actionButtonWidth: layoutConfig.passwordEyeButtonWidth
+                                            actionFontSize: layoutConfig.smallTextFontSize
+                                            Layout.fillWidth: true
+
+                                            onTextEdited: {
+                                                root.wifiPassword = text
+                                                root.selectedWifiHasPassword = text.length > 0
+                                            }
+
+                                            onActionClicked: root.wifiPasswordVisible = !root.wifiPasswordVisible
+                                        }
+
+                                        FieldLabel {
+                                            text: "Auto Connect"
+                                            textColor: ui.subText
+                                            labelFontSize: layoutConfig.labelFontSize
+                                            Layout.preferredWidth: layoutConfig.wifiFormLabelWidth
+                                        }
+
+                                        CheckBox {
+                                            checked: root.wifiAutoConnect
+                                            text: checked ? "Enabled" : "Disabled"
+                                            Layout.fillWidth: true
+                                            onToggled: root.wifiAutoConnect = checked
+                                        }
+                                    }
+
+                                    GridLayout {
+                                        id: wifiActionsRight
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: layoutConfig.wifiButtonColumnSpacing
+                                        rowSpacing: layoutConfig.wifiButtonRowSpacing
+
+                                        AppButton {
+                                            text: "Scan"
+                                            baseColor: ui.panel2
+                                            buttonHeight: layoutConfig.wifiActionButtonHeight
+                                            buttonRadius: layoutConfig.buttonRadius
+                                            buttonFontSize: layoutConfig.buttonFontSize
+                                            busyIndicatorSize: layoutConfig.busyIndicatorSize
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
+                                            enabled: root.wifiEnabled && !root.wifiConnectBusy && !root.wifiToggleBusy && !root.wifiForgetBusy
+                                            onClicked: root.wifiScanRequested()
+                                        }
+
+                                        AppButton {
+                                            text: root.wifiToggleBusy
+                                                  ? (root.pendingWifiAction === "wifi_on" ? "Turning WiFi On..." : "Turning WiFi Off...")
+                                                  : (root.wifiEnabled ? "WiFi Off" : "WiFi On")
+                                            baseColor: root.wifiEnabled ? ui.warning : ui.accent
+                                            buttonHeight: layoutConfig.wifiActionButtonHeight
+                                            buttonRadius: layoutConfig.buttonRadius
+                                            buttonFontSize: layoutConfig.buttonFontSize
+                                            busy: root.wifiToggleBusy
+                                            busyIndicatorSize: layoutConfig.busyIndicatorSize
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
+                                            enabled: !root.wifiToggleBusy && !root.wifiConnectBusy && !root.wifiForgetBusy
+                                            onClicked: root.wifiToggleRequested(!root.wifiEnabled)
+                                        }
+
+                                        AppButton {
+                                            text: !root.hasSelectedWifi
+                                                  ? "Select Network"
+                                                  : (root.wifiConnectBusy
+                                                     ? (root.pendingWifiAction === "disconnect" ? "Disconnecting..." : "Connecting...")
+                                                     : (root.selectedWifiConnected ? "Disconnect" : "Connect"))
+                                            baseColor: root.selectedWifiConnected ? ui.danger : ui.accent
+                                            buttonHeight: layoutConfig.wifiActionButtonHeight
+                                            buttonRadius: layoutConfig.buttonRadius
+                                            buttonFontSize: layoutConfig.buttonFontSize
+                                            busy: root.wifiConnectBusy
+                                            busyIndicatorSize: layoutConfig.busyIndicatorSize
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
+                                            enabled: root.wifiEnabled && root.hasSelectedWifi
+                                                     && !root.wifiConnectBusy
+                                                     && !root.wifiToggleBusy
+                                                     && !root.wifiForgetBusy
+
+                                            onClicked: {
+                                                if (root.selectedWifiConnected)
+                                                    root.wifiDisconnectRequested(root.wifiIface)
+                                                else
+                                                    root.wifiConnectRequested(root.wifiIface,
+                                                                              root.wifiSsid,
+                                                                              root.wifiPassword,
+                                                                              root.wifiBssid,
+                                                                              root.wifiAutoConnect)
+                                            }
+                                        }
+
+                                        AppButton {
+                                            text: root.wifiForgetBusy ? "Forgetting..." : "Forget"
+                                            baseColor: root.selectedWifiSaved ? ui.warning : ui.panel2
+                                            buttonHeight: layoutConfig.wifiActionButtonHeight
+                                            buttonRadius: layoutConfig.buttonRadius
+                                            buttonFontSize: layoutConfig.buttonFontSize
+                                            busy: root.wifiForgetBusy
+                                            busyIndicatorSize: layoutConfig.busyIndicatorSize
+                                            Layout.fillWidth: true
+                                            Layout.minimumWidth: layoutConfig.wifiActionButtonMinWidth
+                                            enabled: root.selectedWifiSaved && root.wifiSsid.length > 0
+                                                     && !root.wifiForgetBusy
+                                                     && !root.wifiConnectBusy
+                                                     && !root.wifiToggleBusy
+
+                                            onClicked: root.wifiForgetRequested(root.wifiIface,
+                                                                                root.wifiSsid,
+                                                                                root.wifiBssid,
+                                                                                root.wifiProfileName)
                                         }
                                     }
                                 }
+                            }
+
+                            Text {
+                                text: root.wifiMessage
+                                color: ui.subText
+                                font.pixelSize: layoutConfig.messageFontSize
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
                             }
 
                             Rectangle {
@@ -1092,33 +1136,21 @@ Item {
                                                 font.pixelSize: layoutConfig.wifiStarFontSize
                                                 font.bold: true
                                                 Layout.preferredWidth: layoutConfig.wifiStarFontSize
+                                                Layout.alignment: Qt.AlignVCenter
                                             }
 
                                             ColumnLayout {
                                                 Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
                                                 spacing: layoutConfig.listTextSpacing
 
-                                                RowLayout {
+                                                Text {
+                                                    text: root.safeText(modelData.ssid, "Hidden")
+                                                    color: ui.text
+                                                    font.pixelSize: layoutConfig.valueFontSize
+                                                    font.bold: modelData.active
+                                                    elide: Text.ElideRight
                                                     Layout.fillWidth: true
-                                                    spacing: layoutConfig.wifiFormColumnSpacing
-
-                                                    Text {
-                                                        text: root.safeText(modelData.ssid, "Hidden")
-                                                        color: ui.text
-                                                        font.pixelSize: layoutConfig.valueFontSize
-                                                        font.bold: modelData.active
-                                                        elide: Text.ElideRight
-                                                        Layout.fillWidth: true
-                                                    }
-
-                                                    StatusBadge {
-                                                        visible: root.isConnectedWifi(modelData)
-                                                        textValue: "Active"
-                                                        badgeColor: ui.accent
-                                                        badgeHeight: layoutConfig.badgeHeight
-                                                        horizontalPadding: layoutConfig.badgeHorizontalPadding
-                                                        badgeFontSize: layoutConfig.badgeFontSize
-                                                    }
                                                 }
 
                                                 Text {
@@ -1128,6 +1160,17 @@ Item {
                                                     elide: Text.ElideRight
                                                     Layout.fillWidth: true
                                                 }
+                                            }
+
+                                            StatusBadge {
+                                                visible: root.isConnectedWifi(modelData)
+                                                textValue: "Active"
+                                                badgeColor: ui.accent
+                                                badgeHeight: layoutConfig.badgeHeight
+                                                horizontalPadding: layoutConfig.badgeHorizontalPadding
+                                                badgeFontSize: layoutConfig.badgeFontSize
+                                                Layout.alignment: Qt.AlignVCenter
+                                                Layout.preferredHeight: layoutConfig.badgeHeight
                                             }
 
                                             SignalBar {
@@ -1140,6 +1183,8 @@ Item {
                                                 itemWidth: layoutConfig.signalBarItemWidth
                                                 itemSpacing: layoutConfig.signalBarSpacing
                                                 itemRadius: layoutConfig.signalBarItemRadius
+                                                Layout.alignment: Qt.AlignVCenter
+                                                Layout.leftMargin: 24
                                             }
 
                                             Text {
@@ -1148,6 +1193,7 @@ Item {
                                                 font.pixelSize: layoutConfig.smallTextFontSize
                                                 Layout.preferredWidth: layoutConfig.signalPercentWidth
                                                 horizontalAlignment: Text.AlignRight
+                                                Layout.alignment: Qt.AlignVCenter
                                             }
                                         }
 
@@ -1183,6 +1229,7 @@ Item {
                                     columnSpacing: layoutConfig.cellularStatusGridSpacing
 
                                     FieldLabel { text: "Modem"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+
                                     Text {
                                         text: root.safeText(root.cellularState.modemName || root.cellularState.device || root.cellularState.interface, "-")
                                         color: ui.text
@@ -1192,6 +1239,7 @@ Item {
                                     }
 
                                     FieldLabel { text: "Operator"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+
                                     Text {
                                         text: root.safeText(root.cellularState.operator, "-")
                                         color: ui.text
@@ -1201,6 +1249,7 @@ Item {
                                     }
 
                                     FieldLabel { text: "State"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+
                                     Text {
                                         text: root.safeText(root.cellularState.state || root.cellularState.sim_status || root.cellularState.registration_state, "-")
                                         color: ui.text
@@ -1210,6 +1259,7 @@ Item {
                                     }
 
                                     FieldLabel { text: "Access Tech"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+
                                     Text {
                                         text: root.safeText(root.cellularState.accessTech || root.cellularState.access_technology, "-")
                                         color: ui.text
@@ -1219,6 +1269,7 @@ Item {
                                     }
 
                                     FieldLabel { text: "Signal"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+
                                     Text {
                                         text: root.safeText(root.cellularState.signal, "-")
                                         color: ui.text
@@ -1297,89 +1348,29 @@ Item {
             border.width: layoutConfig.cardBorderWidth
             clip: true
 
-            Flickable {
-                id: advancedPanelFlickable
+            ColumnLayout {
+                id: advancedPanelContent
                 anchors.fill: parent
                 anchors.margins: layoutConfig.wifiAdvancedPanelPadding
-                clip: true
-                boundsBehavior: Flickable.StopAtBounds
-                contentWidth: width
-                contentHeight: advancedPanelContent.implicitHeight
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AsNeeded
-                }
+                spacing: layoutConfig.wifiAdvancedPanelSpacing
 
-                ColumnLayout {
-                    id: advancedPanelContent
-                    width: advancedPanelFlickable.width
-                    spacing: layoutConfig.wifiAdvancedPanelSpacing
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: layoutConfig.headerItemSpacing
 
-                    RowLayout {
+                    ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: layoutConfig.headerItemSpacing
+                        spacing: layoutConfig.headerTextSpacing
 
-                        ColumnLayout {
+                        Text {
+                            text: "Advanced Wi-Fi Settings"
+                            color: ui.text
+                            font.pixelSize: layoutConfig.sectionTitleFontSize
+                            font.bold: true
                             Layout.fillWidth: true
-                            spacing: layoutConfig.headerTextSpacing
-
-                            Text {
-                                text: "Advanced Wi-Fi Settings"
-                                color: ui.text
-                                font.pixelSize: layoutConfig.sectionTitleFontSize
-                                font.bold: true
-                                Layout.fillWidth: true
-                            }
-
-                            // Text {
-                            //     text: root.safeText(root.wifiSsid, "Selected network") + " (connected)"
-                            //     color: ui.subText
-                            //     font.pixelSize: layoutConfig.smallTextFontSize
-                            //     elide: Text.ElideRight
-                            //     Layout.fillWidth: true
-                            // }
-                        }
-
-                        AppButton {
-                            text: "X"
-                            baseColor: ui.panel
-                            buttonHeight: layoutConfig.wifiAdvancedFooterHeight
-                            buttonRadius: layoutConfig.buttonRadius
-                            buttonFontSize: layoutConfig.buttonFontSize
-                            Layout.preferredWidth: layoutConfig.wifiAdvancedFooterHeight
-                            enabled: !root.wifiAdvancedBusy
-                            onClicked: root.closeWifiAdvancedPanel()
                         }
                     }
-
-                    // Rectangle {
-                    //     Layout.fillWidth: true
-                    //     Layout.preferredHeight: 64
-                    //     radius: layoutConfig.wifiStatusBoxRadius
-                    //     color: ui.panel
-                    //     border.color: ui.border
-
-                    //     ColumnLayout {
-                    //         anchors.fill: parent
-                    //         anchors.margins: layoutConfig.textFieldPadding
-                    //         spacing: layoutConfig.listTextSpacing
-
-                    //         Text {
-                    //             text: "IPv4 Configuration"
-                    //             color: ui.text
-                    //             font.pixelSize: layoutConfig.valueFontSize
-                    //             font.bold: true
-                    //             Layout.fillWidth: true
-                    //         }
-
-                    //         Text {
-                    //             text: root.wifiCurrentSummary()
-                    //             color: ui.subText
-                    //             font.pixelSize: layoutConfig.smallTextFontSize
-                    //             elide: Text.ElideRight
-                    //             Layout.fillWidth: true
-                    //         }
-                    //     }
-                    // }
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -1422,7 +1413,12 @@ Item {
                     columnSpacing: layoutConfig.wifiFormColumnSpacing
                     rowSpacing: layoutConfig.wifiFormRowSpacing
 
-                    FieldLabel { text: "IP Address"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                    FieldLabel {
+                        text: "IP Address"
+                        textColor: ui.subText
+                        labelFontSize: layoutConfig.labelFontSize
+                    }
+
                     DarkField {
                         text: root.wifiAdvancedIpAddress
                         placeholderText: "192.168.10.120"
@@ -1439,7 +1435,12 @@ Item {
                         onTextEdited: root.wifiAdvancedIpAddress = text
                     }
 
-                    FieldLabel { text: "Subnet Mask"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                    FieldLabel {
+                        text: "Subnet Mask"
+                        textColor: ui.subText
+                        labelFontSize: layoutConfig.labelFontSize
+                    }
+
                     DarkField {
                         text: root.wifiAdvancedSubnetMask
                         placeholderText: "255.255.255.0"
@@ -1456,7 +1457,12 @@ Item {
                         onTextEdited: root.wifiAdvancedSubnetMask = text
                     }
 
-                    FieldLabel { text: "Gateway"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                    FieldLabel {
+                        text: "Gateway"
+                        textColor: ui.subText
+                        labelFontSize: layoutConfig.labelFontSize
+                    }
+
                     DarkField {
                         text: root.wifiAdvancedGateway
                         placeholderText: "192.168.10.1"
@@ -1493,7 +1499,12 @@ Item {
                     columnSpacing: layoutConfig.wifiFormColumnSpacing
                     rowSpacing: layoutConfig.wifiFormRowSpacing
 
-                    FieldLabel { text: "Automatic DNS"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                    FieldLabel {
+                        text: "Automatic DNS"
+                        textColor: ui.subText
+                        labelFontSize: layoutConfig.labelFontSize
+                    }
+
                     CheckBox {
                         checked: root.wifiAdvancedDnsAutomatic
                         text: checked ? "Enabled" : "Disabled"
@@ -1502,7 +1513,12 @@ Item {
                         onToggled: root.wifiAdvancedDnsAutomatic = checked
                     }
 
-                    FieldLabel { text: "DNS Servers"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                    FieldLabel {
+                        text: "DNS Servers"
+                        textColor: ui.subText
+                        labelFontSize: layoutConfig.labelFontSize
+                    }
+
                     DarkField {
                         text: root.wifiAdvancedDnsServers
                         placeholderText: "8.8.8.8,1.1.1.1"
@@ -1529,39 +1545,28 @@ Item {
                 }
 
                 Item {
-                    Layout.preferredHeight: 2
+                    Layout.fillHeight: true
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: layoutConfig.wifiFormColumnSpacing
 
-                    AppButton {
-                        text: "Cancel"
-                        baseColor: ui.panel2
-                        buttonHeight: layoutConfig.wifiAdvancedFooterHeight
-                        buttonRadius: layoutConfig.buttonRadius
-                        buttonFontSize: layoutConfig.buttonFontSize
-                        Layout.fillWidth: true
-                        enabled: !root.wifiAdvancedBusy
-                        onClicked: root.closeWifiAdvancedPanel()
-                    }
-
-                    AppButton {
-                        text: root.wifiForgetBusy ? "Forgetting..." : "Forget Connection"
-                        baseColor: ui.warning
-                        buttonHeight: layoutConfig.wifiAdvancedFooterHeight
-                        buttonRadius: layoutConfig.buttonRadius
-                        buttonFontSize: layoutConfig.buttonFontSize
-                        busy: root.wifiForgetBusy
-                        busyIndicatorSize: layoutConfig.busyIndicatorSize
-                        Layout.fillWidth: true
-                        enabled: !root.wifiAdvancedBusy && !root.wifiForgetBusy
-                        onClicked: root.wifiForgetRequested(root.wifiIface,
-                                                            root.wifiSsid,
-                                                            root.wifiBssid,
-                                                            root.wifiProfileName)
-                    }
+                    // AppButton {
+                    //     text: root.wifiForgetBusy ? "Forgetting..." : "Forget Connection"
+                    //     baseColor: ui.warning
+                    //     buttonHeight: layoutConfig.wifiAdvancedFooterHeight
+                    //     buttonRadius: layoutConfig.buttonRadius
+                    //     buttonFontSize: layoutConfig.buttonFontSize
+                    //     busy: root.wifiForgetBusy
+                    //     busyIndicatorSize: layoutConfig.busyIndicatorSize
+                    //     Layout.fillWidth: true
+                    //     enabled: !root.wifiAdvancedBusy && !root.wifiForgetBusy
+                    //     onClicked: root.wifiForgetRequested(root.wifiIface,
+                    //                                         root.wifiSsid,
+                    //                                         root.wifiBssid,
+                    //                                         root.wifiProfileName)
+                    // }
 
                     AppButton {
                         text: root.wifiAdvancedBusy ? "Saving..." : "Save"
@@ -1579,5 +1584,4 @@ Item {
             }
         }
     }
-}
 }
