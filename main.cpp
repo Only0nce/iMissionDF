@@ -25,6 +25,18 @@
 #include <QCursor>
 #include <csignal>
 
+#ifndef HARDWARE_HAS_5G
+#define HARDWARE_HAS_5G 0
+#endif
+
+#ifndef HARDWARE_HAS_WIFI
+#define HARDWARE_HAS_WIFI 0
+#endif
+
+#ifndef HARDWARE_HAS_WIRELESS
+#define HARDWARE_HAS_WIRELESS 0
+#endif
+
 // -------- iScreenDF --------
 #include "iScreenDF/iScreenDF.h"
 #include "iScreenDF/ImageProviderDF.h"
@@ -197,6 +209,9 @@ int main(int argc, char *argv[])
 #else
     qInfo().noquote() << "[HW] HARDWARE_VERSION_NONE_5G";
 #endif
+    qInfo().noquote() << "[HW] Wireless=" << bool(HARDWARE_HAS_WIRELESS)
+                      << "WiFi=" << bool(HARDWARE_HAS_WIFI)
+                      << "5G=" << bool(HARDWARE_HAS_5G);
 
     // ==================================================
     // Register QML Types
@@ -226,6 +241,8 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("HardwareHas5G", false);
     engine.rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("NONE_5G"));
 #endif
+    engine.rootContext()->setContextProperty("HardwareHasWifi", bool(HARDWARE_HAS_WIFI));
+    engine.rootContext()->setContextProperty("HardwareHasWireless", bool(HARDWARE_HAS_WIRELESS));
     // Runtime QML pages use this context property, while Design mode can omit it.
     engine.rootContext()->setContextProperty("networkController", netCtrl);
 

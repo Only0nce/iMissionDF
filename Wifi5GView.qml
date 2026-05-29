@@ -10,6 +10,8 @@ Item {
     clip: true
 
     property bool hardwareHas5G: true
+    property bool hardwareHasWifi: hardwareHas5G
+    property bool hardwareHasWireless: hardwareHas5G
     property string hardwareVersionName: hardwareHas5G ? "5G" : "NONE_5G"
     property string selectedNetworkPage: "wifi"
 
@@ -82,7 +84,7 @@ Item {
         // Adjust 5G controls, status, and modem card sizing here.
         // ============================================================
         readonly property int cellularTitleFontSize: 23
-        readonly property int cellularStatusBoxHeight: 190
+        readonly property int cellularStatusBoxHeight: 310
         readonly property int cellularStatusBoxRadius: 8
         readonly property int cellularStatusBoxPadding: 14
         readonly property int cellularStatusGridSpacing: 8
@@ -138,7 +140,8 @@ Item {
         readonly property int busyIndicatorSize: 18
     }
 
-    readonly property bool showCellularControls: hardwareHas5G
+    readonly property bool showWifiControls: hardwareHasWireless && hardwareHasWifi
+    readonly property bool showCellularControls: hardwareHasWireless && hardwareHas5G
     readonly property int networkGridColumns: root.width > 1200 ? 2 : 1
     readonly property int networkCardHeight: Math.max(layoutConfig.cardMinHeight,
                                                       root.showCellularControls
@@ -230,13 +233,22 @@ Item {
         "connected": true,
         "modemName": "Quectel 5G",
         "device": "rmnet_mhi0.1",
+        "interface": "rmnet_mhi0.1",
         "operator": "AIS",
+        "plmn": "52003",
         "state": "registered",
+        "dataState": "Connected",
+        "ipAddress": "10.88.0.24",
+        "gateway": "10.88.0.1",
+        "simStatus": "Ready",
+        "simIccid": "8986000000000000000",
         "sim_status": "ready",
         "registration_state": "home",
         "accessTech": "nr5g",
         "access_technology": "nr5g",
-        "signal": "22/31"
+        "signal": "22/31",
+        "imei": "860000000000000",
+        "iccid": "8986000000000000000"
     })
     property var modemList: [
         {
@@ -246,6 +258,7 @@ Item {
         }
     ]
     property string cellularMessage: "Mock data for design preview"
+    property var cellularModuleLogs: []
 
     signal refreshAllRequested()
     signal wifiScanRequested()
@@ -283,6 +296,16 @@ Item {
             selectedNetworkPage = "wifi"
     }
 
+    onHardwareHasWifiChanged: {
+        if (!showWifiControls && showCellularControls)
+            selectedNetworkPage = "cellular"
+    }
+
+    onHardwareHasWirelessChanged: {
+        if (!hardwareHasWireless)
+            selectedNetworkPage = "wifi"
+    }
+
     onSelectedNetworkPageChanged: {
         // Advanced panel is always visible on the WiFi page.
     }
@@ -313,6 +336,8 @@ Item {
     }
 
     Component.onCompleted: {
+        if (!showWifiControls && showCellularControls)
+            selectedNetworkPage = "cellular"
         if (!showCellularControls && selectedNetworkPage === "cellular")
             selectedNetworkPage = "wifi"
 
@@ -373,6 +398,86 @@ Item {
 
     function statusColor(connected) {
         return connected ? ui.accent : ui.danger
+    }
+
+    function cellularValue(primary, secondary, fallback) {
+        var value = root.safeText(primary, "")
+        if (value.length > 0)
+            return value
+        return root.safeText(secondary, fallback)
+    }
+
+    function cellularSimStatusText() {
+        return root.safeText(root.cellularState.simStatus || root.cellularState.sim_status, "-")
+    }
+
+    function cellularDataStateText() {
+        return root.safeText(root.cellularState.dataState || root.cellularState.data_state,
+                             root.cellularState.connected ? "Connected" : "Disconnected")
+    }
+
+    function cellularIpAddressText() {
+        return root.safeText(root.cellularState.ipAddress ||
+                             root.cellularState.ip_address ||
+                             root.cellularState.ipv4 ||
+                             root.cellularState.dev_ip4_plain,
+                             "No IPv4 assigned")
+    }
+
+    function cellularLowerText(value) {
+        return root.safeText(value, "").toLowerCase()
+    }
+
+    function cellularHasNoSim() {
+        var text = cellularLowerText(cellularSimStatusText() + " " + root.cellularState.lastError)
+        return text.indexOf("not found") >= 0 ||
+               text.indexOf("missing") >= 0 ||
+               text.indexOf("no sim") >= 0 ||
+               text.indexOf("not inserted") >= 0
+    }
+
+    function cellularHasNoIp() {
+        var text = cellularLowerText(cellularDataStateText() + " " + cellularIpAddressText())
+        return text.indexOf("no ipv4") >= 0 ||
+               text.indexOf("no ip") >= 0 ||
+               text.indexOf("not assigned") >= 0
+    }
+
+    function cellularHasRegistrationTimeout() {
+        var text = cellularLowerText(root.cellularState.state + " " +
+                                     root.cellularState.lastError + " " +
+                                     root.cellularState.registration_state)
+        return text.indexOf("registration timeout") >= 0 ||
+               text.indexOf("requestregistrationstate2 err = 110") >= 0 ||
+               text.indexOf("message timeout") >= 0
+    }
+
+    function cellularBadgeText() {
+        if (cellularHasNoSim())
+            return "No SIM"
+        if (cellularHasRegistrationTimeout())
+            return "Registration Timeout"
+        if (root.cellularState.connected)
+            return "Connected"
+        if (cellularHasNoIp())
+            return "No IP"
+        return "Disconnected"
+    }
+
+    function cellularBadgeColor() {
+        if (root.cellularState.connected)
+            return ui.accent
+        if (cellularHasNoIp())
+            return ui.warning
+        return ui.danger
+    }
+
+    function moduleLogDisplayLines() {
+        if (cellularModuleLogs && cellularModuleLogs.length > 0)
+            return cellularModuleLogs
+
+        // No init/fallback log. Show blank when no real module logs.
+        return []
     }
 
     function isSavedWifi(row) {
@@ -550,6 +655,7 @@ Item {
             width: Math.max(root.width - layoutConfig.pageMarginLeft - layoutConfig.pageMarginRight,
                             layoutConfig.minContentWidth)
             spacing: layoutConfig.mainSpacing
+            visible: root.hardwareHasWireless
 
             RowLayout {
                 Layout.fillWidth: true
@@ -576,6 +682,8 @@ Item {
                 }
 
                 AppButton {
+                    visible: root.showWifiControls
+                    enabled: root.showWifiControls
                     text: "WiFi"
                     baseColor: root.selectedNetworkPage === "wifi" ? ui.accent : ui.panel2
                     buttonHeight: layoutConfig.wifiButtonHeight
@@ -587,6 +695,7 @@ Item {
 
                 AppButton {
                     visible: root.showCellularControls
+                    enabled: root.showCellularControls
                     text: "5G"
                     baseColor: root.selectedNetworkPage === "cellular" ? ui.accent : ui.panel2
                     buttonHeight: layoutConfig.cellularButtonHeight
@@ -603,6 +712,7 @@ Item {
                     buttonRadius: layoutConfig.buttonRadius
                     buttonFontSize: layoutConfig.buttonFontSize
                     Layout.preferredWidth: layoutConfig.refreshButtonWidth
+                    enabled: root.hardwareHasWireless
                     onClicked: root.refreshAllRequested()
                 }
             }
@@ -668,7 +778,7 @@ Item {
                             }
 
                             StatusBadge {
-                                visible: root.selectedNetworkPage === "wifi"
+                                visible: root.selectedNetworkPage === "wifi" && root.showWifiControls
                                 textValue: !root.wifiEnabled
                                            ? "Off"
                                            : (root.selectedWifiConnected ? "Connected" : "Ready")
@@ -683,8 +793,8 @@ Item {
 
                         Loader {
                             id: wifiAdvancedConfigPanel
-                            active: root.selectedNetworkPage === "wifi"
-                            visible: root.selectedNetworkPage === "wifi"
+                            active: root.selectedNetworkPage === "wifi" && root.showWifiControls
+                            visible: root.selectedNetworkPage === "wifi" && root.showWifiControls
                             clip: true
 
                             Layout.fillWidth: true
@@ -696,7 +806,7 @@ Item {
                         }
 
                         ColumnLayout {
-                            visible: root.selectedNetworkPage === "cellular"
+                            visible: root.selectedNetworkPage === "cellular" && root.showCellularControls
                             enabled: root.showCellularControls
                             Layout.fillWidth: true
                             Layout.fillHeight: true
@@ -722,20 +832,15 @@ Item {
                                     labelFontSize: layoutConfig.labelFontSize
                                 }
 
-                                DarkField {
-                                    text: root.cellularIface
-                                    placeholderText: "* or wwan0"
-                                    enabled: root.showCellularControls
-                                    textColor: ui.text
-                                    accentColor: ui.accent
-                                    borderColor: ui.border
-                                    fillColor: ui.field
-                                    fieldHeight: layoutConfig.textFieldHeight
-                                    fieldRadius: layoutConfig.textFieldRadius
-                                    fieldFontSize: layoutConfig.valueFontSize
-                                    fieldPadding: layoutConfig.textFieldPadding
+                                Text {
+                                    text: root.safeText(root.cellularIface, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
                                     Layout.fillWidth: true
-                                    onTextEdited: root.cellularIface = text
+                                    Layout.preferredHeight: layoutConfig.textFieldHeight
                                 }
 
                                 FieldLabel {
@@ -744,35 +849,136 @@ Item {
                                     labelFontSize: layoutConfig.labelFontSize
                                 }
 
-                                DarkField {
-                                    text: root.cellularApn
-                                    placeholderText: "internet"
-                                    enabled: root.showCellularControls
-                                    textColor: ui.text
-                                    accentColor: ui.accent
-                                    borderColor: ui.border
-                                    fillColor: ui.field
-                                    fieldHeight: layoutConfig.textFieldHeight
-                                    fieldRadius: layoutConfig.textFieldRadius
-                                    fieldFontSize: layoutConfig.valueFontSize
-                                    fieldPadding: layoutConfig.textFieldPadding
+                                Text {
+                                    text: root.safeText(root.cellularApn, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                    verticalAlignment: Text.AlignVCenter
                                     Layout.fillWidth: true
-                                    onTextEdited: root.cellularApn = text
+                                    Layout.preferredHeight: layoutConfig.textFieldHeight
+                                }
+                            }
+                            Text {
+                                text: "Cellular Status"
+                                color: ui.text
+                                font.pixelSize: layoutConfig.valueFontSize
+                                font.bold: true
+                                Layout.fillWidth: true
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 4
+                                rowSpacing: layoutConfig.cellularStatusGridSpacing
+                                columnSpacing: layoutConfig.cellularStatusGridSpacing * 2
+
+                                FieldLabel { text: "Modem"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.modemName || root.cellularState.device || root.cellularState.interface, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                FieldLabel { text: "PLMN"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.plmn || root.cellularState.operator_code, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
 
-                                FieldLabel {
-                                    text: "Auto Connect"
-                                    textColor: ui.subText
-                                    labelFontSize: layoutConfig.labelFontSize
+                                FieldLabel { text: "Operator"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.operator || root.cellularState.connection, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                FieldLabel { text: "Data State"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.cellularDataStateText()
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
                                 }
 
-                                CheckBox {
-                                    checked: root.cellularAutoConnect
-                                    enabled: root.showCellularControls
-                                    text: checked ? "Enabled" : "Disabled"
+                                FieldLabel { text: "State"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.state || root.cellularState.sim_status || root.cellularState.registration_state, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
                                     Layout.fillWidth: true
-                                    onToggled: root.cellularAutoConnect = checked
                                 }
+                                FieldLabel { text: "IP Address"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.cellularIpAddressText()
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                FieldLabel { text: "Access Tech"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.accessTech || root.cellularState.access_technology, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                FieldLabel { text: "Gateway"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.gateway || root.cellularState.dev_ip4_gateway, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                FieldLabel { text: "Signal"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.signal, "--")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                FieldLabel { text: "SIM Status"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.cellularSimStatusText()
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                FieldLabel { text: "IMEI"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.imei, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                                FieldLabel { text: "SIM ICCID"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
+                                Text {
+                                    text: root.safeText(root.cellularState.simIccid || root.cellularState.iccid, "-")
+                                    color: ui.text
+                                    font.pixelSize: layoutConfig.valueFontSize
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+
+                            Item {
+                                Layout.fillHeight: true
                             }
 
                             GridLayout {
@@ -780,28 +986,6 @@ Item {
                                 columns: 2
                                 columnSpacing: layoutConfig.cellularFormColumnSpacing
                                 rowSpacing: layoutConfig.cellularFormRowSpacing
-
-                                AppButton {
-                                    text: "Refresh"
-                                    baseColor: ui.panel2
-                                    buttonHeight: layoutConfig.cellularButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    Layout.fillWidth: true
-                                    enabled: root.showCellularControls
-                                    onClicked: root.cellularRefreshRequested()
-                                }
-
-                                AppButton {
-                                    text: "List Modems"
-                                    baseColor: ui.panel2
-                                    buttonHeight: layoutConfig.cellularButtonHeight
-                                    buttonRadius: layoutConfig.buttonRadius
-                                    buttonFontSize: layoutConfig.buttonFontSize
-                                    Layout.fillWidth: true
-                                    enabled: root.showCellularControls
-                                    onClicked: root.cellularListModemsRequested()
-                                }
 
                                 AppButton {
                                     text: "Connect"
@@ -826,18 +1010,6 @@ Item {
                                     enabled: root.showCellularControls
                                     onClicked: root.cellularDisconnectRequested()
                                 }
-                            }
-
-                            Text {
-                                text: root.cellularMessage
-                                color: ui.subText
-                                font.pixelSize: layoutConfig.messageFontSize
-                                Layout.fillWidth: true
-                                elide: Text.ElideRight
-                            }
-
-                            Item {
-                                Layout.fillHeight: true
                             }
                         }
                     }
@@ -876,10 +1048,10 @@ Item {
                             StatusBadge {
                                 textValue: root.selectedNetworkPage === "wifi"
                                            ? (!root.wifiEnabled ? "Off" : (root.currentWifiConnected ? "Connected" : "Disconnected"))
-                                           : (root.cellularState.connected ? "Connected" : "Disconnected")
+                                           : root.cellularBadgeText()
                                 badgeColor: root.selectedNetworkPage === "wifi"
                                             ? (!root.wifiEnabled ? ui.warning : root.statusColor(root.currentWifiConnected))
-                                            : root.statusColor(root.cellularState.connected)
+                                            : root.cellularBadgeColor()
                                 badgeHeight: layoutConfig.badgeHeight
                                 horizontalPadding: layoutConfig.badgeHorizontalPadding
                                 badgeFontSize: layoutConfig.badgeFontSize
@@ -887,7 +1059,7 @@ Item {
                         }
 
                         ColumnLayout {
-                            visible: root.selectedNetworkPage === "wifi"
+                            visible: root.selectedNetworkPage === "wifi" && root.showWifiControls
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             spacing: layoutConfig.cardSpacing
@@ -1209,120 +1381,60 @@ Item {
                         }
 
                         ColumnLayout {
-                            visible: root.selectedNetworkPage === "cellular"
+                            visible: root.selectedNetworkPage === "cellular" && root.showCellularControls
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             spacing: layoutConfig.cardSpacing
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: layoutConfig.cellularStatusBoxHeight
-                                radius: layoutConfig.cellularStatusBoxRadius
-                                color: ui.panel2
-                                border.color: ui.border
-
-                                GridLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: layoutConfig.cellularStatusBoxPadding
-                                    columns: 2
-                                    rowSpacing: layoutConfig.cellularStatusGridSpacing
-                                    columnSpacing: layoutConfig.cellularStatusGridSpacing
-
-                                    FieldLabel { text: "Modem"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-
-                                    Text {
-                                        text: root.safeText(root.cellularState.modemName || root.cellularState.device || root.cellularState.interface, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    FieldLabel { text: "Operator"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-
-                                    Text {
-                                        text: root.safeText(root.cellularState.operator, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    FieldLabel { text: "State"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-
-                                    Text {
-                                        text: root.safeText(root.cellularState.state || root.cellularState.sim_status || root.cellularState.registration_state, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    FieldLabel { text: "Access Tech"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-
-                                    Text {
-                                        text: root.safeText(root.cellularState.accessTech || root.cellularState.access_technology, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-
-                                    FieldLabel { text: "Signal"; textColor: ui.subText; labelFontSize: layoutConfig.labelFontSize }
-
-                                    Text {
-                                        text: root.safeText(root.cellularState.signal, "-")
-                                        color: ui.text
-                                        font.pixelSize: layoutConfig.valueFontSize
-                                        elide: Text.ElideRight
-                                        Layout.fillWidth: true
-                                    }
-                                }
-                            }
 
                             Rectangle {
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
                                 radius: layoutConfig.modemListRadius
-                                color: ui.field
+                                color: ui.panel
                                 border.color: ui.border
+                                border.width: layoutConfig.cardBorderWidth
+                                clip: true
 
-                                ListView {
-                                    id: modemListView
+                                ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: layoutConfig.modemListMargin
-                                    clip: true
-                                    model: root.modemList
+                                    spacing: 8
 
-                                    delegate: Rectangle {
-                                        id: modemDelegate
+                                    RowLayout {
+                                        Layout.fillWidth: true
 
-                                        width: modemListView.width
-                                        height: layoutConfig.modemListRowHeight
+                                        Text {
+                                            text: "Module Logs"
+                                            color: ui.text
+                                            font.pixelSize: layoutConfig.sectionTitleFontSize
+                                            font.bold: true
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
                                         radius: layoutConfig.modemListRadius
-                                        color: "transparent"
+                                        color: "#050a0f"
+                                        border.color: "#203225"
+                                        clip: true
 
-                                        ColumnLayout {
+                                        ListView {
+                                            id: moduleLogView
                                             anchors.fill: parent
-                                            anchors.leftMargin: layoutConfig.textFieldPadding
-                                            anchors.rightMargin: layoutConfig.textFieldPadding
-                                            spacing: layoutConfig.listTextSpacing
+                                            anchors.margins: 8
+                                            clip: true
+                                            model: root.moduleLogDisplayLines()
 
-                                            Text {
-                                                text: root.safeText(modelData.name, "No modem")
-                                                color: modelData.disabled ? ui.warning : ui.text
-                                                font.pixelSize: layoutConfig.valueFontSize
-                                                font.bold: true
+                                            delegate: Text {
+                                                width: moduleLogView.width
+                                                text: root.safeText(modelData, "")
+                                                color: "#8cf06b"
+                                                font.family: "monospace"
+                                                font.pixelSize: layoutConfig.smallTextFontSize + 10
                                                 elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-
-                                            Text {
-                                                text: root.safeText(modelData.vendor, root.safeText(modelData.error, ""))
-                                                color: ui.subText
-                                                font.pixelSize: layoutConfig.smallTextFontSize
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
                                             }
                                         }
                                     }
@@ -1330,6 +1442,29 @@ Item {
                             }
                         }
                     }
+                }
+            }
+
+            ColumnLayout {
+                visible: !root.hardwareHasWireless
+                anchors.centerIn: parent
+                spacing: layoutConfig.headerTextSpacing
+
+                Text {
+                    text: "Wireless Network Disabled"
+                    color: ui.text
+                    font.pixelSize: layoutConfig.headerTitleFontSize
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.alignment: Qt.AlignHCenter
+                }
+
+                Text {
+                    text: "This hardware version does not support WiFi or 5G."
+                    color: ui.subText
+                    font.pixelSize: layoutConfig.headerSubtitleFontSize
+                    horizontalAlignment: Text.AlignHCenter
+                    Layout.alignment: Qt.AlignHCenter
                 }
             }
         }

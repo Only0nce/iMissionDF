@@ -14,6 +14,14 @@
 #define HARDWARE_HAS_5G 0
 #endif
 
+#ifndef HARDWARE_HAS_WIFI
+#define HARDWARE_HAS_WIFI 0
+#endif
+
+#ifndef HARDWARE_HAS_WIRELESS
+#define HARDWARE_HAS_WIRELESS 0
+#endif
+
 namespace {
 
 QString hardwareVersionName()
@@ -221,6 +229,8 @@ void Wifi5GController::sendSnapshot()
         QJsonObject obj;
         obj[QStringLiteral("menuID")] = QStringLiteral("wifi5g");
         obj[QStringLiteral("hardwareHas5G")] = bool(HARDWARE_HAS_5G);
+        obj[QStringLiteral("hardwareHasWifi")] = bool(HARDWARE_HAS_WIFI);
+        obj[QStringLiteral("hardwareHasWireless")] = bool(HARDWARE_HAS_WIRELESS);
         obj[QStringLiteral("hardwareVersion")] = hardwareVersionName();
         obj[QStringLiteral("wifiConfig")] = toObject(network.loadWifiConfig());
 
@@ -232,6 +242,7 @@ void Wifi5GController::sendSnapshot()
         obj[QStringLiteral("cellularConfig")] = toObject(network.loadCellularConfig());
         obj[QStringLiteral("cellularStatus")] = toObject(network.cellularStatus());
         obj[QStringLiteral("modems")] = toArray(network.listModems());
+        obj[QStringLiteral("moduleLogs")] = QJsonArray::fromStringList(network.cellularModuleLogs(120));
         return obj;
     });
 }
@@ -413,6 +424,7 @@ void Wifi5GController::sendCellularStatus(const QString &menuId)
         obj[QStringLiteral("data")] = toObject(status);
         obj[QStringLiteral("status")] = toObject(status);
         obj[QStringLiteral("modems")] = toArray(network.listModems());
+        obj[QStringLiteral("moduleLogs")] = QJsonArray::fromStringList(network.cellularModuleLogs(120));
         return obj;
     });
 }

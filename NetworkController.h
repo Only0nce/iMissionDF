@@ -72,6 +72,7 @@ public:
     Q_INVOKABLE QVariantMap loadCellularConfig();
     Q_INVOKABLE QVariantList listModems();
     Q_INVOKABLE QVariantMap cellularStatus();
+    Q_INVOKABLE QStringList cellularModuleLogs(int maxLines = 120);
     Q_INVOKABLE void connectCellular(const QString &apn,
                                      const QString &iface = QStringLiteral("*"),
                                      bool autoConnect = true);

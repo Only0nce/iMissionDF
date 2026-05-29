@@ -207,6 +207,48 @@ Item {
     property string mapSourceUrl: "qrc:/iScreenDFqml/pages/QMLMap.qml"
     property string sideLogsSourceUrl: "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
     property string wifi5gSourceUrl: "qrc:/Wifi5GSetting.qml"
+    property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
+
+    function toolbarPages() {
+        var pages = [
+            {
+                title: "RADIO",
+                icon: "qrc:/images/radioIcon.png",
+                source: "qrc:/HomeDisplay.qml"
+            },
+            {
+                title: "MAP\nVISUALIZATION",
+                icon: "qrc:/iScreenDFqml/images/earth-asia.png",
+                source: "qrc:/iScreenDFqml/pages/QMLMap.qml"
+            },
+            {
+                title: "DOA\nVIEWER",
+                icon: "qrc:/iScreenDFqml/images/dart-board.png",
+                source: "qrc:/DoaViewer/ViewerPage.qml"
+            }
+        ]
+
+        if (settingsPanel.hardwareHasWireless) {
+            pages.push({
+                           title: "WIFI\n5G",
+                           icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
+                           source: settingsPanel.wifi5gSourceUrl
+                       })
+        }
+
+        pages.push({
+                       title: "RECORDER",
+                       icon: "qrc:/iRecordManage/images/IconRec.png",
+                       source: "qrc:/iRecordManage/TapBarRecordFiles.qml"
+                   })
+        pages.push({
+                       title: "DIAG\nNOSTIC",
+                       icon: "qrc:/images/Diagnostic.png",
+                       source: "qrc:/iRecordManage/MonitorDisplay.qml"
+                   })
+
+        return pages
+    }
 
     property string _pendingSideLogsReloadReason: ""
     property string _pendingBridgeReloadReason: ""
@@ -668,39 +710,7 @@ Item {
 
                     property int hoveredIndex: -1
 
-                    property var pages: [
-                        {
-                            title: "RADIO",
-                            icon: "qrc:/images/radioIcon.png",
-                            source: "qrc:/HomeDisplay.qml"
-                        },
-                        {
-                            title: "MAP\nVISUALIZATION",
-                            icon: "qrc:/iScreenDFqml/images/earth-asia.png",
-                            source: "qrc:/iScreenDFqml/pages/QMLMap.qml"
-                        },
-                        {
-                            title: "DOA\nVIEWER",
-                            icon: "qrc:/iScreenDFqml/images/dart-board.png",
-                            source: "qrc:/DoaViewer/ViewerPage.qml"
-                        },
-                        {
-                            title: "WIFI\n5G",
-                            icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
-                            source: "qrc:/Wifi5GSetting.qml"
-                            // source: settingsPanel.wifi5gSourceUrl
-                        },
-                        {
-                            title: "RECORDER",
-                            icon: "qrc:/iRecordManage/images/IconRec.png",
-                            source: "qrc:/iRecordManage/TapBarRecordFiles.qml"
-                        },
-                        {
-                            title: "DIAG\nNOSTIC",
-                            icon: "qrc:/images/Diagnostic.png",
-                            source: "qrc:/iRecordManage/MonitorDisplay.qml"
-                        }
-                    ]
+                    property var pages: settingsPanel.toolbarPages()
 
                     property int currentIndex: 0
                     property int buttonSize: pages.length > 5 ? 70 : 80

@@ -25,29 +25,37 @@ CONFIG(release, debug|release) {
 # ============================================================
 # Hardware version selector
 #
-# Build 5G hardware:
-#   qmake iScanMR10.pro CONFIG+=HW_5G
-#
-# Build non-5G hardware:
-#   qmake iScanMR10.pro CONFIG+=HW_NONE_5G
+# Current project policy hard-codes one hardware CONFIG below.
+# Switch by enabling only one of these two lines:
+#   CONFIG+=HW_5G
+#   CONFIG+=HW_NONE_5G
 #
 # Default is NONE_5G for safety.
 # ============================================================
 CONFIG+=HW_5G
 # CONFIG+=HW_NONE_5G
+contains(CONFIG, HW_5G):contains(CONFIG, HW_NONE_5G) {
+    error("Select only one hardware version: HW_5G or HW_NONE_5G")
+}
 contains(CONFIG, HW_5G) {
     message("Hardware version: 5G")
     DEFINES += HARDWARE_VERSION_5G
     DEFINES += HARDWARE_HAS_5G=1
+    DEFINES += HARDWARE_HAS_WIFI=1
+    DEFINES += HARDWARE_HAS_WIRELESS=1
 } else {
     contains(CONFIG, HW_NONE_5G) {
         message("Hardware version: NONE_5G")
         DEFINES += HARDWARE_VERSION_NONE_5G
         DEFINES += HARDWARE_HAS_5G=0
+        DEFINES += HARDWARE_HAS_WIFI=0
+        DEFINES += HARDWARE_HAS_WIRELESS=0
     } else {
         message("Hardware version not selected. Default: NONE_5G")
         DEFINES += HARDWARE_VERSION_NONE_5G
         DEFINES += HARDWARE_HAS_5G=0
+        DEFINES += HARDWARE_HAS_WIFI=0
+        DEFINES += HARDWARE_HAS_WIRELESS=0
     }
 }
 

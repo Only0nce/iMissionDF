@@ -14,10 +14,13 @@ Item {
     readonly property bool hasBackend: networkBackend !== null || mainWindowBackend !== null
     readonly property bool designMode: !hasBackend || Qt.application.arguments.join(" ").indexOf("qml2puppet") >= 0
 
-    property bool hardwareHas5G: (typeof HardwareHas5G === "undefined") ? true : HardwareHas5G
+    property bool hardwareHas5G: (typeof HardwareHas5G === "undefined") ? false : HardwareHas5G
+    property bool hardwareHasWifi: (typeof HardwareHasWifi === "undefined") ? hardwareHas5G : HardwareHasWifi
+    property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? hardwareHas5G : HardwareHasWireless
     property string hardwareVersionName: (typeof HardwareVersionName === "undefined") ? "5G" : HardwareVersionName
     property bool useBackendJson: true
-    readonly property bool showCellularControls: hardwareHas5G
+    readonly property bool showWifiControls: hardwareHasWireless && hardwareHasWifi
+    readonly property bool showCellularControls: hardwareHasWireless && hardwareHas5G
     readonly property int networkGridColumns: showCellularControls && root.width > 1200 ? 2 : 1
     readonly property int networkCardHeight: showCellularControls ? 620 : Math.max(620, root.height - 220)
     property alias selectedNetworkPage: pageView.selectedNetworkPage
@@ -60,6 +63,7 @@ Item {
     property alias cellularState: pageView.cellularState
     property alias modemList: pageView.modemList
     property alias cellularMessage: pageView.cellularMessage
+    property alias cellularModuleLogs: pageView.cellularModuleLogs
 
     signal requestToast(string text)
 
@@ -205,6 +209,8 @@ Item {
         // Qt Creator Design mode runs in QML Puppet without C++ context properties.
         // Keep all mock data here so Wifi5GView remains backend-free and previewable.
         hardwareHas5G = true
+        hardwareHasWifi = true
+        hardwareHasWireless = true
         hardwareVersionName = "5G"
         wifiEnabled = true
         wifiIface = safeText(wifiIface, "wlP9p1s0")
@@ -245,13 +251,22 @@ Item {
             "connected": true,
             "modemName": "Quectel 5G",
             "device": "rmnet_mhi0.1",
+            "interface": "rmnet_mhi0.1",
             "operator": "AIS",
+            "plmn": "52003",
             "state": "registered",
+            "dataState": "Connected",
+            "ipAddress": "10.88.0.24",
+            "gateway": "10.88.0.1",
+            "simStatus": "Ready",
+            "simIccid": "8986000000000000000",
             "sim_status": "ready",
             "registration_state": "home",
             "accessTech": "nr5g",
             "access_technology": "nr5g",
-            "signal": "22/31"
+            "signal": "22/31",
+            "imei": "860000000000000",
+            "iccid": "8986000000000000000"
         }
         modemList = [
             {
@@ -261,9 +276,28 @@ Item {
             }
         ]
         cellularMessage = "Mock data for design preview"
+        cellularModuleLogs = [
+            "2026-05-29 11:20:41.132 MODEM [INF] Modem power on",
+            "2026-05-29 11:20:41.486 MODEM [INF] Firmware check completed",
+            "2026-05-29 11:20:42.653 SIM   [INF] SIM check: present",
+            "2026-05-29 11:20:47.325 NET   [INF] Registered to 5G network",
+            "2026-05-29 11:20:48.679 PDP   [INF] IP address assigned",
+            "2026-05-29 11:21:02.317 AT    [DBG] > AT+QENG=\"servingcell\"",
+            "2026-05-29 11:21:02.542 AT    [DBG] < OK"
+        ]
     }
 
     function ensureValidSelectedPage() {
+        if (!root.hardwareHasWireless) {
+            stopWifiAutoRescan()
+            return
+        }
+
+        if (!root.showWifiControls && root.showCellularControls) {
+            selectedNetworkPage = "cellular"
+            return
+        }
+
         if (!root.showCellularControls && selectedNetworkPage === "cellular")
             selectedNetworkPage = "wifi"
     }
@@ -277,6 +311,9 @@ Item {
     }
 
     function requestSavedWifiPassword(iface, ssid, bssid, profileName) {
+        if (!root.showWifiControls)
+            return
+
         var targetSsid = safeText(ssid, wifiSsid)
         var targetProfileName = safeText(profileName, wifiProfileName)
         var targetBssid = safeText(bssid, wifiBssid)
@@ -310,6 +347,13 @@ Item {
     }
 
     function refreshWifiConfig() {
+        if (!root.showWifiControls) {
+            wifiIface = ""
+            wifiSsid = ""
+            wifiAutoConnect = false
+            return
+        }
+
         if (!networkBackend) {
             wifiIface = safeText(wifiIface, "wlP9p1s0")
             wifiSsid = safeText(wifiSsid, "")
@@ -324,6 +368,13 @@ Item {
     }
 
     function refreshWifiStatus() {
+        if (!root.showWifiControls) {
+            wifiState = {}
+            wifiEnabled = false
+            selectedWifiConnected = false
+            return
+        }
+
         if (sendBackendCommand({"menuID": "wifi_state", "iface": wifiIface}))
             return
 
@@ -405,6 +456,13 @@ Item {
     }
 
     function scanWifi() {
+        if (!root.showWifiControls) {
+            wifiList = []
+            wifiMessage = ""
+            stopWifiAutoRescan()
+            return
+        }
+
         wifiMessage = "Scanning..."
         if (sendBackendCommand({"menuID": "scan", "iface": wifiIface}))
             return
@@ -420,6 +478,9 @@ Item {
     }
 
     function refreshWifiNow() {
+        if (!root.showWifiControls)
+            return
+
         if (!root.visible && !designMode)
             return
 
@@ -429,7 +490,7 @@ Item {
     }
 
     function startWifiAutoRescan() {
-        if (designMode || !root.visible)
+        if (!root.showWifiControls || designMode || !root.visible)
             return
 
         // This timer runs only while the WiFi/5G page is visible.
@@ -464,10 +525,36 @@ Item {
         cellularAutoConnect = cfg.autoConnect === undefined ? true : cfg.autoConnect
     }
 
+    function refreshCellularModuleLogs() {
+        if (!root.showCellularControls) {
+            cellularModuleLogs = []
+            return
+        }
+
+        if (!networkBackend) {
+            if (!cellularModuleLogs || cellularModuleLogs.length === 0) {
+                cellularModuleLogs = [
+                    "2026-05-29 11:20:41.132 MODEM [INF] Modem power on",
+                    "2026-05-29 11:20:42.653 SIM   [INF] SIM check: present",
+                    "2026-05-29 11:20:47.325 NET   [INF] Registered to 5G network"
+                ]
+            }
+            return
+        }
+
+        try {
+            var logs = networkBackend.cellularModuleLogs(120)
+            cellularModuleLogs = logs || []
+        } catch (error) {
+            cellularModuleLogs = []
+        }
+    }
+
     function refreshCellularStatus() {
         if (!root.showCellularControls) {
             cellularState = {}
             modemList = []
+            cellularModuleLogs = []
             cellularMessage = ""
             return
         }
@@ -480,13 +567,22 @@ Item {
                 "connected": true,
                 "modemName": "Quectel 5G",
                 "device": "rmnet_mhi0.1",
+                "interface": "rmnet_mhi0.1",
                 "operator": "AIS",
+                "plmn": "52003",
                 "state": "registered",
+                "dataState": "Connected",
+                "ipAddress": "10.88.0.24",
+                "gateway": "10.88.0.1",
+                "simStatus": "Ready",
+                "simIccid": "8986000000000000000",
                 "sim_status": "ready",
                 "registration_state": "home",
                 "accessTech": "nr5g",
                 "access_technology": "nr5g",
-                "signal": "22/31"
+                "signal": "22/31",
+                "imei": "860000000000000",
+                "iccid": "8986000000000000000"
             }
             modemList = [
                 {
@@ -495,14 +591,29 @@ Item {
                     "disabled": false
                 }
             ]
+            refreshCellularModuleLogs()
             return
         }
 
         cellularState = networkBackend.cellularStatus()
         modemList = networkBackend.listModems()
+        refreshCellularModuleLogs()
     }
 
     function refreshAll() {
+        if (!root.hardwareHasWireless) {
+            stopWifiAutoRescan()
+            wifiList = []
+            wifiState = {}
+            wifiEnabled = false
+            wifiMessage = ""
+            cellularState = {}
+            modemList = []
+            cellularModuleLogs = []
+            cellularMessage = ""
+            return
+        }
+
         if (sendBackendCommand({"menuID": "getWifi5GPage"}))
             return
 
@@ -511,8 +622,10 @@ Item {
             return
         }
 
-        refreshWifiConfig()
-        refreshWifiStatus()
+        if (root.showWifiControls) {
+            refreshWifiConfig()
+            refreshWifiStatus()
+        }
         if (root.showCellularControls) {
             refreshCellularConfig()
             refreshCellularStatus()
@@ -521,6 +634,9 @@ Item {
     }
 
     function toggleWifi(on) {
+        if (!root.showWifiControls)
+            return
+
         var nextEnabled = on === undefined ? !wifiEnabled : on
         startWifiToggleBusy(nextEnabled ? "wifi_on" : "wifi_off")
         wifiMessage = nextEnabled ? "Turning WiFi on..." : "Turning WiFi off..."
@@ -549,6 +665,9 @@ Item {
     }
 
     function connectWifi(iface, ssid, password, bssid, autoConnect) {
+        if (!root.showWifiControls)
+            return
+
         var targetIface = safeText(iface, wifiIface)
         var targetSsid = safeText(ssid, wifiSsid)
         var targetPassword = password === undefined ? wifiPassword : password
@@ -598,6 +717,9 @@ Item {
     }
 
     function disconnectWifi(iface) {
+        if (!root.showWifiControls)
+            return
+
         var targetIface = safeText(iface, wifiIface)
         wifiIface = targetIface
         startWifiConnectBusy("disconnect")
@@ -621,6 +743,9 @@ Item {
     }
 
     function forgetWifi(iface, ssid, bssid, profileName) {
+        if (!root.showWifiControls)
+            return
+
         var targetIface = safeText(iface, wifiIface)
         var targetSsid = safeText(ssid, wifiSsid)
         var targetBssid = safeText(bssid, wifiBssid)
@@ -681,6 +806,9 @@ Item {
     }
 
     function openWifiAdvanced(iface, ssid, bssid, profileName) {
+        if (!root.showWifiControls)
+            return
+
         var targetIface = safeText(iface, wifiIface)
         var targetSsid = safeText(ssid, wifiSsid)
         var targetBssid = safeText(bssid, wifiBssid)
@@ -736,6 +864,9 @@ Item {
     }
 
     function saveWifiAdvanced(settings) {
+        if (!root.showWifiControls)
+            return
+
         var payload = settings || {}
         wifiAdvancedBusy = true
         wifiAdvancedMessage = "Saving advanced WiFi settings..."
@@ -785,6 +916,9 @@ Item {
     }
 
     function connectCellular(apn, iface, autoConnect) {
+        if (!root.showCellularControls)
+            return
+
         var targetApn = safeText(apn, cellularApn)
         var targetIface = safeText(iface, cellularIface)
         var targetAutoConnect = autoConnect === undefined ? cellularAutoConnect : autoConnect
@@ -831,13 +965,18 @@ Item {
                     "disabled": false
                 }
             ]
+            refreshCellularModuleLogs()
             return
         }
 
         modemList = networkBackend.listModems()
+        refreshCellularModuleLogs()
     }
 
     function disconnectCellular() {
+        if (!root.showCellularControls)
+            return
+
         cellularMessage = "Disconnecting..."
         if (sendBackendCommand({"menuID": "cellularDisconnect", "connectionName": "cellular-5g"}))
             return
@@ -861,9 +1000,20 @@ Item {
         if (obj.menuID === "wifi5g") {
             if (obj.hardwareHas5G !== undefined)
                 hardwareHas5G = obj.hardwareHas5G
+            if (obj.hardwareHasWifi !== undefined)
+                hardwareHasWifi = obj.hardwareHasWifi
+            else if (obj.hardwareHas5G !== undefined)
+                hardwareHasWifi = obj.hardwareHas5G
+            if (obj.hardwareHasWireless !== undefined)
+                hardwareHasWireless = obj.hardwareHasWireless
+            else if (obj.hardwareHas5G !== undefined)
+                hardwareHasWireless = obj.hardwareHas5G
             if (obj.hardwareVersion !== undefined)
                 hardwareVersionName = obj.hardwareVersion
             ensureValidSelectedPage()
+
+            if (!root.hardwareHasWireless)
+                return
 
             if (obj.wifiConfig) {
                 wifiIface = safeText(obj.wifiConfig.interface, wifiIface)
@@ -888,6 +1038,9 @@ Item {
             if (obj.modems)
                 modemList = obj.modems
 
+            if (obj.moduleLogs || obj.cellularModuleLogs)
+                cellularModuleLogs = obj.moduleLogs || obj.cellularModuleLogs
+
             updateSelectedWifiKnownFromList()
             return
         }
@@ -908,6 +1061,8 @@ Item {
         if (obj.menuID === "cellularStatus" || obj.menuID === "lte_state") {
             cellularState = obj.status || obj.data || {}
             modemList = obj.modems || modemList
+            if (obj.moduleLogs || obj.cellularModuleLogs)
+                cellularModuleLogs = obj.moduleLogs || obj.cellularModuleLogs
             return
         }
 
@@ -999,11 +1154,17 @@ Item {
 
     onVisibleChanged: {
         if (visible) {
+            if (!root.hardwareHasWireless) {
+                stopWifiAutoRescan()
+                return
+            }
             if (!designMode) {
                 refreshAll()
-                refreshWifiNow()
+                if (root.showWifiControls)
+                    refreshWifiNow()
             }
-            startWifiAutoRescan()
+            if (root.showWifiControls)
+                startWifiAutoRescan()
         } else {
             stopWifiAutoRescan()
         }
@@ -1014,10 +1175,12 @@ Item {
             applyMockData()
         } else {
             refreshAll()
-            refreshWifiNow()
+            if (root.showWifiControls)
+                refreshWifiNow()
         }
         ensureValidSelectedPage()
-        startWifiAutoRescan()
+        if (root.showWifiControls)
+            startWifiAutoRescan()
     }
 
     Component.onDestruction: {
@@ -1034,7 +1197,7 @@ Item {
         running: false
 
         onTriggered: {
-            if (root.visible)
+            if (root.visible && root.showWifiControls)
                 root.refreshWifiNow()
             else
                 root.stopWifiAutoRescan()
@@ -1106,6 +1269,9 @@ Item {
         ignoreUnknownSignals: true
 
         function onWifiOperationFinished(action, ok, message) {
+            if (!root.showWifiControls)
+                return
+
             if (action === "connect" || action === "disconnect")
                 root.clearWifiConnectBusy()
             root.wifiMessage = message
@@ -1115,6 +1281,9 @@ Item {
         }
 
         function onCellularOperationFinished(action, ok, message) {
+            if (!root.showCellularControls)
+                return
+
             root.cellularMessage = message
             root.refreshCellularStatus()
             root.requestToast(message)
@@ -1126,6 +1295,8 @@ Item {
 
         anchors.fill: parent
         hardwareHas5G: root.hardwareHas5G
+        hardwareHasWifi: root.hardwareHasWifi
+        hardwareHasWireless: root.hardwareHasWireless
         hardwareVersionName: root.hardwareVersionName
 
         onRefreshAllRequested: root.refreshAll()

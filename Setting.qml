@@ -17,6 +17,12 @@ Item {
     property string primaryDns: ""
     property string secondaryDns: ""
     property string statusMessage: ""
+    property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
+
+    function normalizeSettingTabIndex() {
+        if (!hardwareHasWireless && settingTabs.currentIndex === 1)
+            settingTabs.currentIndex = 0
+    }
 
     function cidrToNetmask(cidr) {
         const bits = parseInt(cidr)
@@ -89,6 +95,11 @@ Item {
     Component.onCompleted: {
         loadLanSetting()
         getRecorderSetting()
+        normalizeSettingTabIndex()
+    }
+
+    onHardwareHasWirelessChanged: {
+        normalizeSettingTabIndex()
     }
 
     Connections {
@@ -208,9 +219,14 @@ Item {
                     id: settingTabs
                     Layout.fillWidth: true
                     currentIndex: 0
+                    onCurrentIndexChanged: networkManager.normalizeSettingTabIndex()
 
                     TabButton { text: "LAN" }
-                    TabButton { text: "WiFi / 5G" }
+                    TabButton {
+                        text: "WiFi / 5G"
+                        visible: networkManager.hardwareHasWireless
+                        enabled: networkManager.hardwareHasWireless
+                    }
                     TabButton { text: "Recorder" }
                 }
             }
@@ -374,6 +390,8 @@ Item {
                 // WIFI / 5G PAGE
                 // ============================================================
                 Wifi5GSetting {
+                    visible: networkManager.hardwareHasWireless
+                    enabled: networkManager.hardwareHasWireless
                     Layout.fillWidth: true
                     Layout.fillHeight: true
                     onRequestToast: function(text) {
