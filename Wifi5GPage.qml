@@ -95,6 +95,54 @@ Item {
         return target
     }
 
+
+    function isObjectValue(value) {
+        return value !== undefined && value !== null && typeof value === "object" && !Array.isArray(value)
+    }
+
+    function mergeObjectCache(oldValue, newValue) {
+        var merged = copyObject(oldValue)
+        if (!isObjectValue(newValue))
+            return merged
+
+        for (var key in newValue) {
+            if (newValue[key] !== undefined && newValue[key] !== null)
+                merged[key] = newValue[key]
+        }
+        return merged
+    }
+
+    function extractStatusPayload(obj) {
+        if (!obj || typeof obj !== "object")
+            return {}
+        if (isObjectValue(obj.status))
+            return obj.status
+        if (isObjectValue(obj.data))
+            return obj.data
+        if (isObjectValue(obj.payload))
+            return obj.payload
+        if (isObjectValue(obj.cellularStatus))
+            return obj.cellularStatus
+        return obj
+    }
+
+    function applyCellularStateUpdate(value) {
+        var payload = extractStatusPayload(value)
+        cellularState = mergeObjectCache(cellularState, payload)
+    }
+
+    function applyWifiStateUpdate(value) {
+        var payload = extractStatusPayload(value)
+        wifiState = mergeObjectCache(wifiState, payload)
+    }
+
+    function stopCellularRealtime() {
+        if (sendBackendCommand({"menuID": "lte_realtime_stop"}))
+            return
+        if (networkBackend && networkBackend.stopCellularRealtime)
+            networkBackend.stopCellularRealtime()
+    }
+
     function startWifiConnectBusy(action) {
         wifiConnectBusy = true
         pendingWifiAction = action
@@ -1033,7 +1081,7 @@ Item {
             }
 
             if (obj.cellularStatus)
-                cellularState = obj.cellularStatus
+                applyCellularStateUpdate(obj.cellularStatus)
 
             if (obj.modems)
                 modemList = obj.modems
@@ -1051,7 +1099,7 @@ Item {
         }
 
         if (obj.menuID === "wifiStatus" || obj.menuID === "wifi_state") {
-            wifiState = obj.status || obj.data || {}
+            applyWifiStateUpdate(obj)
             wifiEnabled = wifiState.enabled === undefined ? wifiEnabled : wifiState.enabled
             wifiIface = safeText(wifiState.device || wifiState.interface || obj.device || obj.iface, wifiIface)
             updateSelectedWifiKnownFromList()
@@ -1059,7 +1107,7 @@ Item {
         }
 
         if (obj.menuID === "cellularStatus" || obj.menuID === "lte_state") {
-            cellularState = obj.status || obj.data || {}
+            applyCellularStateUpdate(obj)
             modemList = obj.modems || modemList
             if (obj.moduleLogs || obj.cellularModuleLogs)
                 cellularModuleLogs = obj.moduleLogs || obj.cellularModuleLogs
@@ -1167,6 +1215,7 @@ Item {
                 startWifiAutoRescan()
         } else {
             stopWifiAutoRescan()
+            stopCellularRealtime()
         }
     }
 
@@ -1185,6 +1234,7 @@ Item {
 
     Component.onDestruction: {
         stopWifiAutoRescan()
+        stopCellularRealtime()
         wifiConnectTimeoutTimer.stop()
         wifiToggleTimeoutTimer.stop()
         wifiForgetTimeoutTimer.stop()

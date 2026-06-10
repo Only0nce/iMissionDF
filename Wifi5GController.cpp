@@ -119,6 +119,7 @@ bool Wifi5GController::canHandle(const QString &menuId) const
            || menuId == QStringLiteral("wifi_advanced_save")
            || menuId == QStringLiteral("wifi_toggle")
            || menuId == QStringLiteral("lte_state")
+           || menuId == QStringLiteral("lte_realtime_stop")
            || menuId == QStringLiteral("wifiScan")
            || menuId == QStringLiteral("wifiStatus")
            || menuId == QStringLiteral("wifiConnect")
@@ -141,7 +142,7 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
     }
 
     if (menuId == QStringLiteral("getWifi5GPage")) {
-        m_networkController->startCellularRealtime(1500);
+        m_networkController->startCellularRealtime(8000);
         sendSnapshot();
     } else if (menuId == QStringLiteral("wifi_state")) {
         sendWifiState(stringValue(command, QStringLiteral("iface")), menuId);
@@ -179,8 +180,16 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
     } else if (menuId == QStringLiteral("wifi_toggle")) {
         sendWifiToggle(boolValue(command, QStringLiteral("on"), true), menuId);
     } else if (menuId == QStringLiteral("lte_state")) {
-        m_networkController->startCellularRealtime(1500);
+        // Keep realtime compatible but throttle inside NetworkController.
+        m_networkController->startCellularRealtime(8000);
         sendCellularStatus(menuId);
+    } else if (menuId == QStringLiteral("lte_realtime_stop")) {
+        m_networkController->stopCellularRealtime();
+        QJsonObject obj;
+        obj[QStringLiteral("menuID")] = menuId;
+        obj[QStringLiteral("ok")] = true;
+        obj[QStringLiteral("message")] = QStringLiteral("5G realtime polling stopped");
+        emitJson(obj);
     } else if (menuId == QStringLiteral("wifiScan")) {
         sendWifiScan(stringValue(command, QStringLiteral("iface")), menuId);
     } else if (menuId == QStringLiteral("wifiStatus")) {
@@ -196,7 +205,7 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
         m_networkController->disconnectWifi(
             stringValue(command, QStringLiteral("iface")));
     } else if (menuId == QStringLiteral("cellularStatus")) {
-        m_networkController->startCellularRealtime(1500);
+        m_networkController->startCellularRealtime(8000);
         sendCellularStatus(menuId);
     } else if (menuId == QStringLiteral("cellularConnect")) {
         m_networkController->connectCellular(
@@ -428,6 +437,8 @@ void Wifi5GController::sendCellularStatus(const QString &menuId)
         obj[QStringLiteral("ok")] = true;
         obj[QStringLiteral("data")] = toObject(status);
         obj[QStringLiteral("status")] = toObject(status);
+        obj[QStringLiteral("payload")] = toObject(status);
+        obj[QStringLiteral("fullStatus")] = true;
         obj[QStringLiteral("modems")] = toArray(network.listModems());
         obj[QStringLiteral("moduleLogs")] = QJsonArray::fromStringList(network.cellularModuleLogs(120));
         return obj;

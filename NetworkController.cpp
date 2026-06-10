@@ -16,8 +16,14 @@
 #include <QRegExp>
 #include <QDateTime>
 #include <QTimer>
+#include <QDir>
+#include <QMutex>
+#include <QMutexLocker>
 
 #include <algorithm>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
 
 // ============================================================
 // Local helpers
@@ -527,6 +533,72 @@ static QVariantMap parseDeviceIpv4(const QString &iface)
     return info;
 }
 
+
+static QVariantMap parseDeviceShow(const QString &iface)
+{
+    QVariantMap result;
+
+    QString out, err;
+    if (!runProcessBlocking(QStringLiteral("nmcli"),
+                            {QStringLiteral("device"), QStringLiteral("show"), iface},
+                            &out, &err, 10000)) {
+        result[QStringLiteral("error")] = err.isEmpty() ? out : err;
+        return result;
+    }
+
+    QRegExp ipRegex(QStringLiteral("IP4.ADDRESS\\[\\d+\\]:\\s+([\\d.]+)/\\d+"));
+    QRegExp gwRegex(QStringLiteral("IP4.GATEWAY:\\s+([\\d.]+)"));
+    QRegExp dnsRegex(QStringLiteral("IP4.DNS\\[\\d+\\]:\\s+([\\d.]+)"));
+    QRegExp stateRegex(QStringLiteral("GENERAL.STATE:\\s+(.+)"));
+    QRegExp connRegex(QStringLiteral("GENERAL.CONNECTION:\\s+(.+)"));
+
+    QStringList dnsList;
+    for (const QString &line : out.split(QLatin1Char('\n'))) {
+        const QString l = line.trimmed();
+
+        if (ipRegex.indexIn(l) != -1)
+            result[QStringLiteral("ip")] = ipRegex.cap(1);
+        else if (gwRegex.indexIn(l) != -1)
+            result[QStringLiteral("gateway")] = gwRegex.cap(1);
+        else if (dnsRegex.indexIn(l) != -1)
+            dnsList << dnsRegex.cap(1);
+        else if (stateRegex.indexIn(l) != -1)
+            result[QStringLiteral("state")] = stateRegex.cap(1).trimmed();
+        else if (connRegex.indexIn(l) != -1)
+            result[QStringLiteral("connection")] = connRegex.cap(1).trimmed();
+    }
+
+    if (!dnsList.isEmpty())
+        result[QStringLiteral("dns")] = dnsList.value(0);
+    if (dnsList.size() > 1)
+        result[QStringLiteral("dns2")] = dnsList.value(1);
+
+    /*
+     * Preserve legacy queryDhcpInfo() keys while also merging newer parsed
+     * device IPv4 fields used elsewhere in this file.
+     */
+    const QVariantMap dev = parseDeviceIpv4(iface);
+    if (!dev.isEmpty()) {
+        result.unite(dev);
+
+        const QString plainIp = dev.value(QStringLiteral("dev_ip4_plain")).toString().trimmed();
+        const QString gw = dev.value(QStringLiteral("dev_ip4_gateway")).toString().trimmed();
+        const QString mask = dev.value(QStringLiteral("dev_ip4_netmask")).toString().trimmed();
+
+        if (!plainIp.isEmpty() && !result.contains(QStringLiteral("ip")))
+            result[QStringLiteral("ip")] = plainIp;
+        if (!gw.isEmpty() && !result.contains(QStringLiteral("gateway")))
+            result[QStringLiteral("gateway")] = gw;
+        if (!mask.isEmpty())
+            result[QStringLiteral("netmask")] = mask;
+    }
+
+    if (!result.contains(QStringLiteral("netmask")))
+        result[QStringLiteral("netmask")] = QStringLiteral("255.255.255.0");
+
+    return result;
+}
+
 static QVariantMap parseKeyValueLines(const QStringList &lines)
 {
     QVariantMap map;
@@ -781,6 +853,37 @@ static QString readLastTextFileBytes(const QString &path, qint64 maxBytes = 128 
     return QString::fromUtf8(f.readAll());
 }
 
+
+static QStringList newestFirstFromText(const QString &text,
+                                       int maxLines,
+                                       const QString &prefix = QString())
+{
+    QStringList parsed;
+    const QStringList lines = text.split(QLatin1Char('\n'), QString::SkipEmptyParts);
+
+    for (const QString &line : lines) {
+        QString trimmed = line.trimmed();
+        if (trimmed.isEmpty())
+            continue;
+        if (!prefix.isEmpty())
+            trimmed = prefix + trimmed;
+        parsed << trimmed;
+    }
+
+    QStringList newestFirst;
+    newestFirst.reserve(qMin(parsed.size(), maxLines));
+    for (int i = parsed.size() - 1; i >= 0 && newestFirst.size() < maxLines; --i)
+        newestFirst << parsed.at(i);
+    return newestFirst;
+}
+
+static bool isCacheFresh(qint64 timestampMs, int ttlMs)
+{
+    return timestampMs > 0 &&
+           (QDateTime::currentMSecsSinceEpoch() - timestampMs) >= 0 &&
+           (QDateTime::currentMSecsSinceEpoch() - timestampMs) < ttlMs;
+}
+
 static QString normalizeQuectelSimStatus(const QString &raw)
 {
     const QString s = raw.trimmed().toUpper();
@@ -832,48 +935,123 @@ static QString normalizeQuectelRegState(const QString &raw)
 
 static QString serviceIsActiveText(const QString &unit)
 {
-    QString out, err;
-    if (runProcessBlocking(QStringLiteral("systemctl"),
-                           {QStringLiteral("is-active"), unit},
-                           &out, &err, 3000)) {
-        return out.trimmed().isEmpty() ? QStringLiteral("active") : out.trimmed();
+    /*
+     * systemctl is relatively expensive on embedded Linux. Cache for a short
+     * time so frequent 5G status polling keeps the same output contract without
+     * repeatedly forking systemctl.
+     */
+    static QMutex mutex;
+    static QMap<QString, QPair<qint64, QString> > cache;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    {
+        QMutexLocker locker(&mutex);
+        if (cache.contains(unit) && (now - cache.value(unit).first) < 10000)
+            return cache.value(unit).second;
     }
 
-    const QString v = out.trimmed();
-    if (!v.isEmpty())
-        return v;
+    QString out, err;
+    QString state = QStringLiteral("inactive");
+    if (runProcessBlocking(QStringLiteral("systemctl"),
+                           {QStringLiteral("is-active"), unit},
+                           &out, &err, 1000)) {
+        state = out.trimmed().isEmpty() ? QStringLiteral("active") : out.trimmed();
+    } else if (!out.trimmed().isEmpty()) {
+        state = out.trimmed();
+    }
 
-    return QStringLiteral("inactive");
+    {
+        QMutexLocker locker(&mutex);
+        cache[unit] = qMakePair(now, state);
+    }
+
+    return state;
 }
 
 static bool pcieQuectelDetected()
 {
-    QString out, err;
-    if (!runProcessBlocking(QStringLiteral("bash"),
-                            {QStringLiteral("-lc"),
-                             QStringLiteral("lspci -nn | grep -i -E '1eac|100b|quectel' >/dev/null")},
-                            &out, &err, 5000)) {
-        return false;
+    /*
+     * Avoid lspci on every poll. Reading sysfs vendor/device is much cheaper
+     * and gives the same PCIe detection result for the UI.
+     */
+    static QMutex mutex;
+    static qint64 lastMs = 0;
+    static bool lastValue = false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    {
+        QMutexLocker locker(&mutex);
+        if (lastMs > 0 && (now - lastMs) < 5000)
+            return lastValue;
     }
 
-    return true;
+    bool found = false;
+    QDir pciDir(QStringLiteral("/sys/bus/pci/devices"));
+    const QStringList entries = pciDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+    for (const QString &entry : entries) {
+        QFile vendorFile(pciDir.absoluteFilePath(entry + QStringLiteral("/vendor")));
+        if (!vendorFile.open(QIODevice::ReadOnly))
+            continue;
+        const QString vendor = QString::fromLatin1(vendorFile.readAll()).trimmed().toLower();
+        vendorFile.close();
+        if (vendor == QStringLiteral("0x1eac")) {
+            found = true;
+            break;
+        }
+    }
+
+    {
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastValue = found;
+    }
+
+    return found;
 }
 
 static bool isQmiCharDevice(const QString &path = QStringLiteral("/dev/mhi_QMI0"))
 {
-    QFileInfo fi(path);
-    return fi.exists() && fi.isFile() == false && fi.isSymLink() == false
-           && QFile::exists(path)
-           && QFileInfo(path).isReadable();
+    struct stat st;
+    if (::stat(path.toLocal8Bit().constData(), &st) != 0)
+        return false;
+    return S_ISCHR(st.st_mode);
 }
 
 static bool qmiDeviceOpenableNoCreate()
 {
-    QString out, err;
-    return runProcessBlocking(QStringLiteral("bash"),
-                              {QStringLiteral("-lc"),
-                               QStringLiteral("[ -c /dev/mhi_QMI0 ] && timeout 2 sh -c 'exec 9<>/dev/mhi_QMI0' >/dev/null 2>&1")},
-                              &out, &err, 3000);
+    /*
+     * Avoid shell redirection here. It used to be expensive and can be unsafe if
+     * called with a missing node. This open never creates /dev/mhi_QMI0.
+     */
+    static QMutex mutex;
+    static qint64 lastMs = 0;
+    static bool lastValue = false;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    {
+        QMutexLocker locker(&mutex);
+        if (lastMs > 0 && (now - lastMs) < 3000)
+            return lastValue;
+    }
+
+    bool ok = false;
+    const QByteArray path = QByteArrayLiteral("/dev/mhi_QMI0");
+    struct stat st;
+    if (::stat(path.constData(), &st) == 0 && S_ISCHR(st.st_mode)) {
+        const int fd = ::open(path.constData(), O_RDWR | O_NONBLOCK);
+        if (fd >= 0) {
+            ok = true;
+            ::close(fd);
+        }
+    }
+
+    {
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastValue = ok;
+    }
+
+    return ok;
 }
 
 static QVariantMap parseQuectelCmLogStatus(int maxLines = 500)
@@ -1008,21 +1186,46 @@ static QVariantMap readLteSignalFromCsq()
     result[QStringLiteral("raw")] = QString();
     result[QStringLiteral("error")] = QString();
 
-    if (!commandExists(QStringLiteral("socat"))) {
-        result[QStringLiteral("error")] = QStringLiteral("socat command not found");
-        return result;
+    /*
+     * AT+CSQ through /dev/mhi_DUN can block or wake the modem. Cache it and
+     * keep the same output keys. Signal is slow-status, not a 1 Hz metric.
+     */
+    static QMutex mutex;
+    static qint64 lastMs = 0;
+    static QVariantMap lastResult;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    {
+        QMutexLocker locker(&mutex);
+        if (lastMs > 0 && (now - lastMs) < 10000)
+            return lastResult;
     }
 
     if (!QFile::exists(QStringLiteral("/dev/mhi_DUN"))) {
         result[QStringLiteral("error")] = QStringLiteral("/dev/mhi_DUN not found");
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastResult = result;
         return result;
     }
 
-    const QString shell = QStringLiteral("printf \"AT+CSQ\\r\" | socat - /dev/mhi_DUN,crnl");
+    // socat lookup itself is also a fork; do it only when DUN exists.
+    if (!commandExists(QStringLiteral("socat"))) {
+        result[QStringLiteral("error")] = QStringLiteral("socat command not found");
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastResult = result;
+        return result;
+    }
+
+    const QString shell = QStringLiteral("printf \"AT+CSQ\\r\" | timeout 2 socat - /dev/mhi_DUN,crnl");
     QString out, err;
-    if (!runProcessBlocking("bash", {"-lc", shell}, &out, &err, 10000)) {
+    if (!runProcessBlocking(QStringLiteral("bash"), {QStringLiteral("-lc"), shell}, &out, &err, 2500)) {
         result[QStringLiteral("raw")] = out;
         result[QStringLiteral("error")] = err.isEmpty() ? out : err;
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastResult = result;
         return result;
     }
 
@@ -1031,59 +1234,35 @@ static QVariantMap readLteSignalFromCsq()
                                 QRegularExpression::CaseInsensitiveOption);
     const QRegularExpressionMatch match = re.match(out);
     if (!match.hasMatch()) {
-        result[QStringLiteral("error")] = QStringLiteral("Unable to parse +CSQ response");
+        result[QStringLiteral("error")] = QStringLiteral("AT+CSQ response parse failed");
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastResult = result;
         return result;
     }
 
     const int csq = match.captured(1).toInt();
+    result[QStringLiteral("csq")] = QString::number(csq);
+
     if (csq >= 0 && csq <= 31) {
         const int dbm = -113 + (2 * csq);
-        result[QStringLiteral("ok")] = true;
-        result[QStringLiteral("csq")] = QString::number(csq);
         result[QStringLiteral("dbm")] = QString::number(dbm);
         result[QStringLiteral("signal")] = QStringLiteral("%1 dBm").arg(dbm);
+        result[QStringLiteral("ok")] = true;
     } else if (csq == 99) {
+        result[QStringLiteral("signal")] = QStringLiteral("Unknown");
         result[QStringLiteral("error")] = QStringLiteral("CSQ unknown");
     } else {
-        result[QStringLiteral("error")] = QStringLiteral("CSQ out of range: %1").arg(csq);
+        result[QStringLiteral("signal")] = QString::number(csq);
+        result[QStringLiteral("ok")] = true;
     }
 
-    return result;
-}
-
-static QVariantMap parseDeviceShow(const QString &iface)
-{
-    QVariantMap result;
-
-    QString out, err;
-    runProcessBlocking("nmcli", {"device", "show", iface}, &out, &err, 10000);
-
-    QRegExp ipRegex("IP4.ADDRESS\\[\\d+\\]:\\s+([\\d.]+)/\\d+");
-    QRegExp gwRegex("IP4.GATEWAY:\\s+([\\d.]+)");
-    QRegExp dnsRegex("IP4.DNS\\[\\d+\\]:\\s+([\\d.]+)");
-    QRegExp stateRegex("GENERAL.STATE:\\s+(.+)");
-    QRegExp connRegex("GENERAL.CONNECTION:\\s+(.+)");
-
-    QStringList dnsList;
-    for (const QString &line : out.split('\n')) {
-        const QString l = line.trimmed();
-
-        if (ipRegex.indexIn(l) != -1)
-            result["ip"] = ipRegex.cap(1);
-        else if (gwRegex.indexIn(l) != -1)
-            result["gateway"] = gwRegex.cap(1);
-        else if (dnsRegex.indexIn(l) != -1)
-            dnsList << dnsRegex.cap(1);
-        else if (stateRegex.indexIn(l) != -1)
-            result["state"] = stateRegex.cap(1).trimmed();
-        else if (connRegex.indexIn(l) != -1)
-            result["connection"] = connRegex.cap(1).trimmed();
+    {
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastResult = result;
     }
 
-    if (!dnsList.isEmpty()) result["dns"] = dnsList.value(0);
-    if (dnsList.size() > 1) result["dns2"] = dnsList.value(1);
-
-    result["netmask"] = "255.255.255.0";
     return result;
 }
 
@@ -2020,39 +2199,72 @@ QVariantList NetworkController::listModems()
     QVariantList list;
 
 #if HARDWARE_HAS_5G
+    /*
+     * mmcli -L is a slow fallback on this product because the real datapath is
+     * quectel-CM over PCIe/MHI. Keep the output key compatible but throttle the
+     * command heavily and return the cached result when possible.
+     */
+    static QMutex mutex;
+    static qint64 lastMs = 0;
+    static QVariantList lastList;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+
+    {
+        QMutexLocker locker(&mutex);
+        if (lastMs > 0 && (now - lastMs) < 30000)
+            return lastList;
+    }
+
     QString out, err;
-    const bool ok = runProcessBlocking("mmcli", {"-L"}, &out, &err, 10000);
+    const bool ok = runProcessBlocking(QStringLiteral("mmcli"), {QStringLiteral("-L")}, &out, &err, 3000);
 
     if (!ok) {
         QVariantMap row;
-        row["index"] = -1;
-        row["path"] = "";
-        row["name"] = "";
-        row["error"] = err.isEmpty() ? QStringLiteral("mmcli -L failed") : err;
+        row[QStringLiteral("index")] = -1;
+        row[QStringLiteral("path")] = QString();
+        row[QStringLiteral("name")] = QStringLiteral("Quectel RM520N-GL");
+        row[QStringLiteral("vendor")] = QStringLiteral("Quectel");
+        row[QStringLiteral("error")] = err.isEmpty() ? QStringLiteral("mmcli -L unavailable") : err;
+        row[QStringLiteral("source")] = QStringLiteral("quectel-CM");
         list << row;
-        return list;
+    } else {
+        QRegularExpression re(QStringLiteral("/org/freedesktop/ModemManager1/Modem/(\\d+)\\s+\\[(.*?)\\]\\s+(.+)$"));
+
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            QRegularExpressionMatch m = re.match(line.trimmed());
+            if (!m.hasMatch())
+                continue;
+
+            QVariantMap row;
+            row[QStringLiteral("index")] = m.captured(1).toInt();
+            row[QStringLiteral("vendor")] = m.captured(2).trimmed();
+            row[QStringLiteral("name")] = m.captured(3).trimmed();
+            row[QStringLiteral("path")] = QStringLiteral("/org/freedesktop/ModemManager1/Modem/%1").arg(row[QStringLiteral("index")].toInt());
+            list << row;
+        }
+
+        if (list.isEmpty()) {
+            QVariantMap row;
+            row[QStringLiteral("index")] = -1;
+            row[QStringLiteral("path")] = QString();
+            row[QStringLiteral("name")] = QStringLiteral("Quectel RM520N-GL");
+            row[QStringLiteral("vendor")] = QStringLiteral("Quectel");
+            row[QStringLiteral("source")] = QStringLiteral("quectel-CM");
+            list << row;
+        }
     }
 
-    QRegularExpression re("/org/freedesktop/ModemManager1/Modem/(\\d+)\\s+\\[(.*?)\\]\\s+(.+)$");
-
-    for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
-        QRegularExpressionMatch m = re.match(line.trimmed());
-        if (!m.hasMatch())
-            continue;
-
-        QVariantMap row;
-        row["index"] = m.captured(1).toInt();
-        row["vendor"] = m.captured(2).trimmed();
-        row["name"] = m.captured(3).trimmed();
-        row["path"] = QStringLiteral("/org/freedesktop/ModemManager1/Modem/%1").arg(row["index"].toInt());
-        list << row;
+    {
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastList = list;
     }
 #else
     QVariantMap row;
-    row["index"] = -1;
-    row["path"] = "";
-    row["name"] = "5G disabled by hardware macro";
-    row["disabled"] = true;
+    row[QStringLiteral("index")] = -1;
+    row[QStringLiteral("path")] = QString();
+    row[QStringLiteral("name")] = QStringLiteral("5G disabled by hardware macro");
+    row[QStringLiteral("disabled")] = true;
     list << row;
 #endif
 
@@ -2118,11 +2330,7 @@ QVariantMap NetworkController::cellularStatus()
     if (!snapshot.isEmpty()) {
         const QString iface = snapshot.value(QStringLiteral("iface")).toString();
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
-        result.insert(snapshot);
-#else
         result.unite(snapshot);
-#endif
 
         result[QStringLiteral("device")] = iface;
         result[QStringLiteral("interface")] = iface;
@@ -2138,11 +2346,7 @@ QVariantMap NetworkController::cellularStatus()
             result[QStringLiteral("gateway")] = gateway;
     }
 
-    const bool rmnetReady =
-        (QProcess::execute(QStringLiteral("ip"),
-                           QStringList() << QStringLiteral("link")
-                                         << QStringLiteral("show")
-                                         << primaryIface) == 0);
+    const bool rmnetReady = QFile::exists(QStringLiteral("/sys/class/net/%1").arg(primaryIface));
 
     result[QStringLiteral("rmnetReady")] = rmnetReady;
 
@@ -2436,135 +2640,60 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
 #if HARDWARE_HAS_5G
     const int limit = qBound(20, maxLines, 300);
 
-    auto stripQuectelJournalPrefix = [](const QString &line) -> QString {
-        QString s = line.trimmed();
-        if (s.isEmpty())
-            return s;
+    /*
+     * This function is called by the 5G UI. Avoid journalctl/tail forks on every
+     * refresh. Read the two real log files directly and cache the formatted list.
+     * Fallback commands are only used when both files are empty/unavailable.
+     */
+    static QMutex mutex;
+    static qint64 lastMs = 0;
+    static int lastLimit = 0;
+    static QStringList lastLogs;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
 
-        const int bracketColonPos = s.indexOf(QStringLiteral("]: "));
-        if (bracketColonPos >= 0) {
-            const QString message = s.mid(bracketColonPos + 3).trimmed();
-            if (!message.isEmpty())
-                return message;
-        }
-
-        int procPos = s.indexOf(QStringLiteral("quectel-CM"));
-        if (procPos < 0)
-            procPos = s.indexOf(QStringLiteral("quectel-cm"));
-        if (procPos < 0)
-            procPos = s.indexOf(QStringLiteral("QConnectManager"));
-
-        if (procPos >= 0) {
-            const int colonPos = s.indexOf(QStringLiteral(": "), procPos);
-            if (colonPos >= 0) {
-                const QString message = s.mid(colonPos + 2).trimmed();
-                if (!message.isEmpty())
-                    return message;
-            }
-        }
-
-        return s;
-    };
-
-    auto parseLinesNewestFirst = [&](const QString &text,
-                                     bool stripJournalPrefix,
-                                     const QString &prefix = QString()) -> QStringList {
-        QStringList parsed;
-        const QStringList lines = text.split(QLatin1Char('\n'), QString::SkipEmptyParts);
-
-        for (const QString &line : lines) {
-            QString trimmed = line.trimmed();
-            if (trimmed.isEmpty())
-                continue;
-            if (trimmed.startsWith(QStringLiteral("-- No entries")))
-                continue;
-            if (stripJournalPrefix)
-                trimmed = stripQuectelJournalPrefix(trimmed);
-            if (trimmed.isEmpty())
-                continue;
-            if (!prefix.isEmpty())
-                trimmed = prefix + trimmed;
-            parsed << trimmed;
-        }
-
-        QStringList newestFirst;
-        newestFirst.reserve(parsed.size());
-        for (int i = parsed.size() - 1; i >= 0; --i)
-            newestFirst << parsed.at(i);
-        return newestFirst;
-    };
+    {
+        QMutexLocker locker(&mutex);
+        if (lastMs > 0 && lastLimit >= limit && (now - lastMs) < 5000)
+            return lastLogs.mid(0, limit);
+    }
 
     auto appendLimited = [&](const QStringList &src, int maxAdd) {
         for (const QString &line : src) {
             if (logs.size() >= limit || maxAdd <= 0)
                 break;
-            logs << line;
-            --maxAdd;
+            if (!line.trimmed().isEmpty()) {
+                logs << line;
+                --maxAdd;
+            }
         }
     };
 
-    auto readTailFile = [&](const QString &path,
-                            int lineCount,
-                            const QString &prefix = QString()) -> QStringList {
-        QString out, err;
-        const int n = qBound(1, lineCount, 300);
-        if (runProcessBlocking(QStringLiteral("tail"),
-                               {QStringLiteral("-n"), QString::number(n), path},
-                               &out, &err, 5000)
-            && !out.trimmed().isEmpty()) {
-            return parseLinesNewestFirst(out, false, prefix);
-        }
-        return {};
-    };
+    const QString qcmText = readLastTextFileBytes(QStringLiteral("/tmp/quectel-CM.log"), 96 * 1024);
+    appendLimited(newestFirstFromText(qcmText, qMax(10, (limit * 2) / 3)), limit);
 
-    auto readJournalUnit = [&](const QString &unit,
-                               int lineCount,
-                               bool stripPrefix,
-                               const QString &prefix = QString()) -> QStringList {
+    if (logs.size() < limit) {
+        const QString recoverText = readLastTextFileBytes(QStringLiteral("/var/log/5g-pcie-recover.log"), 64 * 1024);
+        appendLimited(newestFirstFromText(recoverText,
+                                          limit - logs.size(),
+                                          QStringLiteral("[recover] ")),
+                      limit - logs.size());
+    }
+
+    if (logs.isEmpty()) {
         QString out, err;
-        const int n = qBound(1, lineCount, 300);
         if (runProcessBlocking(QStringLiteral("journalctl"),
-                               {QStringLiteral("-u"), unit,
-                                QStringLiteral("-n"), QString::number(n),
+                               {QStringLiteral("-u"), QStringLiteral("quectel-cm.service"),
+                                QStringLiteral("-n"), QString::number(limit),
                                 QStringLiteral("--no-pager"),
                                 QStringLiteral("-o"), QStringLiteral("short-iso")},
-                               &out, &err, 5000)
-            && !out.trimmed().isEmpty()) {
-            return parseLinesNewestFirst(out, stripPrefix, prefix);
+                               &out, &err, 1500)) {
+            logs = newestFirstFromText(out, limit);
         }
-        return {};
-    };
-
-    const QStringList qcmFileLogs =
-        readTailFile(QStringLiteral("/tmp/quectel-CM.log"), limit);
-    appendLimited(qcmFileLogs, qMax(10, (limit * 2) / 3));
-
-    if (logs.size() < limit) {
-        const QStringList recoverFileLogs =
-            readTailFile(QStringLiteral("/var/log/5g-pcie-recover.log"),
-                         limit,
-                         QStringLiteral("[recover] "));
-        appendLimited(recoverFileLogs, limit - logs.size());
-    }
-
-    if (logs.isEmpty()) {
-        const QStringList qcmJournalLogs =
-            readJournalUnit(QStringLiteral("quectel-cm.service"), limit, true);
-        appendLimited(qcmJournalLogs, limit);
-    }
-
-    if (logs.size() < limit) {
-        const QStringList recoverJournalLogs =
-            readJournalUnit(QStringLiteral("5g-pcie-recover.service"),
-                            limit,
-                            false,
-                            QStringLiteral("[recover-service] "));
-        appendLimited(recoverJournalLogs, limit - logs.size());
     }
 
     if (logs.isEmpty()) {
         QString out, err;
-        if (runProcessBlocking(QStringLiteral("dmesg"), {}, &out, &err, 5000)
+        if (runProcessBlocking(QStringLiteral("dmesg"), {}, &out, &err, 1500)
             && !out.trimmed().isEmpty()) {
             const QStringList keywords = {
                 QStringLiteral("quectel"), QStringLiteral("mhi"),
@@ -2601,6 +2730,13 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
     if (logs.isEmpty()) {
         logs << QStringLiteral("No 5G logs found from /tmp/quectel-CM.log, /var/log/5g-pcie-recover.log, journalctl, or dmesg");
     }
+
+    {
+        QMutexLocker locker(&mutex);
+        lastMs = now;
+        lastLimit = limit;
+        lastLogs = logs;
+    }
 #else
     Q_UNUSED(maxLines)
     logs << QStringLiteral("5G is disabled by HW_NONE_5G build macro");
@@ -2616,12 +2752,13 @@ void NetworkController::startCellularRealtime(int intervalMs)
     if (!m_cellularRealtimeTimer)
         return;
 
-    intervalMs = qBound(500, intervalMs, 10000);
+    intervalMs = qBound(5000, intervalMs, 30000);
 
     if (m_cellularRealtimeTimer->interval() != intervalMs)
         m_cellularRealtimeTimer->setInterval(intervalMs);
 
     qWarning() << "[5G] startCellularRealtime intervalMs =" << intervalMs;
+    // Emit cached/current status once, then continue at the throttled interval.
     pollCellularRealtime();
 
     if (!m_cellularRealtimeTimer->isActive())
