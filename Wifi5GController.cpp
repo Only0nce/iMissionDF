@@ -101,6 +101,8 @@ Wifi5GController::Wifi5GController(NetworkController *networkController,
             this, &Wifi5GController::onWifiOperationFinished);
     connect(m_networkController, &NetworkController::cellularOperationFinished,
             this, &Wifi5GController::onCellularOperationFinished);
+    connect(m_networkController, &NetworkController::cellularRealtimeStatusChanged,
+            this, &Wifi5GController::onCellularRealtimeStatusChanged);
 }
 
 bool Wifi5GController::canHandle(const QString &menuId) const
@@ -139,6 +141,7 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
     }
 
     if (menuId == QStringLiteral("getWifi5GPage")) {
+        m_networkController->startCellularRealtime(1500);
         sendSnapshot();
     } else if (menuId == QStringLiteral("wifi_state")) {
         sendWifiState(stringValue(command, QStringLiteral("iface")), menuId);
@@ -176,6 +179,7 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
     } else if (menuId == QStringLiteral("wifi_toggle")) {
         sendWifiToggle(boolValue(command, QStringLiteral("on"), true), menuId);
     } else if (menuId == QStringLiteral("lte_state")) {
+        m_networkController->startCellularRealtime(1500);
         sendCellularStatus(menuId);
     } else if (menuId == QStringLiteral("wifiScan")) {
         sendWifiScan(stringValue(command, QStringLiteral("iface")), menuId);
@@ -192,6 +196,7 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
         m_networkController->disconnectWifi(
             stringValue(command, QStringLiteral("iface")));
     } else if (menuId == QStringLiteral("cellularStatus")) {
+        m_networkController->startCellularRealtime(1500);
         sendCellularStatus(menuId);
     } else if (menuId == QStringLiteral("cellularConnect")) {
         m_networkController->connectCellular(
@@ -452,6 +457,24 @@ void Wifi5GController::onWifiOperationFinished(const QString &action,
 
     // Refresh the page after the async operation result so QML gets current state.
     sendSnapshot();
+}
+
+
+void Wifi5GController::onCellularRealtimeStatusChanged(const QVariantMap &status)
+{
+    QJsonObject obj;
+    obj[QStringLiteral("menuID")] = QStringLiteral("lte_state");
+    obj[QStringLiteral("ok")] = true;
+    obj[QStringLiteral("realtime")] = true;
+    obj[QStringLiteral("data")] = toObject(status);
+    obj[QStringLiteral("status")] = toObject(status);
+    obj[QStringLiteral("payload")] = toObject(status);
+
+    const QStringList moduleLogs = status.value(QStringLiteral("moduleLogs")).toStringList();
+    if (!moduleLogs.isEmpty())
+        obj[QStringLiteral("moduleLogs")] = QJsonArray::fromStringList(moduleLogs);
+
+    emitJson(obj);
 }
 
 void Wifi5GController::onCellularOperationFinished(const QString &action,

@@ -25,6 +25,14 @@
 #include <QThread>
 #include "SetFreqWorker.h"
 
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <cerrno>
+
+#include <QtConcurrent/QtConcurrent>
+#include <QAtomicInteger>
+
 #pragma once
 
 #define GPA0   0
@@ -77,6 +85,11 @@
 #define RST_AMP "gpiochip1",14
 #define SHD_AMP "gpiochip1",15
 #define HS_MUTE "gpiochip0",102
+
+#define FULL_CARD_POWER_OFF "gpiochip2",9
+#define W_DISABLE1 "gpiochip2",2
+#define W_DISABLE2 "gpiochip2",3
+#define RESET "gpiochip2",1
 
 #define LED_ON   true
 #define LED_OFF  false
@@ -329,6 +342,9 @@ public slots:
         // hmc->selectRF(RFPort::RF6);
     }
 
+#ifdef PLATFORM_JETSON
+    Q_INVOKABLE void scheduleReset5GModemNoReboot(int delayMs = 15000);
+#endif
     void vpnConnect();
     void vpnDisconnect();
     void vpnRefresh();
@@ -365,6 +381,11 @@ private:
     newGPIOClass *rst_amp = new newGPIOClass(RST_AMP);
     newGPIOClass *shd_amp = new newGPIOClass(SHD_AMP);
     newGPIOClass *hs_mute = new newGPIOClass(HS_MUTE);
+    newGPIOClass *full_card_power_off = new newGPIOClass(FULL_CARD_POWER_OFF);
+    newGPIOClass *w_disable1 = new newGPIOClass(W_DISABLE1);
+    newGPIOClass *w_disable2 = new newGPIOClass(W_DISABLE2);
+    newGPIOClass *reset_5g = new newGPIOClass(RESET);
+
 #endif
     ChatServer  *wsServer = new ChatServer(8049);
     ChatServer  *webServer = new ChatServer(3310);
@@ -417,6 +438,7 @@ private:
 #ifdef PLATFORM_JETSON
     void codecDSPinit();
     void gpioInit();
+    void reset5GModemNoReboot();
     void DSPBootSelect(const bool qspiflash);
     void updateDSPOutputGain(const uint8_t value, const uint8_t outputChannel);
     void backlightOn(){backlight->setValue(false);}
@@ -586,6 +608,17 @@ private slots:
     void newSettingPageConnectd(QWebSocket *pSender);
     void setTimeHWClockSlot();
 
+signals:
+    void reset5GModemStarted();
+    void reset5GModemFinished(bool ready);
+
+private:
+    QAtomicInteger<int> m_reset5GBusy {0};
+#ifdef PLATFORM_JETSON
+private:
+    bool m_reset5GDelayedPending = false;
+#endif
+    bool reset5GModemNoRebootWorker();
 };
 
 #endif // MAINWINDOWS_H

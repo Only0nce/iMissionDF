@@ -7,6 +7,7 @@
 #include <QVariantMap>
 #include <QVariantList>
 #include <QJsonObject>
+#include <QTimer>
 
 class NetworkController : public QObject
 {
@@ -73,6 +74,9 @@ public:
     Q_INVOKABLE QVariantList listModems();
     Q_INVOKABLE QVariantMap cellularStatus();
     Q_INVOKABLE QStringList cellularModuleLogs(int maxLines = 120);
+    Q_INVOKABLE void startCellularRealtime(int intervalMs = 1500);
+    Q_INVOKABLE void stopCellularRealtime();
+    Q_INVOKABLE QVariantMap cellularRealtimeSnapshot();
     Q_INVOKABLE void connectCellular(const QString &apn,
                                      const QString &iface = QStringLiteral("*"),
                                      bool autoConnect = true);
@@ -102,8 +106,15 @@ signals:
     // New operation result signals for QML refresh/toast.
     void wifiOperationFinished(const QString &action, bool ok, const QString &message);
     void cellularOperationFinished(const QString &action, bool ok, const QString &message);
+    void cellularRealtimeStatusChanged(const QVariantMap &status);
+
+private slots:
+    void pollCellularRealtime();
 
 private:
+    QTimer *m_cellularRealtimeTimer = nullptr;
+    QString m_lastCellularRealtimeJson;
+
     void runCommand(const QString &cmd) const;
     void saveConfigToJson(const QJsonObject &obj);
     void runNmcliCommand(const QStringList &args);

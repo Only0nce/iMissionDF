@@ -3,6 +3,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDebug>
@@ -14,6 +15,7 @@
 #include <QTextStream>
 #include <QRegExp>
 #include <QDateTime>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -687,7 +689,7 @@ static QVariantMap parseIfaceIpSnapshot(const QString &iface)
             result[QStringLiteral("dev_ip4_prefix")] = match.captured(2).trimmed();
             result[QStringLiteral("dev_ip4_address")] =
                 QStringLiteral("%1/%2").arg(match.captured(1).trimmed(),
-                                           match.captured(2).trimmed());
+                                            match.captured(2).trimmed());
             result[QStringLiteral("dev_ip4_netmask")] =
                 prefixToMask(match.captured(2).toInt());
         }
@@ -765,6 +767,236 @@ static bool cellularTextSuggestsRegistrationTimeout(const QString &text)
            || s.contains(QStringLiteral("registration timeout"))
            || s.contains(QStringLiteral("message timeout"));
 }
+
+static QString readLastTextFileBytes(const QString &path, qint64 maxBytes = 128 * 1024)
+{
+    QFile f(path);
+    if (!f.open(QIODevice::ReadOnly))
+        return QString();
+
+    const qint64 size = f.size();
+    if (size > maxBytes)
+        f.seek(size - maxBytes);
+
+    return QString::fromUtf8(f.readAll());
+}
+
+static QString normalizeQuectelSimStatus(const QString &raw)
+{
+    const QString s = raw.trimmed().toUpper();
+
+    if (s.contains(QStringLiteral("SIM_READY")) || s == QStringLiteral("READY"))
+        return QStringLiteral("Ready");
+
+    if (s.contains(QStringLiteral("SIM_PIN")))
+        return QStringLiteral("PIN required");
+
+    if (s.contains(QStringLiteral("SIM_PUK")))
+        return QStringLiteral("PUK required");
+
+    if (s.contains(QStringLiteral("SIM_ABSENT")) ||
+        s.contains(QStringLiteral("SIM_NOT_INSERTED")) ||
+        s.contains(QStringLiteral("SIM_MISSING")) ||
+        s.contains(QStringLiteral("SIM_REMOVED")) ||
+        s.contains(QStringLiteral("NO_SIM")) ||
+        s.contains(QStringLiteral("NO SIM"))) {
+        return QStringLiteral("Not found");
+    }
+
+    if (s.contains(QStringLiteral("SIM_NOT_READY")) ||
+        s.contains(QStringLiteral("NOT_READY"))) {
+        return QStringLiteral("Not ready");
+    }
+
+    return QString();
+}
+
+static QString normalizeQuectelRegState(const QString &raw)
+{
+    const QString s = raw.trimmed();
+    const QString l = s.toLower();
+
+    if (l.contains(QStringLiteral("attached")))
+        return QStringLiteral("Attached");
+    if (l.contains(QStringLiteral("registered")))
+        return QStringLiteral("Registered");
+    if (l.contains(QStringLiteral("search")))
+        return QStringLiteral("Searching");
+    if (l.contains(QStringLiteral("denied")))
+        return QStringLiteral("Denied");
+    if (l.contains(QStringLiteral("detach")))
+        return QStringLiteral("Detached");
+
+    return s;
+}
+
+static QString serviceIsActiveText(const QString &unit)
+{
+    QString out, err;
+    if (runProcessBlocking(QStringLiteral("systemctl"),
+                           {QStringLiteral("is-active"), unit},
+                           &out, &err, 3000)) {
+        return out.trimmed().isEmpty() ? QStringLiteral("active") : out.trimmed();
+    }
+
+    const QString v = out.trimmed();
+    if (!v.isEmpty())
+        return v;
+
+    return QStringLiteral("inactive");
+}
+
+static bool pcieQuectelDetected()
+{
+    QString out, err;
+    if (!runProcessBlocking(QStringLiteral("bash"),
+                            {QStringLiteral("-lc"),
+                             QStringLiteral("lspci -nn | grep -i -E '1eac|100b|quectel' >/dev/null")},
+                            &out, &err, 5000)) {
+        return false;
+    }
+
+    return true;
+}
+
+static bool isQmiCharDevice(const QString &path = QStringLiteral("/dev/mhi_QMI0"))
+{
+    QFileInfo fi(path);
+    return fi.exists() && fi.isFile() == false && fi.isSymLink() == false
+           && QFile::exists(path)
+           && QFileInfo(path).isReadable();
+}
+
+static bool qmiDeviceOpenableNoCreate()
+{
+    QString out, err;
+    return runProcessBlocking(QStringLiteral("bash"),
+                              {QStringLiteral("-lc"),
+                               QStringLiteral("[ -c /dev/mhi_QMI0 ] && timeout 2 sh -c 'exec 9<>/dev/mhi_QMI0' >/dev/null 2>&1")},
+                              &out, &err, 3000);
+}
+
+static QVariantMap parseQuectelCmLogStatus(int maxLines = 500)
+{
+    QVariantMap st;
+
+    QString text = readLastTextFileBytes(QStringLiteral("/tmp/quectel-CM.log"));
+    if (text.trimmed().isEmpty())
+        return st;
+
+    QStringList lines = text.split(QLatin1Char('\n'), QString::SkipEmptyParts);
+    if (lines.size() > maxLines)
+        lines = lines.mid(lines.size() - maxLines);
+
+    /*
+     * Read newest -> oldest, because /tmp/quectel-CM.log may contain stale
+     * messages from previous reset attempts. The newest matching line wins.
+     */
+    for (int i = lines.size() - 1; i >= 0; --i) {
+        const QString line = lines.at(i).trimmed();
+        const QString lower = line.toLower();
+
+        if (line.isEmpty())
+            continue;
+
+        if (!st.contains(QStringLiteral("simStatus"))) {
+            QRegularExpression simRe(
+                QStringLiteral("SIMStatus\\s*:\\s*([A-Za-z0-9_\\-]+)"),
+                QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch m = simRe.match(line);
+
+            if (m.hasMatch()) {
+                const QString sim = normalizeQuectelSimStatus(m.captured(1));
+                if (!sim.isEmpty()) {
+                    st[QStringLiteral("simStatus")] = sim;
+                    st[QStringLiteral("sim_status")] = sim;
+                }
+            } else if (cellularTextSuggestsNoSim(line)) {
+                st[QStringLiteral("simStatus")] = QStringLiteral("Not found");
+                st[QStringLiteral("sim_status")] = QStringLiteral("Not found");
+                st[QStringLiteral("lastError")] = QStringLiteral("SIM not found");
+            }
+        }
+
+        if (!st.contains(QStringLiteral("registration_state")) ||
+            !st.contains(QStringLiteral("access_technology")) ||
+            !st.contains(QStringLiteral("plmn"))) {
+            QRegularExpression regRe(
+                QStringLiteral("MCC\\s*:\\s*(\\d+)\\s*,\\s*MNC\\s*:\\s*(\\d+)\\s*,\\s*PS\\s*:\\s*([^,]+)\\s*,\\s*DataCap\\s*:\\s*([^\\]\\r\\n]+)"),
+                QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch m = regRe.match(line);
+
+            if (m.hasMatch()) {
+                const QString mcc = m.captured(1).trimmed();
+                const QString mncRaw = m.captured(2).trimmed();
+                const QString mnc = mncRaw.rightJustified(2, QLatin1Char('0'));
+                const QString ps = normalizeQuectelRegState(m.captured(3));
+                const QString rat = m.captured(4).trimmed();
+                const QString plmn = mcc + mnc;
+
+                st[QStringLiteral("operator_code")] = plmn;
+                st[QStringLiteral("plmn")] = plmn;
+                st[QStringLiteral("operator")] = QStringLiteral("PLMN %1").arg(plmn);
+                st[QStringLiteral("registration_state")] = ps;
+                st[QStringLiteral("accessTech")] = rat;
+                st[QStringLiteral("access_technology")] = rat;
+
+                if (ps.toLower().contains(QStringLiteral("attached")) ||
+                    ps.toLower().contains(QStringLiteral("registered"))) {
+                    st[QStringLiteral("state")] = QStringLiteral("Registered");
+                } else if (!ps.isEmpty()) {
+                    st[QStringLiteral("state")] = ps;
+                }
+            }
+        }
+
+        if (!st.contains(QStringLiteral("modemName"))) {
+            QRegularExpression fwRe(
+                QStringLiteral("requestBaseBandVersion\\s+([^\\s]+)"),
+                QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch m = fwRe.match(line);
+            if (m.hasMatch())
+                st[QStringLiteral("modemName")] = QStringLiteral("Quectel %1").arg(m.captured(1).trimmed());
+        }
+
+        if (!st.contains(QStringLiteral("qmi_mode")) &&
+            lower.contains(QStringLiteral("modem works in qmi mode"))) {
+            st[QStringLiteral("qmi_mode")] = QStringLiteral("QMI");
+        }
+
+        if (!st.contains(QStringLiteral("qmap_netcard"))) {
+            QRegularExpression qmapRe(
+                QStringLiteral("qmap_netcard\\s*=\\s*([^,\\s]+)"),
+                QRegularExpression::CaseInsensitiveOption);
+            QRegularExpressionMatch m = qmapRe.match(line);
+            if (m.hasMatch())
+                st[QStringLiteral("qmap_netcard")] = m.captured(1).trimmed();
+        }
+
+        if (!st.contains(QStringLiteral("lastError"))) {
+            if (cellularTextSuggestsRegistrationTimeout(line)) {
+                st[QStringLiteral("lastError")] = QStringLiteral("Registration timeout");
+            } else if (lower.contains(QStringLiteral("failed to open /dev/mhi_qmi0"))) {
+                st[QStringLiteral("lastError")] = QStringLiteral("QMI device open failed");
+            } else if (lower.contains(QStringLiteral("qmidevice_detect failed"))) {
+                st[QStringLiteral("lastError")] = QStringLiteral("QMI device not detected");
+            } else if (lower.contains(QStringLiteral("atdevice_detect failed"))) {
+                st[QStringLiteral("lastError")] = QStringLiteral("AT device not detected");
+            }
+        }
+
+        if (st.contains(QStringLiteral("simStatus")) &&
+            st.contains(QStringLiteral("registration_state")) &&
+            st.contains(QStringLiteral("access_technology")) &&
+            st.contains(QStringLiteral("modemName")) &&
+            st.contains(QStringLiteral("qmap_netcard"))) {
+            break;
+        }
+    }
+
+    return st;
+}
+
 
 static QVariantMap readLteSignalFromCsq()
 {
@@ -858,7 +1090,17 @@ static QVariantMap parseDeviceShow(const QString &iface)
 // ============================================================
 // NetworkController
 // ============================================================
-NetworkController::NetworkController(QObject *parent) : QObject(parent) {}
+NetworkController::NetworkController(QObject *parent) : QObject(parent)
+{
+#if HARDWARE_HAS_5G
+    m_cellularRealtimeTimer = new QTimer(this);
+    m_cellularRealtimeTimer->setSingleShot(false);
+    m_cellularRealtimeTimer->setInterval(1500);
+
+    connect(m_cellularRealtimeTimer, &QTimer::timeout,
+            this, &NetworkController::pollCellularRealtime);
+#endif
+}
 
 // ============================================================
 // LAN apply
@@ -1820,20 +2062,23 @@ QVariantList NetworkController::listModems()
 QVariantMap NetworkController::cellularStatus()
 {
     QVariantMap result;
-    result["hardwareHas5G"] = bool(HARDWARE_HAS_5G);
+    result[QStringLiteral("hardwareHas5G")] = bool(HARDWARE_HAS_5G);
 
 #if HARDWARE_HAS_5G
+    const QString primaryIface = QStringLiteral("rmnet_mhi0.1");
+    const QString fallbackIface = QStringLiteral("rmnet_mhi0");
+
     result[QStringLiteral("connected")] = false;
-    result[QStringLiteral("modemName")] = QString();
-    result[QStringLiteral("interface")] = QString();
-    result[QStringLiteral("device")] = QString();
-    result[QStringLiteral("operator")] = QString();
-    result[QStringLiteral("operator_code")] = QString();
-    result[QStringLiteral("plmn")] = QString();
+    result[QStringLiteral("modemName")] = QStringLiteral("Quectel RM520N-GL");
+    result[QStringLiteral("interface")] = primaryIface;
+    result[QStringLiteral("device")] = primaryIface;
+    result[QStringLiteral("operator")] = QStringLiteral("-");
+    result[QStringLiteral("operator_code")] = QStringLiteral("-");
+    result[QStringLiteral("plmn")] = QStringLiteral("-");
     result[QStringLiteral("state")] = QStringLiteral("Unknown");
-    result[QStringLiteral("registration_state")] = QString();
-    result[QStringLiteral("accessTech")] = QString();
-    result[QStringLiteral("access_technology")] = QString();
+    result[QStringLiteral("registration_state")] = QStringLiteral("Unknown");
+    result[QStringLiteral("accessTech")] = QStringLiteral("-");
+    result[QStringLiteral("access_technology")] = QStringLiteral("-");
     result[QStringLiteral("signal")] = QStringLiteral("--");
     result[QStringLiteral("imei")] = QStringLiteral("-");
     result[QStringLiteral("simStatus")] = QStringLiteral("Unknown");
@@ -1841,14 +2086,26 @@ QVariantMap NetworkController::cellularStatus()
     result[QStringLiteral("simIccid")] = QStringLiteral("-");
     result[QStringLiteral("iccid")] = QStringLiteral("-");
     result[QStringLiteral("dataState")] = QStringLiteral("Disconnected");
+    result[QStringLiteral("data_state")] = QStringLiteral("Disconnected");
     result[QStringLiteral("ipAddress")] = QStringLiteral("No IPv4 assigned");
     result[QStringLiteral("ip_address")] = QStringLiteral("No IPv4 assigned");
     result[QStringLiteral("gateway")] = QStringLiteral("--");
     result[QStringLiteral("lastError")] = QString();
-    result[QStringLiteral("note")] = QStringLiteral("Structured cellular status generated from ip/nmcli/mmcli.");
+    result[QStringLiteral("source")] = QStringLiteral("quectel-CM + pcie_mhi + rmnet_mhi0.1");
 
-    const QString primaryIface = QStringLiteral("rmnet_mhi0.1");
-    const QString fallbackIface = QStringLiteral("rmnet_mhi0");
+    const QString qcmServiceState = serviceIsActiveText(QStringLiteral("quectel-cm.service"));
+    const QString recoverServiceState = serviceIsActiveText(QStringLiteral("5g-pcie-recover.service"));
+    const bool qcmActive = (qcmServiceState == QStringLiteral("active"));
+    const bool recoverActive = (recoverServiceState == QStringLiteral("active"));
+    const bool pcieDetected = pcieQuectelDetected();
+    const bool qmiOpenable = qmiDeviceOpenableNoCreate();
+
+    result[QStringLiteral("qcmServiceState")] = qcmServiceState;
+    result[QStringLiteral("recoverServiceState")] = recoverServiceState;
+    result[QStringLiteral("qcmServiceActive")] = qcmActive;
+    result[QStringLiteral("recoverServiceActive")] = recoverActive;
+    result[QStringLiteral("pcieDetected")] = pcieDetected;
+    result[QStringLiteral("qmiDeviceReady")] = qmiOpenable;
 
     QVariantMap snapshot = parseIfaceIpSnapshot(primaryIface);
     if (snapshot.isEmpty())
@@ -1860,8 +2117,13 @@ QVariantMap NetworkController::cellularStatus()
 
     if (!snapshot.isEmpty()) {
         const QString iface = snapshot.value(QStringLiteral("iface")).toString();
-        const QString flags = snapshot.value(QStringLiteral("flags")).toString();
+
+#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
+        result.insert(snapshot);
+#else
         result.unite(snapshot);
+#endif
+
         result[QStringLiteral("device")] = iface;
         result[QStringLiteral("interface")] = iface;
 
@@ -1874,224 +2136,251 @@ QVariantMap NetworkController::cellularStatus()
         const QString gateway = snapshot.value(QStringLiteral("gateway")).toString();
         if (!isUnsetCellularText(gateway))
             result[QStringLiteral("gateway")] = gateway;
-
-        if (!flags.isEmpty())
-            result[QStringLiteral("registration_state")] = flags;
-
-        const QString lowerFlags = flags.toLower();
-        QStringList noteParts;
-        noteParts << QStringLiteral("Using interface %1 (fallback %2)").arg(iface, fallbackIface);
-        if (!snapshot.value(QStringLiteral("mtu")).toString().isEmpty())
-            noteParts << QStringLiteral("MTU %1").arg(snapshot.value(QStringLiteral("mtu")).toString());
-        if (!snapshot.value(QStringLiteral("tx_queue")).toString().isEmpty())
-            noteParts << QStringLiteral("Queue %1").arg(snapshot.value(QStringLiteral("tx_queue")).toString());
-        if (!lowerFlags.isEmpty())
-            noteParts << QStringLiteral("Flags %1").arg(flags);
-        result[QStringLiteral("note")] = noteParts.join(QStringLiteral(" · "));
     }
 
-    const QVariantMap nmDevice = findLteNmDevice();
-    if (!nmDevice.isEmpty()) {
-        const QString device = nmDevice.value(QStringLiteral("device")).toString();
-        if (result.value(QStringLiteral("device")).toString().isEmpty()) {
-            result[QStringLiteral("device")] = device;
-            result[QStringLiteral("interface")] = device;
-        }
-        if (!device.isEmpty()) {
-            const QVariantMap live = parseDeviceIpv4(device);
-            const QString liveIp = live.value(QStringLiteral("dev_ip4_plain")).toString();
-            if (hasUsableIpv4Address(liveIp)) {
-                result[QStringLiteral("ipAddress")] = liveIp;
-                result[QStringLiteral("ip_address")] = liveIp;
-            }
-            if (!live.value(QStringLiteral("dev_ip4_gateway")).toString().isEmpty())
-                result[QStringLiteral("gateway")] =
-                    live.value(QStringLiteral("dev_ip4_gateway")).toString();
-        }
-        result[QStringLiteral("connection")] =
-            nmDevice.value(QStringLiteral("connection")).toString();
-        result[QStringLiteral("nmState")] =
-            nmDevice.value(QStringLiteral("state")).toString();
-    }
+    const bool rmnetReady =
+        (QProcess::execute(QStringLiteral("ip"),
+                           QStringList() << QStringLiteral("link")
+                                         << QStringLiteral("show")
+                                         << primaryIface) == 0);
+
+    result[QStringLiteral("rmnetReady")] = rmnetReady;
+
+    const QVariantMap qcmLogStatus = parseQuectelCmLogStatus(500);
+
+    auto setFromQcm = [&](const QString &key) {
+        const QString v = qcmLogStatus.value(key).toString().trimmed();
+        if (!v.isEmpty())
+            result[key] = v;
+    };
+
+    setFromQcm(QStringLiteral("simStatus"));
+    setFromQcm(QStringLiteral("sim_status"));
+    setFromQcm(QStringLiteral("registration_state"));
+    setFromQcm(QStringLiteral("state"));
+    setFromQcm(QStringLiteral("operator"));
+    setFromQcm(QStringLiteral("operator_code"));
+    setFromQcm(QStringLiteral("plmn"));
+    setFromQcm(QStringLiteral("accessTech"));
+    setFromQcm(QStringLiteral("access_technology"));
+    setFromQcm(QStringLiteral("modemName"));
+    setFromQcm(QStringLiteral("lastError"));
+    setFromQcm(QStringLiteral("qmi_mode"));
+    setFromQcm(QStringLiteral("qmap_netcard"));
 
     const QVariantMap csqSignal = readLteSignalFromCsq();
-    if (csqSignal.value(QStringLiteral("ok")).toBool())
+    if (csqSignal.value(QStringLiteral("ok")).toBool()) {
         result[QStringLiteral("signal")] = csqSignal.value(QStringLiteral("signal")).toString();
+        result[QStringLiteral("csq")] = csqSignal.value(QStringLiteral("csq")).toString();
+        result[QStringLiteral("dbm")] = csqSignal.value(QStringLiteral("dbm")).toString();
+    }
 
-    if (commandExists(QStringLiteral("mmcli"))) {
+    /*
+     * mmcli is only a fallback here. This product uses quectel-CM on PCIe/MHI,
+     * so stale ModemManager values must not override fresh quectel-CM log data.
+     */
+    if (qcmLogStatus.isEmpty() && commandExists(QStringLiteral("mmcli"))) {
         const QString modemId = findFirstModemId();
         if (!modemId.isEmpty()) {
             QString out, err;
-            if (runProcessBlocking("mmcli", {"-m", modemId, "-K"}, &out, &err, 10000)) {
-                const QVariantMap modem = parseKeyValueLines(out.split('\n', QString::SkipEmptyParts));
+            if (runProcessBlocking(QStringLiteral("mmcli"),
+                                   {QStringLiteral("-m"), modemId, QStringLiteral("-K")},
+                                   &out, &err, 10000)) {
+                const QVariantMap modem =
+                    parseKeyValueLines(out.split('\n', QString::SkipEmptyParts));
+
                 const QString simPath = pickFirstValue(modem, {
                                                                   QStringLiteral("modem.generic.sim"),
                                                                   QStringLiteral("modem.3gpp.sim")
                                                               });
                 const QString modemState = pickFirstValue(modem, {
-                                                                  QStringLiteral("modem.generic.state"),
-                                                                  QStringLiteral("modem.state")
-                                                              });
+                                                                     QStringLiteral("modem.generic.state"),
+                                                                     QStringLiteral("modem.state")
+                                                                 });
                 const QString registrationState = pickFirstValue(modem, {
-                                                                         QStringLiteral("modem.3gpp.registration-state"),
-                                                                         QStringLiteral("modem.generic.state")
-                                                                     });
-                const QString failedReason = pickFirstValue(modem, {
-                                                                    QStringLiteral("modem.generic.failed-reason"),
-                                                                    QStringLiteral("modem.failed-reason")
-                                                                });
+                                                                            QStringLiteral("modem.3gpp.registration-state"),
+                                                                            QStringLiteral("modem.generic.state")
+                                                                        });
                 const QString operatorName = pickFirstValue(modem, {
                                                                        QStringLiteral("modem.3gpp.operator-name"),
                                                                        QStringLiteral("modem.3gpp.operator-code")
                                                                    });
                 const QString operatorCode = pickFirstValue(modem, {
-                                                                    QStringLiteral("modem.3gpp.operator-code"),
-                                                                    QStringLiteral("modem.3gpp.plmn")
-                                                                });
-                const QString signal = pickFirstValue(modem, {
-                                                                 QStringLiteral("modem.generic.signal-quality.value"),
-                                                                 QStringLiteral("modem.signal-quality.value")
-                                                             });
-                const QString access = pickFirstValue(modem, {
-                                                                 QStringLiteral("modem.generic.access-technologies"),
-                                                                 QStringLiteral("modem.3gpp.packet-service-state")
-                                                             });
+                                                                       QStringLiteral("modem.3gpp.operator-code"),
+                                                                       QStringLiteral("modem.3gpp.plmn")
+                                                                   });
                 const QString imei = pickFirstValue(modem, {
                                                                QStringLiteral("modem.3gpp.imei"),
                                                                QStringLiteral("modem.generic.equipment-identifier")
                                                            });
 
-                if (!operatorName.isEmpty() && result.value(QStringLiteral("operator")).toString().isEmpty())
-                    result[QStringLiteral("operator")] = operatorName;
-                if (!operatorCode.isEmpty()) {
-                    result[QStringLiteral("operator_code")] = operatorCode;
-                    result[QStringLiteral("plmn")] = operatorCode;
+                if (!simPath.isEmpty()) {
+                    result[QStringLiteral("simStatus")] = QStringLiteral("Ready");
+                    result[QStringLiteral("sim_status")] = QStringLiteral("Ready");
                 }
                 if (!modemState.isEmpty())
                     result[QStringLiteral("state")] = modemState;
                 if (!registrationState.isEmpty())
                     result[QStringLiteral("registration_state")] = registrationState;
-                if (result.value(QStringLiteral("signal")).toString().isEmpty() && !signal.isEmpty())
-                    result[QStringLiteral("signal")] = signal.endsWith(QLatin1Char('%')) ? signal : signal + "%";
-                if (result.value(QStringLiteral("access_technology")).toString().isEmpty() && !access.isEmpty())
-                    result[QStringLiteral("access_technology")] = access;
+                if (!operatorName.isEmpty())
+                    result[QStringLiteral("operator")] = operatorName;
+                if (!operatorCode.isEmpty()) {
+                    result[QStringLiteral("operator_code")] = operatorCode;
+                    result[QStringLiteral("plmn")] = operatorCode;
+                }
                 if (!imei.isEmpty())
                     result[QStringLiteral("imei")] = imei;
-                if (!failedReason.isEmpty() && !isUnsetCellularText(failedReason))
-                    result[QStringLiteral("lastError")] = failedReason;
-                result[QStringLiteral("modemIndex")] = modemId.toInt();
-                result[QStringLiteral("modemName")] =
-                    pickFirstValue(modem, {QStringLiteral("modem.generic.model"),
-                                           QStringLiteral("modem.generic.manufacturer")});
-
-                if (!simPath.isEmpty()) {
-                    result[QStringLiteral("simStatus")] = QStringLiteral("Ready");
-                    result[QStringLiteral("sim_status")] = QStringLiteral("Ready");
-
-                    QString simOut, simErr;
-                    if (runProcessBlocking("mmcli", {"-i", simPath, "-K"}, &simOut, &simErr, 10000)) {
-                        const QVariantMap sim = parseKeyValueLines(simOut.split('\n', QString::SkipEmptyParts));
-                        const QString iccid = pickFirstValue(sim, {
-                                                                      QStringLiteral("sim.properties.iccid"),
-                                                                      QStringLiteral("sim.iccid")
-                                                                  });
-                        if (!iccid.isEmpty()) {
-                            result[QStringLiteral("iccid")] = iccid;
-                            result[QStringLiteral("simIccid")] = iccid;
-                        }
-                    }
-                } else if (cellularTextSuggestsNoSim(failedReason)
-                           || modemState.toLower().contains(QStringLiteral("failed"))) {
-                    result[QStringLiteral("simStatus")] = QStringLiteral("Not found");
-                    result[QStringLiteral("sim_status")] = QStringLiteral("Not found");
-                }
             }
         }
     }
 
-    if (isUnsetCellularText(result.value(QStringLiteral("signal")).toString()))
-        result[QStringLiteral("signal")] = QStringLiteral("--");
-
-    const QStringList moduleLogs = cellularModuleLogs(80);
-    result[QStringLiteral("moduleLogs")] = moduleLogs;
-
-    const QString logText = moduleLogs.join(QLatin1Char('\n'));
-    const bool directStatusHasIp =
-        hasUsableIpv4Address(result.value(QStringLiteral("ipAddress")).toString())
-        || hasUsableIpv4Address(result.value(QStringLiteral("ip_address")).toString());
-
-    // Logs are diagnostic fallback only. Do not let stale log lines override
-    // direct IP/mmcli/nmcli evidence that the modem currently has service.
-    if ((isUnsetCellularText(result.value(QStringLiteral("simStatus")).toString())
-         || result.value(QStringLiteral("simStatus")).toString() == QStringLiteral("Unknown"))
-        && !directStatusHasIp
-        && cellularTextSuggestsNoSim(logText)) {
-        result[QStringLiteral("simStatus")] = QStringLiteral("Not found");
-        result[QStringLiteral("sim_status")] = QStringLiteral("Not found");
-        result[QStringLiteral("lastError")] = QStringLiteral("SIM not found");
-    }
-
-    if (!directStatusHasIp && cellularTextSuggestsRegistrationTimeout(logText)) {
-        result[QStringLiteral("lastError")] = QStringLiteral("Registration timeout");
-    }
-
-    QString simStatus = result.value(QStringLiteral("simStatus")).toString();
-    if (isUnsetCellularText(simStatus))
-        simStatus = result.value(QStringLiteral("sim_status")).toString();
-    if (isUnsetCellularText(simStatus))
-        simStatus = QStringLiteral("Unknown");
-
-    QString ipAddress = result.value(QStringLiteral("ipAddress")).toString();
+    QString ipAddress = result.value(QStringLiteral("ipAddress")).toString().trimmed();
     if (!hasUsableIpv4Address(ipAddress))
-        ipAddress = result.value(QStringLiteral("ip_address")).toString();
+        ipAddress = result.value(QStringLiteral("ip_address")).toString().trimmed();
 
     const bool hasIp = hasUsableIpv4Address(ipAddress);
     if (!hasIp)
         ipAddress = QStringLiteral("No IPv4 assigned");
 
-    QString gateway = result.value(QStringLiteral("gateway")).toString();
-    if (isUnsetCellularText(gateway))
-        gateway = QStringLiteral("--");
+    QString simStatus = result.value(QStringLiteral("simStatus")).toString().trimmed();
+    if (isUnsetCellularText(simStatus))
+        simStatus = result.value(QStringLiteral("sim_status")).toString().trimmed();
+    if (isUnsetCellularText(simStatus))
+        simStatus = QStringLiteral("Unknown");
 
-    const QString allStatusText =
-        (simStatus + QLatin1Char('\n')
-         + result.value(QStringLiteral("lastError")).toString() + QLatin1Char('\n')
-         + result.value(QStringLiteral("state")).toString() + QLatin1Char('\n')
-         + result.value(QStringLiteral("registration_state")).toString() + QLatin1Char('\n')
-         + result.value(QStringLiteral("nmState")).toString()).toLower();
+    QString registration = result.value(QStringLiteral("registration_state")).toString().trimmed();
+    QString displayState = result.value(QStringLiteral("state")).toString().trimmed();
 
-    const bool noSim = cellularTextSuggestsNoSim(allStatusText);
-    const bool registrationTimeout = cellularTextSuggestsRegistrationTimeout(allStatusText);
-    const bool simUnknown = simStatus.trimmed().toLower() == QStringLiteral("unknown")
-                            || simStatus.trimmed().toLower() == QStringLiteral("no data");
-    const bool simOk = !noSim && (!simUnknown || hasIp);
-    const bool modemRegistered =
-        allStatusText.contains(QStringLiteral("connected"))
-        || allStatusText.contains(QStringLiteral("registered"))
-        || allStatusText.contains(QStringLiteral("home"))
-        || allStatusText.contains(QStringLiteral("roaming"))
-        || allStatusText.contains(QStringLiteral("attached"));
+    const QString simLowerBeforeIpFix = simStatus.toLower();
+    bool noSim = simLowerBeforeIpFix.contains(QStringLiteral("not found"))
+                 || simLowerBeforeIpFix.contains(QStringLiteral("no sim"))
+                 || cellularTextSuggestsNoSim(simStatus);
 
-    const bool connected = simOk && hasIp && modemRegistered && !registrationTimeout;
+    /*
+     * Important rule for this hardware:
+     *
+     * If rmnet_mhi0.1 has a usable IPv4 address, the data call is already up.
+     * In that state, stale old log lines like "No SIM", "Registration timeout",
+     * or an old QMI detect error must not override the live rmnet state.
+     */
+    if (hasIp) {
+        noSim = false;
+
+        if (isUnsetCellularText(simStatus) ||
+            simStatus.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0 ||
+            simStatus.compare(QStringLiteral("Not found"), Qt::CaseInsensitive) == 0 ||
+            simStatus.compare(QStringLiteral("No SIM"), Qt::CaseInsensitive) == 0) {
+            simStatus = QStringLiteral("Ready");
+        }
+
+        const QString regLower = registration.toLower();
+        if (isUnsetCellularText(registration) ||
+            registration.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0 ||
+            regLower.contains(QStringLiteral("timeout")) ||
+            regLower.contains(QStringLiteral("detach"))) {
+            registration = QStringLiteral("Attached");
+        }
+
+        if (isUnsetCellularText(displayState) ||
+            displayState.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0 ||
+            displayState.compare(QStringLiteral("No SIM"), Qt::CaseInsensitive) == 0 ||
+            displayState.toLower().contains(QStringLiteral("timeout"))) {
+            displayState = QStringLiteral("Registered");
+        }
+
+        const QString lastError = result.value(QStringLiteral("lastError")).toString().trimmed();
+        if (cellularTextSuggestsNoSim(lastError) ||
+            cellularTextSuggestsRegistrationTimeout(lastError) ||
+            lastError.compare(QStringLiteral("SIM not found"), Qt::CaseInsensitive) == 0 ||
+            lastError.compare(QStringLiteral("QMI device not detected"), Qt::CaseInsensitive) == 0 ||
+            lastError.compare(QStringLiteral("AT device not detected"), Qt::CaseInsensitive) == 0 ||
+            lastError.compare(QStringLiteral("QMI device open failed"), Qt::CaseInsensitive) == 0) {
+            result[QStringLiteral("lastError")] = QString();
+        }
+    }
+
+    const QString registrationLower = registration.toLower();
+    bool registered = registrationLower.contains(QStringLiteral("attached"))
+                      || registrationLower.contains(QStringLiteral("registered"))
+                      || registrationLower.contains(QStringLiteral("home"))
+                      || registrationLower.contains(QStringLiteral("roaming"));
+
+    if (hasIp && !registered) {
+        registration = QStringLiteral("Attached");
+        registered = true;
+        result[QStringLiteral("registration_state")] = registration;
+    }
+
+    const bool registrationTimeout =
+        !hasIp &&
+        (cellularTextSuggestsRegistrationTimeout(result.value(QStringLiteral("lastError")).toString()) ||
+         cellularTextSuggestsRegistrationTimeout(registration));
+
+    /*
+     * For quectel-CM PCIe mode, a usable IPv4 address on rmnet_mhi0.1 is the
+     * strongest evidence that the data call is connected. Do not require
+     * ModemManager registration state, and do not require qcmServiceActive here
+     * because the process/service state can lag while the interface still has IP.
+     */
+    const bool connected = hasIp && rmnetReady && !noSim && !registrationTimeout;
+
     QString dataState;
-    QString displayState = result.value(QStringLiteral("state")).toString();
 
-    if (noSim) {
+    if (connected) {
+        dataState = QStringLiteral("Connected");
+        simStatus = QStringLiteral("Ready");
+
+        if (isUnsetCellularText(registration) ||
+            registration.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) {
+            registration = QStringLiteral("Attached");
+        }
+
+        if (isUnsetCellularText(displayState) ||
+            displayState.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) {
+            displayState = QStringLiteral("Registered");
+        }
+    } else if (noSim) {
         simStatus = QStringLiteral("Not found");
         dataState = QStringLiteral("No SIM");
         displayState = QStringLiteral("No SIM");
-        if (result.value(QStringLiteral("lastError")).toString().isEmpty())
+        if (result.value(QStringLiteral("lastError")).toString().trimmed().isEmpty())
             result[QStringLiteral("lastError")] = QStringLiteral("SIM not found");
     } else if (registrationTimeout) {
         dataState = QStringLiteral("Disconnected");
         displayState = QStringLiteral("Registration timeout");
-    } else if (!hasIp) {
-        dataState = QStringLiteral("No IPv4 assigned");
-    } else if (connected) {
-        dataState = QStringLiteral("Connected");
+    } else if (!pcieDetected) {
+        dataState = QStringLiteral("PCIe Not Detected");
+        if (isUnsetCellularText(displayState) ||
+            displayState.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) {
+            displayState = QStringLiteral("PCIe Not Detected");
+        }
+    } else if (!qmiOpenable && !rmnetReady) {
+        dataState = QStringLiteral("Modem Not Ready");
+        if (isUnsetCellularText(displayState) ||
+            displayState.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) {
+            displayState = QStringLiteral("Modem Not Ready");
+        }
+    } else if (!hasIp && (qcmActive || qmiOpenable || rmnetReady)) {
+        dataState = QStringLiteral("Connecting");
+        if (isUnsetCellularText(displayState) ||
+            displayState.compare(QStringLiteral("Unknown"), Qt::CaseInsensitive) == 0) {
+            displayState = qmiOpenable ? QStringLiteral("QMI Ready") : QStringLiteral("Connecting");
+        }
     } else {
         dataState = QStringLiteral("Disconnected");
     }
+
+    QString gateway = result.value(QStringLiteral("gateway")).toString().trimmed();
+    if (isUnsetCellularText(gateway))
+        gateway = QStringLiteral("--");
+
+    QString accessTech = result.value(QStringLiteral("access_technology")).toString().trimmed();
+    if (isUnsetCellularText(accessTech))
+        accessTech = result.value(QStringLiteral("accessTech")).toString().trimmed();
+    if (isUnsetCellularText(accessTech) && connected)
+        accessTech = QStringLiteral("LTE");
+    if (isUnsetCellularText(accessTech))
+        accessTech = QStringLiteral("-");
 
     result[QStringLiteral("connected")] = connected;
     result[QStringLiteral("dataState")] = dataState;
@@ -2102,31 +2391,39 @@ QVariantMap NetworkController::cellularStatus()
     result[QStringLiteral("simStatus")] = simStatus;
     result[QStringLiteral("sim_status")] = simStatus;
     result[QStringLiteral("state")] = isUnsetCellularText(displayState) ? dataState : displayState;
-    result[QStringLiteral("accessTech")] = result.value(QStringLiteral("access_technology")).toString();
-    if (isUnsetCellularText(result.value(QStringLiteral("accessTech")).toString())) {
-        result[QStringLiteral("accessTech")] = QStringLiteral("-");
-        result[QStringLiteral("access_technology")] = QStringLiteral("-");
-    }
+    result[QStringLiteral("registration_state")] =
+        isUnsetCellularText(registration) ? QStringLiteral("Unknown") : registration;
+    result[QStringLiteral("accessTech")] = accessTech;
+    result[QStringLiteral("access_technology")] = accessTech;
 
     if (isUnsetCellularText(result.value(QStringLiteral("operator")).toString()))
         result[QStringLiteral("operator")] = QStringLiteral("-");
+    if (isUnsetCellularText(result.value(QStringLiteral("operator_code")).toString()))
+        result[QStringLiteral("operator_code")] = result.value(QStringLiteral("plmn")).toString();
     if (isUnsetCellularText(result.value(QStringLiteral("plmn")).toString()))
         result[QStringLiteral("plmn")] = QStringLiteral("-");
+    if (isUnsetCellularText(result.value(QStringLiteral("signal")).toString()))
+        result[QStringLiteral("signal")] = QStringLiteral("--");
     if (isUnsetCellularText(result.value(QStringLiteral("imei")).toString()))
         result[QStringLiteral("imei")] = QStringLiteral("-");
     if (isUnsetCellularText(result.value(QStringLiteral("iccid")).toString()))
         result[QStringLiteral("iccid")] = QStringLiteral("-");
     if (isUnsetCellularText(result.value(QStringLiteral("simIccid")).toString()))
         result[QStringLiteral("simIccid")] = result.value(QStringLiteral("iccid")).toString();
+
+    result[QStringLiteral("moduleLogs")] = cellularModuleLogs(80);
+    result[QStringLiteral("note")] =
+        QStringLiteral("Realtime status from /tmp/quectel-CM.log + rmnet_mhi0.1 + service state; rmnet IPv4 wins over stale modem log errors");
 #else
-    result["connected"] = false;
-    result["state"] = "disabled";
-    result["dataState"] = "Disabled";
-    result["simStatus"] = "Disabled";
-    result["sim_status"] = "Disabled";
-    result["ipAddress"] = "No IPv4 assigned";
-    result["ip_address"] = "No IPv4 assigned";
-    result["message"] = "Build is HW_NONE_5G";
+    result[QStringLiteral("connected")] = false;
+    result[QStringLiteral("state")] = QStringLiteral("disabled");
+    result[QStringLiteral("dataState")] = QStringLiteral("Disabled");
+    result[QStringLiteral("data_state")] = QStringLiteral("Disabled");
+    result[QStringLiteral("simStatus")] = QStringLiteral("Disabled");
+    result[QStringLiteral("sim_status")] = QStringLiteral("Disabled");
+    result[QStringLiteral("ipAddress")] = QStringLiteral("No IPv4 assigned");
+    result[QStringLiteral("ip_address")] = QStringLiteral("No IPv4 assigned");
+    result[QStringLiteral("message")] = QStringLiteral("Build is HW_NONE_5G");
 #endif
 
     return result;
@@ -2138,18 +2435,7 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
 
 #if HARDWARE_HAS_5G
     const int limit = qBound(20, maxLines, 300);
-    QString out, err;
-    bool hasRealLogSource = false;
 
-    /*
-     * ตัด prefix จาก journalctl ของ quectel-cm.service
-     *
-     * ก่อน:
-     * 2026-05-29T14:12:12+0700 ubuntu quectel-CM[1714]: [05-29_14:12:12:576] requestReg...
-     *
-     * หลัง:
-     * [05-29_14:12:12:576] requestReg...
-     */
     auto stripQuectelJournalPrefix = [](const QString &line) -> QString {
         QString s = line.trimmed();
         if (s.isEmpty())
@@ -2180,92 +2466,119 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
         return s;
     };
 
-    auto makeNewestFirst = [](const QStringList &input) -> QStringList {
-        QStringList reversed;
-        reversed.reserve(input.size());
-
-        for (int i = input.size() - 1; i >= 0; --i)
-            reversed << input.at(i);
-
-        return reversed;
-    };
-
-    auto appendJournalLines = [&logs, &stripQuectelJournalPrefix](const QString &text,
-                                                                  bool stripQuectelPrefix) {
+    auto parseLinesNewestFirst = [&](const QString &text,
+                                     bool stripJournalPrefix,
+                                     const QString &prefix = QString()) -> QStringList {
+        QStringList parsed;
         const QStringList lines = text.split(QLatin1Char('\n'), QString::SkipEmptyParts);
 
         for (const QString &line : lines) {
             QString trimmed = line.trimmed();
-
             if (trimmed.isEmpty())
                 continue;
-
             if (trimmed.startsWith(QStringLiteral("-- No entries")))
                 continue;
-
-            if (stripQuectelPrefix)
+            if (stripJournalPrefix)
                 trimmed = stripQuectelJournalPrefix(trimmed);
-
             if (trimmed.isEmpty())
                 continue;
+            if (!prefix.isEmpty())
+                trimmed = prefix + trimmed;
+            parsed << trimmed;
+        }
 
-            logs << trimmed;
+        QStringList newestFirst;
+        newestFirst.reserve(parsed.size());
+        for (int i = parsed.size() - 1; i >= 0; --i)
+            newestFirst << parsed.at(i);
+        return newestFirst;
+    };
+
+    auto appendLimited = [&](const QStringList &src, int maxAdd) {
+        for (const QString &line : src) {
+            if (logs.size() >= limit || maxAdd <= 0)
+                break;
+            logs << line;
+            --maxAdd;
         }
     };
 
-    // Primary source: QConnectManager / Quectel-CM service log.
-    if (runProcessBlocking(QStringLiteral("journalctl"),
-                           {QStringLiteral("-u"), QStringLiteral("quectel-cm.service"),
-                            QStringLiteral("-n"), QString::number(limit),
-                            QStringLiteral("--no-pager"), QStringLiteral("-o"), QStringLiteral("short-iso")},
-                           &out, &err, 5000)) {
-        appendJournalLines(out, true);
-        if (!logs.isEmpty())
-            hasRealLogSource = true;
-    }
-
-    // Fallback: ModemManager logs.
-    if (logs.isEmpty()) {
-        out.clear();
-        err.clear();
-
-        if (runProcessBlocking(QStringLiteral("journalctl"),
-                               {QStringLiteral("-u"), QStringLiteral("ModemManager.service"),
-                                QStringLiteral("-n"), QString::number(limit),
-                                QStringLiteral("--no-pager"), QStringLiteral("-o"), QStringLiteral("short-iso")},
-                               &out, &err, 5000)) {
-            appendJournalLines(out, false);
-            if (!logs.isEmpty())
-                hasRealLogSource = true;
+    auto readTailFile = [&](const QString &path,
+                            int lineCount,
+                            const QString &prefix = QString()) -> QStringList {
+        QString out, err;
+        const int n = qBound(1, lineCount, 300);
+        if (runProcessBlocking(QStringLiteral("tail"),
+                               {QStringLiteral("-n"), QString::number(n), path},
+                               &out, &err, 5000)
+            && !out.trimmed().isEmpty()) {
+            return parseLinesNewestFirst(out, false, prefix);
         }
+        return {};
+    };
+
+    auto readJournalUnit = [&](const QString &unit,
+                               int lineCount,
+                               bool stripPrefix,
+                               const QString &prefix = QString()) -> QStringList {
+        QString out, err;
+        const int n = qBound(1, lineCount, 300);
+        if (runProcessBlocking(QStringLiteral("journalctl"),
+                               {QStringLiteral("-u"), unit,
+                                QStringLiteral("-n"), QString::number(n),
+                                QStringLiteral("--no-pager"),
+                                QStringLiteral("-o"), QStringLiteral("short-iso")},
+                               &out, &err, 5000)
+            && !out.trimmed().isEmpty()) {
+            return parseLinesNewestFirst(out, stripPrefix, prefix);
+        }
+        return {};
+    };
+
+    const QStringList qcmFileLogs =
+        readTailFile(QStringLiteral("/tmp/quectel-CM.log"), limit);
+    appendLimited(qcmFileLogs, qMax(10, (limit * 2) / 3));
+
+    if (logs.size() < limit) {
+        const QStringList recoverFileLogs =
+            readTailFile(QStringLiteral("/var/log/5g-pcie-recover.log"),
+                         limit,
+                         QStringLiteral("[recover] "));
+        appendLimited(recoverFileLogs, limit - logs.size());
     }
 
-    // Fallback: dmesg modem related lines.
     if (logs.isEmpty()) {
-        out.clear();
-        err.clear();
+        const QStringList qcmJournalLogs =
+            readJournalUnit(QStringLiteral("quectel-cm.service"), limit, true);
+        appendLimited(qcmJournalLogs, limit);
+    }
 
+    if (logs.size() < limit) {
+        const QStringList recoverJournalLogs =
+            readJournalUnit(QStringLiteral("5g-pcie-recover.service"),
+                            limit,
+                            false,
+                            QStringLiteral("[recover-service] "));
+        appendLimited(recoverJournalLogs, limit - logs.size());
+    }
+
+    if (logs.isEmpty()) {
+        QString out, err;
         if (runProcessBlocking(QStringLiteral("dmesg"), {}, &out, &err, 5000)
             && !out.trimmed().isEmpty()) {
-
             const QStringList keywords = {
-                QStringLiteral("quectel"),
-                QStringLiteral("mhi"),
-                QStringLiteral("rmnet"),
-                QStringLiteral("wwan"),
-                QStringLiteral("qmi"),
-                QStringLiteral("modem"),
-                QStringLiteral("lte"),
-                QStringLiteral("5g"),
-                QStringLiteral("sim"),
-                QStringLiteral("usb")
+                QStringLiteral("quectel"), QStringLiteral("mhi"),
+                QStringLiteral("rmnet"), QStringLiteral("wwan"),
+                QStringLiteral("qmi"), QStringLiteral("pcie"),
+                QStringLiteral("1eac"), QStringLiteral("100b"),
+                QStringLiteral("aer"), QStringLiteral("fatal"),
+                QStringLiteral("reset"), QStringLiteral("sim")
             };
 
+            QStringList matchedLines;
             const QStringList lines = out.split(QLatin1Char('\n'), QString::SkipEmptyParts);
-
             for (const QString &line : lines) {
                 const QString lower = line.toLower();
-
                 bool matched = false;
                 for (const QString &keyword : keywords) {
                     if (lower.contains(keyword)) {
@@ -2273,36 +2586,92 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
                         break;
                     }
                 }
-
                 if (matched) {
                     const QString trimmed = line.trimmed();
                     if (!trimmed.isEmpty())
-                        logs << trimmed;
+                        matchedLines << QStringLiteral("[dmesg] ") + trimmed;
                 }
             }
 
-            if (!logs.isEmpty())
-                hasRealLogSource = true;
+            for (int i = matchedLines.size() - 1; i >= 0 && logs.size() < limit; --i)
+                logs << matchedLines.at(i);
         }
     }
 
-    /*
-     * จำกัดจำนวน log ก่อน แล้วค่อยกลับลำดับ
-     * journalctl -n จะให้ลำดับเก่า -> ใหม่
-     * UI ต้องการ ใหม่ -> เก่า
-     */
-    if (logs.size() > limit)
-        logs = logs.mid(logs.size() - limit);
-
-    if (hasRealLogSource && logs.size() > 1)
-        logs = makeNewestFirst(logs);
-
+    if (logs.isEmpty()) {
+        logs << QStringLiteral("No 5G logs found from /tmp/quectel-CM.log, /var/log/5g-pcie-recover.log, journalctl, or dmesg");
+    }
 #else
     Q_UNUSED(maxLines)
     logs << QStringLiteral("5G is disabled by HW_NONE_5G build macro");
 #endif
 
     return logs;
+}
+
+
+void NetworkController::startCellularRealtime(int intervalMs)
+{
+#if HARDWARE_HAS_5G
+    if (!m_cellularRealtimeTimer)
+        return;
+
+    intervalMs = qBound(500, intervalMs, 10000);
+
+    if (m_cellularRealtimeTimer->interval() != intervalMs)
+        m_cellularRealtimeTimer->setInterval(intervalMs);
+
+    qWarning() << "[5G] startCellularRealtime intervalMs =" << intervalMs;
+    pollCellularRealtime();
+
+    if (!m_cellularRealtimeTimer->isActive())
+        m_cellularRealtimeTimer->start();
+#else
+    Q_UNUSED(intervalMs)
+#endif
+}
+
+void NetworkController::stopCellularRealtime()
+{
+#if HARDWARE_HAS_5G
+    if (m_cellularRealtimeTimer)
+        m_cellularRealtimeTimer->stop();
+    qWarning() << "[5G] stopCellularRealtime";
+#endif
+}
+
+QVariantMap NetworkController::cellularRealtimeSnapshot()
+{
+#if HARDWARE_HAS_5G
+    return cellularStatus();
+#else
+    QVariantMap m;
+    m[QStringLiteral("hardwareHas5G")] = false;
+    m[QStringLiteral("connected")] = false;
+    m[QStringLiteral("simStatus")] = QStringLiteral("Disabled");
+    m[QStringLiteral("sim_status")] = QStringLiteral("Disabled");
+    m[QStringLiteral("state")] = QStringLiteral("5G disabled by build macro");
+    m[QStringLiteral("dataState")] = QStringLiteral("Disabled");
+    return m;
+#endif
+}
+
+void NetworkController::pollCellularRealtime()
+{
+#if HARDWARE_HAS_5G
+    QVariantMap status = cellularStatus();
+    status[QStringLiteral("menuID")] = QStringLiteral("lte_state");
+    status[QStringLiteral("realtime")] = true;
+    status[QStringLiteral("timestamp")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+    const QJsonObject obj = QJsonObject::fromVariantMap(status);
+    const QString compact = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+
+    if (compact != m_lastCellularRealtimeJson) {
+        m_lastCellularRealtimeJson = compact;
+        emit cellularRealtimeStatusChanged(status);
+    }
+#endif
 }
 
 void NetworkController::connectCellular(const QString &apn,

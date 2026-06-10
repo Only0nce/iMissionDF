@@ -517,28 +517,28 @@ void Mainwindows::fileUpdated(const QString &path)
 Q_INVOKABLE void Mainwindows::shutdownRequested()
 {
 #ifdef PLATFORM_JETSON
-    backlightOff();
+    // backlightOff();
 
     //resetHW
-    dspBootSelect->setValue(QSPIFLASH);
-    codecReset->setValue(RESET_ACTIVE);
-    dspReset->setValue(RESET_ACTIVE);
-    led3->setValue(LED_OFF);
-    led4->setValue(LED_OFF);
+    // dspBootSelect->setValue(QSPIFLASH);
+    // codecReset->setValue(RESET_ACTIVE);
+    // dspReset->setValue(RESET_ACTIVE);
+    // led3->setValue(LED_OFF);
+    // led4->setValue(LED_OFF);
     QProcess::execute("sudo shutdown now");
 #endif
 }
 Q_INVOKABLE void Mainwindows::rebootRequested()
 {
 #ifdef PLATFORM_JETSON
-    backlightOff();
+    // backlightOff();
 
     //resetHW
-    dspBootSelect->setValue(QSPIFLASH);
-    codecReset->setValue(RESET_ACTIVE);
-    dspReset->setValue(RESET_ACTIVE);
-    led3->setValue(LED_OFF);
-    led4->setValue(LED_OFF);
+    // dspBootSelect->setValue(QSPIFLASH);
+    // codecReset->setValue(RESET_ACTIVE);
+    // dspReset->setValue(RESET_ACTIVE);
+    // led3->setValue(LED_OFF);
+    // led4->setValue(LED_OFF);
     QProcess::execute("sudo reboot"); // or "shutdown now"
 #endif
 }
@@ -869,52 +869,303 @@ Q_INVOKABLE void Mainwindows::sCanfreq(){
     qDebug() << "sCanfreq done";
 }
 #ifdef PLATFORM_JETSON
+
+void Mainwindows::scheduleReset5GModemNoReboot(int delayMs)
+{
+    if (delayMs < 0)
+        delayMs = 0;
+
+    if (m_reset5GDelayedPending) {
+        qWarning() << "[5G] delayed reset already scheduled, skip";
+        return;
+    }
+
+    m_reset5GDelayedPending = true;
+
+    qWarning() << "[5G] scheduleReset5GModemNoReboot delayMs =" << delayMs;
+
+    QTimer::singleShot(delayMs, this, [this]() {
+        m_reset5GDelayedPending = false;
+
+        qWarning() << "[5G] delayed reset5GModemNoReboot starting";
+        reset5GModemNoReboot();
+    });
+}
+
+void Mainwindows::reset5GModemNoReboot()
+{
+    if (!m_reset5GBusy.testAndSetAcquire(0, 1)) {
+        qWarning() << "[5G] reset already running, skip";
+        return;
+    }
+
+    qWarning() << "[5G] reset5GModemNoReboot background start";
+    emit reset5GModemStarted();
+
+    QtConcurrent::run([this]() {
+        const bool ready = reset5GModemNoRebootWorker();
+
+        QMetaObject::invokeMethod(this, [this, ready]() {
+            m_reset5GBusy.storeRelease(0);
+
+            qWarning() << "[5G] reset5GModemNoReboot background finished ready =" << ready;
+            emit reset5GModemFinished(ready);
+        }, Qt::QueuedConnection);
+    });
+}
+
+bool Mainwindows::reset5GModemNoRebootWorker()
+{
+    qWarning() << "[5G] reset5GModemNoRebootWorker start - service mode";
+
+    const QString recoverService = "5g-pcie-recover.service";
+    const QString qcmService     = "quectel-cm.service";
+
+    auto runShell = [](const QString &label,
+                       const QString &cmd,
+                       int timeoutMs = 60000) -> int {
+        qWarning() << "[5G]" << label << "CMD =" << cmd;
+
+        QProcess p;
+        p.start("sh", QStringList() << "-c" << cmd);
+
+        if (!p.waitForStarted(5000)) {
+            qWarning() << "[5G]" << label << "failed to start";
+            return -1000;
+        }
+
+        if (!p.waitForFinished(timeoutMs)) {
+            qWarning() << "[5G]" << label << "timeout, kill process";
+            p.kill();
+            p.waitForFinished(3000);
+            return -1001;
+        }
+
+        const QString out = QString::fromLocal8Bit(p.readAllStandardOutput()).trimmed();
+        const QString err = QString::fromLocal8Bit(p.readAllStandardError()).trimmed();
+
+        if (!out.isEmpty())
+            qWarning().noquote() << "[5G]" << label << "stdout:\n" << out;
+
+        if (!err.isEmpty())
+            qWarning().noquote() << "[5G]" << label << "stderr:\n" << err;
+
+        qWarning() << "[5G]" << label
+                   << "exitCode =" << p.exitCode()
+                   << "exitStatus =" << p.exitStatus();
+
+        if (p.exitStatus() != QProcess::NormalExit)
+            return -1002;
+
+        return p.exitCode();
+    };
+
+    auto isCharDevice = [](const char *path) -> bool {
+        struct stat st;
+        if (::stat(path, &st) != 0)
+            return false;
+
+        return S_ISCHR(st.st_mode);
+    };
+
+    auto canOpenQmiNoCreate = [&]() -> bool {
+        const char *path = "/dev/mhi_QMI0";
+
+        if (!isCharDevice(path)) {
+            qWarning() << "[5G] /dev/mhi_QMI0 is not a character device";
+            return false;
+        }
+
+        const int fd = ::open(path, O_RDWR | O_NONBLOCK);
+        if (fd < 0) {
+            qWarning() << "[5G] open /dev/mhi_QMI0 failed errno =" << errno;
+            return false;
+        }
+
+        ::close(fd);
+        return true;
+    };
+
+    auto isQmiReady = [&]() -> bool {
+        const int rmnet0 = QProcess::execute("ip",
+                                             QStringList() << "link"
+                                                           << "show"
+                                                           << "rmnet_mhi0");
+
+        const int rmnet1 = QProcess::execute("ip",
+                                             QStringList() << "link"
+                                                           << "show"
+                                                           << "rmnet_mhi0.1");
+
+        if (rmnet0 != 0 || rmnet1 != 0) {
+            qWarning() << "[5G] rmnet not ready"
+                       << "rmnet_mhi0 ret =" << rmnet0
+                       << "rmnet_mhi0.1 ret =" << rmnet1;
+            return false;
+        }
+
+        if (!canOpenQmiNoCreate())
+            return false;
+
+        return true;
+    };
+
+    auto waitQmiReady = [&]() -> bool {
+        for (int i = 0; i < 90; ++i) {
+            if (isQmiReady()) {
+                qWarning() << "[5G] QMI ready after" << i << "sec";
+                return true;
+            }
+
+            if ((i % 10) == 0)
+                qWarning() << "[5G] wait QMI ready..." << i << "sec";
+
+            QThread::sleep(1);
+        }
+
+        qWarning() << "[5G] QMI wait timeout";
+        return false;
+    };
+
+    auto dump5GDebug = [&]() {
+        runShell("dump 5G debug",
+                 "echo '=== service ==='; "
+                 "systemctl status 5g-pcie-recover.service --no-pager -l | tail -80 || true; "
+                 "systemctl status quectel-cm.service --no-pager -l | tail -80 || true; "
+                 "echo '=== lspci ==='; "
+                 "lspci -Dnn | grep -i -E '1eac|100b|mhi|quectel' || true; "
+                 "echo '=== /dev/mhi* ==='; "
+                 "ls -l /dev/mhi* 2>/dev/null || true; "
+                 "echo '=== rmnet/wwan ==='; "
+                 "ip -br link | grep -E 'rmnet|wwan|mhi' || true; "
+                 "echo '=== recover log ==='; "
+                 "tail -120 /var/log/5g-pcie-recover.log 2>/dev/null || true; "
+                 "echo '=== quectel log ==='; "
+                 "tail -120 /tmp/quectel-CM.log 2>/dev/null || true; "
+                 "echo '=== dmesg ==='; "
+                 "dmesg -T | grep -i -E 'mhi|qmi|rmnet|pcie|quectel|1eac|aer|fatal|reset' | tail -120",
+                 30000);
+    };
+
+    // 1) Stop QConnectManager first.
+    runShell("stop quectel-cm.service",
+             "systemctl stop quectel-cm.service 2>/dev/null || true; "
+             "pkill -INT quectel-CM 2>/dev/null || true; "
+             "sleep 1; "
+             "pkill -KILL quectel-CM 2>/dev/null || true",
+             30000);
+
+    // 2) Clear previous failed state.
+    runShell("reset-failed services",
+             "systemctl reset-failed 5g-pcie-recover.service quectel-cm.service 2>/dev/null || true",
+             10000);
+
+    // 3) Run recover service.
+    // This service should contain your working RST_5G polarity script.
+    const int recoverRet = runShell("restart 5g-pcie-recover.service",
+                                    "systemctl restart 5g-pcie-recover.service",
+                                    240000);
+
+    if (recoverRet != 0) {
+        qWarning() << "[5G] recover service failed ret =" << recoverRet;
+        dump5GDebug();
+        return false;
+    }
+
+    // 4) Confirm QMI/rmnet ready before starting quectel-CM.
+    if (!waitQmiReady()) {
+        qWarning() << "[5G] QMI not ready after recover service";
+        dump5GDebug();
+        return false;
+    }
+
+    // 5) Start/restart QConnectManager service.
+    const int qcmRet = runShell("restart quectel-cm.service",
+                                "systemctl restart quectel-cm.service",
+                                60000);
+
+    if (qcmRet != 0) {
+        qWarning() << "[5G] quectel-cm.service restart failed ret =" << qcmRet;
+        dump5GDebug();
+        return false;
+    }
+
+    // 6) Optional: check service active.
+    const int activeRet = runShell("check quectel-cm.service active",
+                                   "systemctl is-active --quiet quectel-cm.service",
+                                   10000);
+
+    if (activeRet != 0) {
+        qWarning() << "[5G] quectel-cm.service is not active";
+        dump5GDebug();
+        return false;
+    }
+
+    dump5GDebug();
+
+    qWarning() << "[5G] reset5GModemNoRebootWorker done - service mode OK";
+    return true;
+}
+
 void Mainwindows::gpioInit()
 {
-    codecReset->requestOutput();
-    dspReset->requestOutput();
-    dspBootSelect->requestOutput();
-    led3->requestOutput();
-    led4->requestOutput();
-    headphoneGpioOn->requestOutput();
-    ampGpioMute->requestOutput();
-    ampGpioStandby->requestOutput();
-    backlight->requestOutput();
-    lna_1_enable->requestOutput();
-    lna_2_enable->requestOutput();
+    // codecReset->requestOutput();
+    // dspReset->requestOutput();
+    // dspBootSelect->requestOutput();
+    // led3->requestOutput();
+    // led4->requestOutput();
+    // headphoneGpioOn->requestOutput();
+    // ampGpioMute->requestOutput();
+    // ampGpioStandby->requestOutput();
+    // backlight->requestOutput();
+    // lna_1_enable->requestOutput();
+    // lna_2_enable->requestOutput();
 
     rotary_led->requestOutput();
     rst_amp->requestOutput();
     shd_amp->requestOutput();
     hs_mute->requestOutput();
 
-    backlightOn();
-    set_lna_1_enable();
-    set_lna_2_disable(); // Distortion
+    // full_card_power_off->requestOutput();
+    // w_disable1->requestOutput();
+    // w_disable2->requestOutput();
+    // reset_5g->requestOutput();
+
+    // backlightOn();
+    // set_lna_1_enable();
+    // set_lna_2_disable(); // Distortion
 
     //resetHW
-    dspBootSelect->setValue(QSPIFLASH);
-    codecReset->setValue(RESET_ACTIVE);
-    dspReset->setValue(RESET_ACTIVE);
-    QThread::msleep(200);
+    // dspBootSelect->setValue(QSPIFLASH);
+    // codecReset->setValue(RESET_ACTIVE);
+    // dspReset->setValue(RESET_ACTIVE);
+    // full_card_power_off->setValue(0);
+    // w_disable1->setValue(1);
+    // w_disable2->setValue(0);
+    // reset_5g->setValue(1);
+    QThread::msleep(500);          // ต้องมากกว่า 900 ms, แนะนำ 2 วินาที
 
-    codecReset->setValue(RESET_INACTIVE);
-    dspReset->setValue(RESET_INACTIVE);
+    // codecReset->setValue(RESET_INACTIVE);
+    // dspReset->setValue(RESET_INACTIVE);
 
-
-    led3->setValue(LED_ON);
-    led4->setValue(LED_ON);
-    headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
-    ampGpioMute->setValue(SPK_MUTE);
-    ampGpioStandby->setValue(AMP_SHUTDOWN);
+    // led3->setValue(LED_ON);
+    // led4->setValue(LED_ON);
+    // headphoneGpioOn->setValue(HEADPHONE_SHUTDOWN);
+    // ampGpioMute->setValue(SPK_MUTE);
+    // ampGpioStandby->setValue(AMP_SHUTDOWN);
 
     rotary_led->setValue(1);
     rst_amp->setValue(1);
     shd_amp->setValue(0);
     hs_mute->setValue(0);
+    // reset_5g->setValue(0);
 
-    QThread::msleep(200);
-
+    QThread::msleep(100);
+    // full_card_power_off->setValue(1);
+    // qWarning() << "[5G] reset5GModemNoReboot starting";
+    // reset5GModemNoReboot();
+    // qWarning() << "[5G] reset5GModemNoReboot ending";
+    // reset_5g->setValue(1);
 }
 #endif
 #ifdef PLATFORM_JETSON

@@ -1,7 +1,7 @@
 TEMPLATE = app
 TARGET = iScanMR10
 
-QT += quick websockets sql widgets multimedia opengl
+QT += quick websockets sql widgets multimedia opengl concurrent
 CONFIG += c++17
 CONFIG += c++11
 contains(CONFIG, static) {
@@ -32,8 +32,8 @@ CONFIG(release, debug|release) {
 #
 # Default is NONE_5G for safety.
 # ============================================================
-CONFIG+=HW_5G
-# CONFIG+=HW_NONE_5G
+# CONFIG+=HW_5G
+CONFIG+=HW_NONE_5G
 contains(CONFIG, HW_5G):contains(CONFIG, HW_NONE_5G) {
     error("Select only one hardware version: HW_5G or HW_NONE_5G")
 }

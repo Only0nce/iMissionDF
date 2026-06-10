@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QJsonObject>
 #include <QString>
+#include <QVariantMap>
 
 class NetworkController;
 
@@ -53,6 +54,7 @@ private:
 private slots:
     void onWifiOperationFinished(const QString &action, bool ok, const QString &message);
     void onCellularOperationFinished(const QString &action, bool ok, const QString &message);
+    void onCellularRealtimeStatusChanged(const QVariantMap &status);
 };
 
 #endif // WIFI5GCONTROLLER_H
