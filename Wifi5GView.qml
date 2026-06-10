@@ -188,74 +188,18 @@ Item {
     property string wifiAdvancedCurrentGateway: "192.168.10.1"
     property string wifiAdvancedConnectionName: "Office-WiFi"
     property var wifiList: [
-        {
-            "ssid": "Office-WiFi",
-            "bssid": "00:11:22:33:44:55",
-            "band": "5 GHz",
-            "channel": 44,
-            "signal": 82,
-            "security": "WPA2",
-            "active": true,
-            "known": true,
-            "saved": true,
-            "profile_name": "Office-WiFi"
-        },
-        {
-            "ssid": "Field-Router",
-            "bssid": "66:77:88:99:AA:BB",
-            "band": "2.4 GHz",
-            "channel": 6,
-            "signal": 58,
-            "security": "WPA2",
-            "active": false,
-            "known": false,
-            "saved": false,
-            "profile_name": ""
-        }
     ]
     property var wifiState: ({
-        "connected": true,
-        "ssid": "Office-WiFi",
-        "connection": "Office-WiFi",
-        "signal": 82,
-        "current_ip": "192.168.10.24",
-        "current_gateway": "192.168.10.1",
-        "current_netmask": "255.255.255.0",
-        "device": "wlP9p1s0",
-        "enabled": true
     })
     property string wifiMessage: "Mock data for design preview"
 
     property string cellularIface: "*"
     property string cellularApn: "internet"
     property bool cellularAutoConnect: true
+    property bool cellularResetBusy: false
     property var cellularState: ({
-        "connected": true,
-        "modemName": "Quectel 5G",
-        "device": "rmnet_mhi0.1",
-        "interface": "rmnet_mhi0.1",
-        "operator": "AIS",
-        "plmn": "52003",
-        "state": "registered",
-        "dataState": "Connected",
-        "ipAddress": "10.88.0.24",
-        "gateway": "10.88.0.1",
-        "simStatus": "Ready",
-        "simIccid": "8986000000000000000",
-        "sim_status": "ready",
-        "registration_state": "home",
-        "accessTech": "nr5g",
-        "access_technology": "nr5g",
-        "signal": "22/31",
-        "imei": "860000000000000",
-        "iccid": "8986000000000000000"
     })
     property var modemList: [
-        {
-            "name": "Quectel 5G",
-            "vendor": "Mock modem",
-            "disabled": false
-        }
     ]
     property string cellularMessage: "Mock data for design preview"
     property var cellularModuleLogs: []
@@ -272,6 +216,7 @@ Item {
     signal cellularRefreshRequested()
     signal cellularConnectRequested(string apn, string iface, bool autoConnect)
     signal cellularDisconnectRequested()
+    signal cellularResetModemRequested()
     signal cellularListModemsRequested()
 
     QtObject {
@@ -704,17 +649,6 @@ Item {
                     Layout.preferredWidth: layoutConfig.selectorButtonWidth
                     onClicked: root.selectedNetworkPage = "cellular"
                 }
-
-                AppButton {
-                    text: "Refresh All"
-                    baseColor: ui.panel2
-                    buttonHeight: layoutConfig.wifiButtonHeight
-                    buttonRadius: layoutConfig.buttonRadius
-                    buttonFontSize: layoutConfig.buttonFontSize
-                    Layout.preferredWidth: layoutConfig.refreshButtonWidth
-                    enabled: root.hardwareHasWireless
-                    onClicked: root.refreshAllRequested()
-                }
             }
 
             GridLayout {
@@ -1011,6 +945,27 @@ Item {
                                     onClicked: root.cellularDisconnectRequested()
                                 }
                             }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: 2
+                                columnSpacing: layoutConfig.cellularFormColumnSpacing
+                                rowSpacing: layoutConfig.cellularFormRowSpacing
+
+                                AppButton {
+                                    text: root.cellularResetBusy ? "Restarting..." : "Restart Modem"
+                                    baseColor: ui.warning
+                                    buttonHeight: layoutConfig.cellularButtonHeight
+                                    buttonRadius: layoutConfig.buttonRadius
+                                    buttonFontSize: layoutConfig.buttonFontSize
+                                    busy: root.cellularResetBusy
+                                    busyIndicatorSize: layoutConfig.busyIndicatorSize
+                                    Layout.fillWidth: true
+                                    enabled: root.showCellularControls && !root.cellularResetBusy
+                                    onClicked: resetModemConfirmPopup.open()
+                                }
+                            }
+
                         }
                     }
                 }
@@ -1066,7 +1021,7 @@ Item {
 
                             Rectangle {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 264
+                                Layout.preferredHeight: 284
                                 radius: layoutConfig.wifiStatusBoxRadius
                                 color: ui.panel2
                                 border.color: ui.border
@@ -1465,6 +1420,100 @@ Item {
                     font.pixelSize: layoutConfig.headerSubtitleFontSize
                     horizontalAlignment: Text.AlignHCenter
                     Layout.alignment: Qt.AlignHCenter
+                }
+            }
+        }
+    }
+
+    Popup {
+        id: resetModemConfirmPopup
+
+        modal: true
+        focus: true
+        dim: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        width: Math.min(540, root.width - 80)
+        x: Math.round((root.width - width) / 2)
+        y: Math.round((root.height - height) / 2)
+        padding: 0
+
+        background: Rectangle {
+            radius: layoutConfig.cardRadius
+            color: ui.panel
+            border.color: ui.warning
+            border.width: layoutConfig.cardBorderWidth
+        }
+
+        contentItem: ColumnLayout {
+            width: resetModemConfirmPopup.width
+            spacing: 14
+
+            Item {
+                Layout.preferredHeight: 4
+            }
+
+            Text {
+                text: "Confirm 5G Modem Restart"
+                color: ui.text
+                font.pixelSize: layoutConfig.sectionTitleFontSize
+                font.bold: true
+                Layout.leftMargin: 20
+                Layout.rightMargin: 20
+                Layout.fillWidth: true
+            }
+
+            Text {
+                text: "Restarting the modem will temporarily disconnect the 5G data connection and reload the PCIe/MHI modem service. Continue?"
+                color: ui.subText
+                font.pixelSize: layoutConfig.messageFontSize
+                wrapMode: Text.WordWrap
+                Layout.leftMargin: 20
+                Layout.rightMargin: 20
+                Layout.fillWidth: true
+            }
+
+            Text {
+                text: "Current interface: " + root.safeText(root.cellularState.interface || root.cellularState.device || root.cellularIface, "-")
+                color: ui.warning
+                font.pixelSize: layoutConfig.smallTextFontSize
+                elide: Text.ElideRight
+                Layout.leftMargin: 20
+                Layout.rightMargin: 20
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.leftMargin: 20
+                Layout.rightMargin: 20
+                Layout.bottomMargin: 20
+                Layout.fillWidth: true
+                spacing: layoutConfig.cellularFormColumnSpacing
+
+                AppButton {
+                    text: "Cancel"
+                    baseColor: ui.panel2
+                    buttonHeight: layoutConfig.cellularButtonHeight
+                    buttonRadius: layoutConfig.buttonRadius
+                    buttonFontSize: layoutConfig.buttonFontSize
+                    Layout.fillWidth: true
+                    enabled: !root.cellularResetBusy
+                    onClicked: resetModemConfirmPopup.close()
+                }
+
+                AppButton {
+                    text: root.cellularResetBusy ? "Restarting..." : "Restart Now"
+                    baseColor: ui.warning
+                    buttonHeight: layoutConfig.cellularButtonHeight
+                    buttonRadius: layoutConfig.buttonRadius
+                    buttonFontSize: layoutConfig.buttonFontSize
+                    busy: root.cellularResetBusy
+                    busyIndicatorSize: layoutConfig.busyIndicatorSize
+                    Layout.fillWidth: true
+                    enabled: root.showCellularControls && !root.cellularResetBusy
+                    onClicked: {
+                        resetModemConfirmPopup.close()
+                        root.cellularResetModemRequested()
+                    }
                 }
             }
         }

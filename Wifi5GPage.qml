@@ -64,6 +64,7 @@ Item {
     property alias modemList: pageView.modemList
     property alias cellularMessage: pageView.cellularMessage
     property alias cellularModuleLogs: pageView.cellularModuleLogs
+    property alias cellularResetBusy: pageView.cellularResetBusy
 
     signal requestToast(string text)
 
@@ -1041,6 +1042,38 @@ Item {
         networkBackend.disconnectCellular("cellular-5g")
     }
 
+    function restartCellularModem() {
+        if (!showCellularControls)
+            return
+
+        if (cellularResetBusy) {
+            requestToast("5G modem restart is already running")
+            return
+        }
+
+        cellularResetBusy = true
+        cellularMessage = "Restarting 5G modem..."
+        requestToast(cellularMessage)
+        cellularResetTimeoutTimer.restart()
+
+        if (mainWindowBackend && mainWindowBackend.scheduleReset5GModemNoReboot) {
+            // Manual confirm already happened in QML, so run immediately.
+            mainWindowBackend.scheduleReset5GModemNoReboot(0)
+            return
+        }
+
+        // Fallback for projects that expose the same object as Backend instead of mainWindows.
+        if (typeof Backend !== "undefined" && Backend && Backend.scheduleReset5GModemNoReboot) {
+            Backend.scheduleReset5GModemNoReboot(0)
+            return
+        }
+
+        cellularResetTimeoutTimer.stop()
+        cellularResetBusy = false
+        cellularMessage = "5G modem restart function is not available"
+        requestToast(cellularMessage)
+    }
+
     function applyBackendMessage(obj) {
         if (!obj || typeof obj !== "object")
             return
@@ -1299,6 +1332,22 @@ Item {
         }
     }
 
+    Timer {
+        id: cellularResetTimeoutTimer
+        interval: 180000
+        repeat: false
+
+        onTriggered: {
+            if (!root.cellularResetBusy)
+                return
+
+            root.cellularResetBusy = false
+            root.cellularMessage = "5G modem restart timeout. Please check modem status."
+            root.requestToast(root.cellularMessage)
+            root.refreshCellularStatus()
+        }
+    }
+
     Connections {
         target: root.mainWindowBackend
         ignoreUnknownSignals: true
@@ -1311,6 +1360,23 @@ Item {
                 return
             }
             root.applyBackendMessage(obj)
+        }
+
+        function onReset5GModemStarted() {
+            root.cellularResetBusy = true
+            root.cellularMessage = "Restarting 5G modem..."
+            root.cellularResetTimeoutTimer.restart()
+            root.requestToast(root.cellularMessage)
+        }
+
+        function onReset5GModemFinished(ready) {
+            root.cellularResetTimeoutTimer.stop()
+            root.cellularResetBusy = false
+            root.cellularMessage = ready
+                    ? "5G modem restarted successfully"
+                    : "5G modem restart failed"
+            root.refreshCellularStatus()
+            root.requestToast(root.cellularMessage)
         }
     }
 
@@ -1373,6 +1439,7 @@ Item {
             root.connectCellular(apn, iface, autoConnect)
         }
         onCellularDisconnectRequested: root.disconnectCellular()
+        onCellularResetModemRequested: root.restartCellularModem()
         onCellularListModemsRequested: root.listModems()
     }
 }
