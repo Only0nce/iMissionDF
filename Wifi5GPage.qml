@@ -1,4 +1,4 @@
-import QtQuick 2.15
+import QtQuick 2.12
 
 Item {
     id: root
@@ -19,11 +19,34 @@ Item {
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? hardwareHas5G : HardwareHasWireless
     property string hardwareVersionName: (typeof HardwareVersionName === "undefined") ? "5G" : HardwareVersionName
     property bool useBackendJson: true
+
+    property string initialNetworkPage: "wifi"
+    property bool forceSingleNetworkPage: false
+    property bool hideInternalNetworkTabs: false
+
+    // KP-6JUL2026 : Scope runtime work to the host page.
+    // "wifi" means WiFi scan/status/connect/config are allowed only while the WiFi page is active.
+    // "cellular" prevents the 5G page from starting any WiFi work during component creation.
+    // "auto" keeps compatibility for standalone use and follows selectedNetworkPage.
+    property string pageScope: "auto"
+
     readonly property bool showWifiControls: hardwareHasWireless && hardwareHasWifi
     readonly property bool showCellularControls: hardwareHasWireless && hardwareHas5G
     readonly property int networkGridColumns: showCellularControls && root.width > 1200 ? 2 : 1
     readonly property int networkCardHeight: showCellularControls ? 620 : Math.max(620, root.height - 220)
     property alias selectedNetworkPage: pageView.selectedNetworkPage
+
+    readonly property bool wifiPageActive:
+        root.visible && root.showWifiControls
+        && (root.pageScope === "wifi"
+            || (root.pageScope === "auto" && root.selectedNetworkPage === "wifi"))
+    readonly property bool cellularPageActive:
+        root.visible && root.showCellularControls
+        && (root.pageScope === "cellular"
+            || (root.pageScope === "auto" && root.selectedNetworkPage === "cellular"))
+
+    property bool wifiRuntimeStarted: false
+    property bool cellularRuntimeStarted: false
 
     property alias wifiEnabled: pageView.wifiEnabled
     property alias wifiIface: pageView.wifiIface
@@ -96,6 +119,49 @@ Item {
         return target
     }
 
+    function normalizeWifiRows(rows) {
+        var out = []
+        if (!rows)
+            return out
+
+        for (var i = 0; i < rows.length; ++i) {
+            var src = rows[i]
+            if (!src)
+                continue
+
+            var row = copyObject(src)
+            var profileName = safeText(row.profile_name || row.connection || row.connection_name || row.profileName, "")
+            var saved = (row.saved === true || row.known === true || row.configured === true ||
+                         row.profileExists === true || row.remembered === true ||
+                         row.previouslyConnected === true || row.autoConnect === true ||
+                         row.connectedBefore === true || row.isSaved === true ||
+                         row.hasProfile === true || profileName.length > 0)
+
+            row.saved = saved
+            row.known = saved
+            row.previouslyConnected = saved
+            row.hasProfile = saved
+            row.hasSavedSecret = saved
+            // Never expose saved WiFi passwords to QML UI. NetworkManager/backend owns stored secrets.
+            if (row.password !== undefined) row.password = ""
+            if (row.savedPassword !== undefined) row.savedPassword = ""
+            if (row.psk !== undefined) row.psk = ""
+            if (row.profile_name === undefined && profileName.length > 0)
+                row.profile_name = profileName
+            if (row.connection === undefined && profileName.length > 0)
+                row.connection = profileName
+            if (row.signal === undefined && row.strength !== undefined)
+                row.signal = row.strength
+            if (row.signal === undefined && row.rssi !== undefined)
+                row.signal = row.rssi
+            if (row.security === undefined && row.sec !== undefined)
+                row.security = row.sec
+
+            out.push(row)
+        }
+        return out
+    }
+
 
     function isObjectValue(value) {
         return value !== undefined && value !== null && typeof value === "object" && !Array.isArray(value)
@@ -130,11 +196,16 @@ Item {
     function applyCellularStateUpdate(value) {
         var payload = extractStatusPayload(value)
         cellularState = mergeObjectCache(cellularState, payload)
+        console.log("[5G] status map", JSON.stringify(cellularState))
     }
 
     function applyWifiStateUpdate(value) {
+        if (!root.wifiPageActive)
+            return
+
         var payload = extractStatusPayload(value)
         wifiState = mergeObjectCache(wifiState, payload)
+        console.log("[WiFi] state map", JSON.stringify(wifiState))
     }
 
     function stopCellularRealtime() {
@@ -197,6 +268,9 @@ Item {
     }
 
     function applyWifiAdvancedInfo(info) {
+        if (!root.wifiPageActive)
+            return
+
         var data = info || {}
         wifiAdvancedConnectionName = safeText(data.connection_name || data.profileName, wifiProfileName)
         if (wifiAdvancedConnectionName.length > 0)
@@ -351,6 +425,113 @@ Item {
             selectedNetworkPage = "wifi"
     }
 
+    function isWifiBackendMenuId(menuId) {
+        return menuId === "wifiScan"
+                || menuId === "scan"
+                || menuId === "wifiStatus"
+                || menuId === "wifi_state"
+                || menuId === "wifi_toggle"
+                || menuId === "forget"
+                || menuId === "wifi_password"
+                || menuId === "advinfo"
+                || menuId === "apply_ipv4"
+                || menuId === "wifi_advanced_save"
+                || menuId === "wifiOperationResult"
+    }
+
+    function deactivateWifiPageRuntime() {
+        stopWifiAutoRescan()
+        wifiConnectTimeoutTimer.stop()
+        wifiToggleTimeoutTimer.stop()
+        wifiForgetTimeoutTimer.stop()
+
+        if (!wifiRuntimeStarted)
+            return
+
+        wifiRuntimeStarted = false
+        wifiConnectBusy = false
+        wifiToggleBusy = false
+        wifiForgetBusy = false
+        wifiAdvancedBusy = false
+        pendingWifiAction = ""
+        wifiPassword = ""
+
+        if (wifiAdvancedVisible)
+            pageView.closeWifiAdvancedPanel()
+
+        console.log("[WiFiPageScope] STOP page-only WiFi runtime")
+    }
+
+    function activateWifiPageRuntime() {
+        if (!root.wifiPageActive || wifiRuntimeStarted)
+            return
+
+        wifiRuntimeStarted = true
+        console.log("[WiFiPageScope] START page-only WiFi runtime")
+
+        if (!designMode) {
+            refreshWifiConfig()
+            refreshWifiStatus()
+            refreshWifiNow()
+        }
+
+        startWifiAutoRescan()
+    }
+
+    function deactivateCellularPageRuntime() {
+        if (!cellularRuntimeStarted)
+            return
+
+        cellularRuntimeStarted = false
+        stopCellularRealtime()
+    }
+
+    function activateCellularPageRuntime() {
+        if (!root.cellularPageActive || cellularRuntimeStarted)
+            return
+
+        cellularRuntimeStarted = true
+
+        if (!designMode) {
+            refreshCellularConfig()
+            refreshCellularStatus()
+        }
+    }
+
+    function refreshActivePage() {
+        if (!root.hardwareHasWireless) {
+            deactivateWifiPageRuntime()
+            deactivateCellularPageRuntime()
+            return
+        }
+
+        if (root.wifiPageActive) {
+            refreshWifiConfig()
+            refreshWifiStatus()
+            refreshWifiNow()
+            return
+        }
+
+        if (root.cellularPageActive) {
+            refreshCellularConfig()
+            refreshCellularStatus()
+        }
+    }
+
+    function syncPageRuntime() {
+        ensureValidSelectedPage()
+
+        if (root.wifiPageActive)
+            activateWifiPageRuntime()
+        else
+            deactivateWifiPageRuntime()
+
+        if (root.cellularPageActive)
+            activateCellularPageRuntime()
+        else
+            deactivateCellularPageRuntime()
+    }
+
     function sendBackendCommand(obj) {
         if (useBackendJson && mainWindowBackend && mainWindowBackend.cppSubmitTextFiled) {
             mainWindowBackend.cppSubmitTextFiled(JSON.stringify(obj))
@@ -360,7 +541,7 @@ Item {
     }
 
     function requestSavedWifiPassword(iface, ssid, bssid, profileName) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var targetSsid = safeText(ssid, wifiSsid)
@@ -396,12 +577,8 @@ Item {
     }
 
     function refreshWifiConfig() {
-        if (!root.showWifiControls) {
-            wifiIface = ""
-            wifiSsid = ""
-            wifiAutoConnect = false
+        if (!root.wifiPageActive)
             return
-        }
 
         if (!networkBackend) {
             wifiIface = safeText(wifiIface, "wlP9p1s0")
@@ -417,12 +594,8 @@ Item {
     }
 
     function refreshWifiStatus() {
-        if (!root.showWifiControls) {
-            wifiState = {}
-            wifiEnabled = false
-            selectedWifiConnected = false
+        if (!root.wifiPageActive)
             return
-        }
 
         if (sendBackendCommand({"menuID": "wifi_state", "iface": wifiIface}))
             return
@@ -446,11 +619,14 @@ Item {
     }
 
     function applyWifiScanData(scanData, envelope) {
+        if (!root.wifiPageActive)
+            return
+
         var data = scanData || {}
         var source = envelope || {}
         wifiEnabled = data.enabled === undefined ? wifiEnabled : data.enabled
         wifiIface = safeText(data.device || data.interface || source.device || source.iface, wifiIface)
-        wifiList = data.rows || source.rows || source.networks || []
+        wifiList = normalizeWifiRows(data.rows || source.rows || source.networks || [])
 
         var nextWifiState = copyObject(wifiState)
         if (data.active_ssid !== undefined)
@@ -469,12 +645,23 @@ Item {
         wifiState = nextWifiState
         updateSelectedWifiKnownFromList()
 
+        for (var logIndex = 0; logIndex < wifiList.length; ++logIndex) {
+            var logRow = wifiList[logIndex]
+            console.log("[WiFi] scan item:", safeText(logRow.ssid, "Hidden"),
+                        "signal:", safeText(logRow.signal, ""),
+                        "saved:", logRow.saved === true,
+                        "active:", logRow.active === true)
+        }
+
         wifiMessage = wifiList.length > 0
                 ? ("Found " + wifiList.length + " network(s)")
                 : safeText(source.message || data.message || data.error, "No WiFi networks found")
     }
 
     function updateSelectedWifiKnownFromList() {
+        if (!root.wifiPageActive)
+            return
+
         var matched = false
         var selectedSsid = safeText(wifiSsid, "")
         var activeSsid = safeText(wifiState.ssid || wifiState.connection || wifiState.active_ssid, "")
@@ -505,9 +692,7 @@ Item {
     }
 
     function scanWifi() {
-        if (!root.showWifiControls) {
-            wifiList = []
-            wifiMessage = ""
+        if (!root.wifiPageActive) {
             stopWifiAutoRescan()
             return
         }
@@ -527,10 +712,7 @@ Item {
     }
 
     function refreshWifiNow() {
-        if (!root.showWifiControls)
-            return
-
-        if (!root.visible && !designMode)
+        if (!root.wifiPageActive)
             return
 
         // The automatic page timer uses the same scan path as the manual Scan button.
@@ -539,11 +721,11 @@ Item {
     }
 
     function startWifiAutoRescan() {
-        if (!root.showWifiControls || designMode || !root.visible)
+        if (!root.wifiPageActive || designMode)
             return
 
-        // This timer runs only while the WiFi/5G page is visible.
-        // Do not move it to app startup; background scanning wastes WiFi/CPU resources.
+        // KP-6JUL2026 : The timer belongs to the WiFi page lifecycle only.
+        // LAN and 5G pages must never keep NetworkManager WiFi scans running.
         if (!wifiAutoRescanTimer.running)
             wifiAutoRescanTimer.start()
     }
@@ -650,40 +832,18 @@ Item {
     }
 
     function refreshAll() {
-        if (!root.hardwareHasWireless) {
-            stopWifiAutoRescan()
-            wifiList = []
-            wifiState = {}
-            wifiEnabled = false
-            wifiMessage = ""
-            cellularState = {}
-            modemList = []
-            cellularModuleLogs = []
-            cellularMessage = ""
-            return
-        }
-
-        if (sendBackendCommand({"menuID": "getWifi5GPage"}))
-            return
-
-        if (!networkBackend) {
+        // Compatibility entry point used by Wifi5GView. Runtime work is intentionally
+        // page-scoped; never request the old combined getWifi5GPage snapshot here.
+        if (designMode) {
             applyMockData()
             return
         }
 
-        if (root.showWifiControls) {
-            refreshWifiConfig()
-            refreshWifiStatus()
-        }
-        if (root.showCellularControls) {
-            refreshCellularConfig()
-            refreshCellularStatus()
-        }
-        ensureValidSelectedPage()
+        refreshActivePage()
     }
 
     function toggleWifi(on) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var nextEnabled = on === undefined ? !wifiEnabled : on
@@ -714,7 +874,7 @@ Item {
     }
 
     function connectWifi(iface, ssid, password, bssid, autoConnect) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var targetIface = safeText(iface, wifiIface)
@@ -730,19 +890,22 @@ Item {
 
         wifiIface = targetIface
         wifiSsid = targetSsid
-        wifiPassword = targetPassword
         wifiBssid = targetBssid
         wifiAutoConnect = targetAutoConnect
+        console.log("[WiFiBackendBridge] connect ssid:", targetSsid, "iface:", targetIface, "bssid:", targetBssid, "password_set:", safeText(targetPassword, "").length > 0)
         startWifiConnectBusy("connect")
         wifiMessage = "Connecting..."
-        if (sendBackendCommand({
+        var joinPayload = {
             "menuID": "join",
             "iface": targetIface,
             "ssid": targetSsid,
             "password": targetPassword,
             "bssid": targetBssid,
             "autoConnect": targetAutoConnect
-        })) {
+        }
+        // Password is kept only in this local payload and is never logged. Clear QML storage immediately after dispatch.
+        if (sendBackendCommand(joinPayload)) {
+            wifiPassword = ""
             return
         }
 
@@ -756,6 +919,7 @@ Item {
                 "enabled": wifiEnabled
             }
             selectedWifiConnected = true
+            wifiPassword = ""
             wifiMessage = "Connected to " + targetSsid + " (mock)"
             requestToast(wifiMessage)
             clearWifiConnectBusy()
@@ -763,10 +927,11 @@ Item {
         }
 
         networkBackend.connectWifi(targetIface, targetSsid, targetPassword, targetAutoConnect, targetBssid)
+        wifiPassword = ""
     }
 
     function disconnectWifi(iface) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var targetIface = safeText(iface, wifiIface)
@@ -792,7 +957,7 @@ Item {
     }
 
     function forgetWifi(iface, ssid, bssid, profileName) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var targetIface = safeText(iface, wifiIface)
@@ -807,6 +972,7 @@ Item {
         wifiSsid = targetSsid
         wifiBssid = targetBssid
         wifiProfileName = targetProfileName
+        console.log("[WiFiBackendBridge] forget ssid:", targetSsid, "profile:", targetProfileName, "bssid:", targetBssid)
         startWifiForgetBusy()
         wifiMessage = "Forgetting saved WiFi profile..."
 
@@ -855,7 +1021,7 @@ Item {
     }
 
     function openWifiAdvanced(iface, ssid, bssid, profileName) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var targetIface = safeText(iface, wifiIface)
@@ -863,11 +1029,14 @@ Item {
         var targetBssid = safeText(bssid, wifiBssid)
         var targetProfileName = safeText(profileName, wifiProfileName)
 
-        if (targetSsid.length === 0 || !selectedWifiConnected) {
-            wifiMessage = "Advanced settings are available only for the connected network."
+        if (targetSsid.length === 0) {
+            wifiMessage = "Select a WiFi network first."
             requestToast(wifiMessage)
             return
         }
+
+        if (targetProfileName.length === 0)
+            targetProfileName = targetSsid
 
         wifiIface = targetIface
         wifiSsid = targetSsid
@@ -913,10 +1082,11 @@ Item {
     }
 
     function saveWifiAdvanced(settings) {
-        if (!root.showWifiControls)
+        if (!root.wifiPageActive)
             return
 
         var payload = settings || {}
+        console.log("[WiFiBackendBridge] apply IPv4 config:", safeText(payload.ssid, wifiSsid), safeText(payload.ipv4Mode, wifiAdvancedIpv4Mode), safeText(payload.ipAddress, wifiAdvancedIpAddress), safeText(payload.subnetMask, wifiAdvancedSubnetMask), safeText(payload.gateway, wifiAdvancedGateway), "dnsAuto:", payload.dnsAutomatic === undefined ? wifiAdvancedDnsAutomatic : payload.dnsAutomatic)
         wifiAdvancedBusy = true
         wifiAdvancedMessage = "Saving advanced WiFi settings..."
 
@@ -1096,33 +1266,43 @@ Item {
             if (!root.hardwareHasWireless)
                 return
 
-            if (obj.wifiConfig) {
-                wifiIface = safeText(obj.wifiConfig.interface, wifiIface)
-                wifiSsid = safeText(obj.wifiConfig.ssid, wifiSsid)
-                wifiAutoConnect = obj.wifiConfig.autoConnect === undefined ? wifiAutoConnect : obj.wifiConfig.autoConnect
+            if (root.wifiPageActive) {
+                if (obj.wifiConfig) {
+                    wifiIface = safeText(obj.wifiConfig.interface, wifiIface)
+                    wifiSsid = safeText(obj.wifiConfig.ssid, wifiSsid)
+                    wifiAutoConnect = obj.wifiConfig.autoConnect === undefined ? wifiAutoConnect : obj.wifiConfig.autoConnect
+                }
+
+                if (obj.wifiStatus) {
+                    wifiState = obj.wifiStatus
+                    wifiEnabled = obj.wifiStatus.enabled === undefined ? wifiEnabled : obj.wifiStatus.enabled
+                }
+
+                updateSelectedWifiKnownFromList()
             }
 
-            if (obj.wifiStatus) {
-                wifiState = obj.wifiStatus
-                wifiEnabled = obj.wifiStatus.enabled === undefined ? wifiEnabled : obj.wifiStatus.enabled
+            if (root.cellularPageActive) {
+                if (obj.cellularConfig) {
+                    cellularIface = safeText(obj.cellularConfig.interface, cellularIface)
+                    cellularApn = safeText(obj.cellularConfig.apn, cellularApn)
+                    cellularAutoConnect = obj.cellularConfig.autoConnect === undefined ? cellularAutoConnect : obj.cellularConfig.autoConnect
+                }
+
+                if (obj.cellularStatus)
+                    applyCellularStateUpdate(obj.cellularStatus)
+
+                if (obj.modems)
+                    modemList = obj.modems
+
+                if (obj.moduleLogs || obj.cellularModuleLogs)
+                    cellularModuleLogs = obj.moduleLogs || obj.cellularModuleLogs
             }
 
-            if (obj.cellularConfig) {
-                cellularIface = safeText(obj.cellularConfig.interface, cellularIface)
-                cellularApn = safeText(obj.cellularConfig.apn, cellularApn)
-                cellularAutoConnect = obj.cellularConfig.autoConnect === undefined ? cellularAutoConnect : obj.cellularConfig.autoConnect
-            }
+            return
+        }
 
-            if (obj.cellularStatus)
-                applyCellularStateUpdate(obj.cellularStatus)
-
-            if (obj.modems)
-                modemList = obj.modems
-
-            if (obj.moduleLogs || obj.cellularModuleLogs)
-                cellularModuleLogs = obj.moduleLogs || obj.cellularModuleLogs
-
-            updateSelectedWifiKnownFromList()
+        if (isWifiBackendMenuId(obj.menuID) && !root.wifiPageActive) {
+            console.log("[WiFiPageScope] Ignore WiFi backend message outside WiFi page:", obj.menuID)
             return
         }
 
@@ -1182,10 +1362,9 @@ Item {
             var passwordProfile = safeText(passwordData.connection_name || obj.profileName, "")
             if ((passwordSsid.length === 0 || passwordSsid === wifiSsid)
                     && (passwordProfile.length === 0 || passwordProfile === wifiProfileName)) {
-                wifiPassword = passwordData.ok && safeText(passwordData.password, "").length > 0
-                        ? safeText(passwordData.password, "")
-                        : ""
-                selectedWifiHasPassword = wifiPassword.length > 0
+                // Do not copy saved secrets into QML. Keep only a boolean proof that backend has a saved secret/profile.
+                selectedWifiHasPassword = passwordData.ok && (safeText(passwordData.password, "").length > 0 || passwordData.hasPassword === true || passwordData.hasSavedSecret === true)
+                wifiPassword = ""
             }
             return
         }
@@ -1234,43 +1413,35 @@ Item {
     }
 
     onVisibleChanged: {
-        if (visible) {
-            if (!root.hardwareHasWireless) {
-                stopWifiAutoRescan()
-                return
-            }
-            if (!designMode) {
-                refreshAll()
-                if (root.showWifiControls)
-                    refreshWifiNow()
-            }
-            if (root.showWifiControls)
-                startWifiAutoRescan()
-        } else {
-            stopWifiAutoRescan()
-            stopCellularRealtime()
-        }
+        Qt.callLater(root.syncPageRuntime)
+    }
+
+    onWifiPageActiveChanged: {
+        Qt.callLater(root.syncPageRuntime)
+    }
+
+    onCellularPageActiveChanged: {
+        Qt.callLater(root.syncPageRuntime)
+    }
+
+    onPageScopeChanged: {
+        Qt.callLater(root.syncPageRuntime)
     }
 
     Component.onCompleted: {
-        if (designMode) {
+        if (designMode)
             applyMockData()
-        } else {
-            refreshAll()
-            if (root.showWifiControls)
-                refreshWifiNow()
-        }
+
         ensureValidSelectedPage()
-        if (root.showWifiControls)
-            startWifiAutoRescan()
+
+        // Defer one event-loop turn so Wifi5GSetting.qml can apply pageScope first.
+        // This prevents a 5G page from briefly starting the default WiFi scan path.
+        Qt.callLater(root.syncPageRuntime)
     }
 
     Component.onDestruction: {
-        stopWifiAutoRescan()
-        stopCellularRealtime()
-        wifiConnectTimeoutTimer.stop()
-        wifiToggleTimeoutTimer.stop()
-        wifiForgetTimeoutTimer.stop()
+        deactivateWifiPageRuntime()
+        deactivateCellularPageRuntime()
     }
 
     Timer {
@@ -1280,7 +1451,7 @@ Item {
         running: false
 
         onTriggered: {
-            if (root.visible && root.showWifiControls)
+            if (root.wifiPageActive)
                 root.refreshWifiNow()
             else
                 root.stopWifiAutoRescan()
@@ -1293,7 +1464,7 @@ Item {
         repeat: false
 
         onTriggered: {
-            if (!root.wifiConnectBusy)
+            if (!root.wifiPageActive || !root.wifiConnectBusy)
                 return
             root.clearWifiConnectBusy()
             root.wifiMessage = "WiFi connect/disconnect timed out"
@@ -1308,7 +1479,7 @@ Item {
         repeat: false
 
         onTriggered: {
-            if (!root.wifiToggleBusy)
+            if (!root.wifiPageActive || !root.wifiToggleBusy)
                 return
             root.clearWifiToggleBusy()
             root.wifiMessage = "WiFi on/off operation timed out"
@@ -1323,7 +1494,7 @@ Item {
         repeat: false
 
         onTriggered: {
-            if (!root.wifiForgetBusy)
+            if (!root.wifiPageActive || !root.wifiForgetBusy)
                 return
             root.clearWifiForgetBusy()
             root.wifiMessage = "WiFi forget operation timed out"
@@ -1385,7 +1556,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onWifiOperationFinished(action, ok, message) {
-            if (!root.showWifiControls)
+            if (!root.wifiPageActive)
                 return
 
             if (action === "connect" || action === "disconnect")
@@ -1397,7 +1568,7 @@ Item {
         }
 
         function onCellularOperationFinished(action, ok, message) {
-            if (!root.showCellularControls)
+            if (!root.cellularPageActive)
                 return
 
             root.cellularMessage = message
@@ -1408,6 +1579,9 @@ Item {
 
     Wifi5GView {
         id: pageView
+        selectedNetworkPage: root.initialNetworkPage
+        forceSingleNetworkPage: root.forceSingleNetworkPage
+        hideInternalNetworkTabs: root.hideInternalNetworkTabs
 
         anchors.fill: parent
         hardwareHas5G: root.hardwareHas5G

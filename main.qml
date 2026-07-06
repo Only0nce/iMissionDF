@@ -47,7 +47,6 @@ Window {
     property bool widgetView: false
     property bool trigerScan: true
     property bool updateListProfiles: false
-
     // //--------------Recoder-----------------------------------
     signal deviceListUpdated()
     property string serverAddress: "127.0.0.1"

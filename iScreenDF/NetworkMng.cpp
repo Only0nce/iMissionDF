@@ -7,6 +7,154 @@
 #include <sstream>
 
 using namespace std;
+
+
+namespace {
+
+QStringList splitNmcliEscapedLine(const QString &line, int limit = 0)
+{
+    QStringList parts;
+    QString current;
+    bool escaped = false;
+
+    for (const QChar ch : line) {
+        if (escaped) {
+            current.append(ch);
+            escaped = false;
+            continue;
+        }
+
+        if (ch == QLatin1Char('\\')) {
+            escaped = true;
+            continue;
+        }
+
+        if (ch == QLatin1Char(':') && (limit <= 0 || parts.size() < limit - 1)) {
+            parts << current;
+            current.clear();
+            continue;
+        }
+
+        current.append(ch);
+    }
+
+    if (escaped)
+        current.append(QLatin1Char('\\'));
+
+    parts << current;
+    return parts;
+}
+
+bool runNmcliBlocking(const QStringList &args, QString *stdOut = nullptr, QString *stdErr = nullptr, int timeoutMs = 30000)
+{
+    QProcess process;
+    process.start(QStringLiteral("nmcli"), args);
+
+    if (!process.waitForStarted(timeoutMs)) {
+        if (stdErr)
+            *stdErr = QStringLiteral("nmcli waitForStarted failed");
+        return false;
+    }
+
+    if (!process.waitForFinished(timeoutMs)) {
+        process.kill();
+        process.waitForFinished(1000);
+        if (stdErr)
+            *stdErr = QStringLiteral("nmcli timeout");
+        return false;
+    }
+
+    if (stdOut)
+        *stdOut = QString::fromUtf8(process.readAllStandardOutput()).trimmed();
+    if (stdErr)
+        *stdErr = QString::fromUtf8(process.readAllStandardError()).trimmed();
+
+    return process.exitStatus() == QProcess::NormalExit && process.exitCode() == 0;
+}
+
+QString findNmConnectionForInterface(const QString &iface)
+{
+    const QString device = iface.trimmed();
+    if (device.isEmpty())
+        return QString();
+
+    QString out;
+    QString err;
+
+    // Prefer an exact deterministic profile name when it already exists.
+    if (runNmcliBlocking({QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME"),
+                          QStringLiteral("connection"), QStringLiteral("show"), device}, &out, &err, 10000)
+            && !out.trimmed().isEmpty()) {
+        return device;
+    }
+
+    // Then prefer the active profile currently bound to this device.
+    if (runNmcliBlocking({QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME,DEVICE"),
+                          QStringLiteral("connection"), QStringLiteral("show"), QStringLiteral("--active")},
+                         &out, &err, 10000)) {
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            const QStringList fields = splitNmcliEscapedLine(line, 2);
+            if (fields.value(1).trimmed() == device)
+                return fields.value(0).trimmed();
+        }
+    }
+
+    // Finally search inactive profiles with connection.interface-name == iface.
+    if (runNmcliBlocking({QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME,connection.interface-name"),
+                          QStringLiteral("connection"), QStringLiteral("show")},
+                         &out, &err, 10000)) {
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            const QStringList fields = splitNmcliEscapedLine(line, 2);
+            if (fields.value(1).trimmed() == device)
+                return fields.value(0).trimmed();
+        }
+    }
+
+    return QString();
+}
+
+QString ensureNmConnectionForInterface(const QString &iface)
+{
+    const QString device = iface.trimmed();
+    if (device.isEmpty())
+        return QString();
+
+    QString connectionName = findNmConnectionForInterface(device);
+    if (!connectionName.isEmpty())
+        return connectionName;
+
+    QString out;
+    QString err;
+    const bool ok = runNmcliBlocking({QStringLiteral("connection"), QStringLiteral("add"),
+                                      QStringLiteral("type"), QStringLiteral("ethernet"),
+                                      QStringLiteral("ifname"), device,
+                                      QStringLiteral("con-name"), device,
+                                      QStringLiteral("connection.interface-name"), device,
+                                      QStringLiteral("connection.autoconnect"), QStringLiteral("yes"),
+                                      QStringLiteral("ipv4.method"), QStringLiteral("auto")},
+                                     &out, &err, 20000);
+    if (!ok)
+        qWarning() << "[NetworkMng] failed to create deterministic ethernet profile" << device << err << out;
+
+    return ok ? device : QString();
+}
+
+bool upNmConnection(const QString &connectionName)
+{
+    const QString profile = connectionName.trimmed();
+    if (profile.isEmpty())
+        return false;
+
+    QString out;
+    QString err;
+    const bool ok = runNmcliBlocking({QStringLiteral("connection"), QStringLiteral("up"), profile},
+                                     &out, &err, 45000);
+    if (!ok)
+        qWarning() << "[NetworkMng] nmcli connection up failed" << profile << err << out;
+    return ok;
+}
+
+}
 NetworkMng::NetworkMng(QObject * parent): QObject(parent) {
     getAddressProcess = new QProcess(this);
     getSystemInfoProcess = new QProcess(this);
@@ -582,7 +730,7 @@ void NetworkMng::setDHCPIpAddr3(const QString &phyNetworkName) {
     getAddressProcess -> waitForFinished();
 
     arguments.clear();
-    arguments << "-c" << QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+    arguments << "-c" << QString("sudo nmcli connection up \"%1\"").arg(connectionName);
     getAddressProcess -> start(prog, arguments);
     getAddressProcess -> waitForFinished();
     arguments.clear();
@@ -692,18 +840,9 @@ bool NetworkMng::checkAddress(const QString &address) {
     return true;
 }
 QString NetworkMng::getCurrentNetworkName(const QString &phyNetworkName) {
-    QProcess process;
-    QStringList arguments;
-    arguments << "-c" << QString("nmcli -t -f NAME,DEVICE connection | grep %1").arg(phyNetworkName);
-
-    process.start("/bin/bash", arguments);
-    process.waitForFinished();
-
-    QString output = process.readAllStandardOutput().trimmed();
-    qDebug() << "getCurrentNetworkName:" << output;
-
-    if (!output.contains(":")) return "";
-    return output.split(":").at(0);
+    const QString connectionName = ensureNmConnectionForInterface(phyNetworkName);
+    qDebug() << "getCurrentNetworkName:" << phyNetworkName << "=>" << connectionName;
+    return connectionName;
 }
 void NetworkMng::setStaticIpAddr3(QString ipaddr, QString netmask,QString gateway,QString dns1,QString dns2,QString phyNetworkName) {
     phyName = phyNetworkName;
@@ -728,7 +867,7 @@ void NetworkMng::setStaticIpAddr3(QString ipaddr, QString netmask,QString gatewa
         qDebug() << "first nmcliCmd " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         qDebug() << "nmcliCmd2 " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
     } else if (((ipaddr != "0.0.0.0") && (gateway != "0.0.0.0") && (dns1 != "0.0.0.0") && (dns2 == "0.0.0.0"))) {
@@ -736,7 +875,7 @@ void NetworkMng::setStaticIpAddr3(QString ipaddr, QString netmask,QString gatewa
         qDebug() << "nmcliCmd " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         qDebug() << "nmcliCmd2 " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
     } else if (((ipaddr != "0.0.0.0") && (gateway != "0.0.0.0") && (dns1 == "0.0.0.0") && (dns2 != "0.0.0.0"))) {
@@ -744,7 +883,7 @@ void NetworkMng::setStaticIpAddr3(QString ipaddr, QString netmask,QString gatewa
         qDebug() << "nmcliCmd " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         qDebug() << "nmcliCmd2 " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
     } else if ((ipaddr != "0.0.0.0") && (gateway != "0.0.0.0") && (dns1 == "0.0.0.0") && (dns2 == "0.0.0.0")) {
@@ -752,20 +891,20 @@ void NetworkMng::setStaticIpAddr3(QString ipaddr, QString netmask,QString gatewa
         qDebug() << "nmcliCmd " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         qDebug() << "nmcliCmd2 " << nmcliCmd;
         system(nmcliCmd.toStdString().c_str());
     } else if ((ipaddr != "0.0.0.0") && (gateway == "0.0.0.0")) {
         QString nmcliCmd = QString("sudo nmcli connection modify \"%1\" ipv4.method manual ipv4.addresses %2/%3").arg(connectionName).arg(ipaddr).arg(netMaskPrefix);
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         system(nmcliCmd.toStdString().c_str());
     } else if (ipaddr != "0.0.0.0") {
         QString nmcliCmd = QString("sudo nmcli connection modify \"%1\" ipv4.method manual ipv4.addresses %2/24").arg(connectionName).arg(ipaddr);
         system(nmcliCmd.toStdString().c_str());
 
-        nmcliCmd = QString("sudo nmcli dev connect %1").arg(phyNetworkName);
+        nmcliCmd = QString("sudo nmcli connection up \"%1\"").arg(connectionName);
         system(nmcliCmd.toStdString().c_str());
     }
     resetNetworknmcli();

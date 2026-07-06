@@ -37,6 +37,10 @@
 #define HARDWARE_HAS_WIRELESS 0
 #endif
 
+#ifndef FEATURE_TOP_NETWORK_DRAWER
+#define FEATURE_TOP_NETWORK_DRAWER 0
+#endif
+
 // -------- iScreenDF --------
 #include "iScreenDF/iScreenDF.h"
 #include "iScreenDF/ImageProviderDF.h"
@@ -156,7 +160,7 @@ static void setupRuntimeEnv()
         qputenv("QTWEBGL_PORT", QByteArray("8081"));
     }
 
-    qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
+    // qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
 }
 
 // ======================================================
@@ -174,6 +178,12 @@ int main(int argc, char *argv[])
 
     QGuiApplication app(argc, argv);
     app.setFont(fon);
+
+    // Qt.labs.settings requires stable application identifiers before any
+    // QML Settings object is instantiated.
+    QCoreApplication::setOrganizationName(QStringLiteral("IFZTeam"));
+    QCoreApplication::setOrganizationDomain(QStringLiteral("ifzteam.local"));
+    QCoreApplication::setApplicationName(QStringLiteral("iScanMR10"));
 
 #ifdef PLATFORM_JETSON
     QGuiApplication::setOverrideCursor(QCursor(Qt::BlankCursor));
@@ -212,6 +222,8 @@ int main(int argc, char *argv[])
     qInfo().noquote() << "[HW] Wireless=" << bool(HARDWARE_HAS_WIRELESS)
                       << "WiFi=" << bool(HARDWARE_HAS_WIFI)
                       << "5G=" << bool(HARDWARE_HAS_5G);
+    qInfo().noquote() << "[FEATURE] TopNetworkDrawer="
+                      << bool(FEATURE_TOP_NETWORK_DRAWER);
 
     // ==================================================
     // Register QML Types
@@ -243,6 +255,8 @@ int main(int argc, char *argv[])
 #endif
     engine.rootContext()->setContextProperty("HardwareHasWifi", bool(HARDWARE_HAS_WIFI));
     engine.rootContext()->setContextProperty("HardwareHasWireless", bool(HARDWARE_HAS_WIRELESS));
+    engine.rootContext()->setContextProperty("FeatureTopNetworkDrawer",
+                                             bool(FEATURE_TOP_NETWORK_DRAWER));
     // Runtime QML pages use this context property, while Design mode can omit it.
     engine.rootContext()->setContextProperty("networkController", netCtrl);
 

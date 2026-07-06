@@ -185,6 +185,53 @@ static QStringList splitNmcliEscaped(const QString &line, int limit = 0)
     return parts;
 }
 
+
+static QString findNmEthernetConnectionForInterface(const QString &iface)
+{
+    const QString device = iface.trimmed();
+    if (device.isEmpty())
+        return QString();
+
+    QString out;
+    QString err;
+
+    // Prefer the deterministic profile name when it already exists.
+    if (runProcessBlocking(QStringLiteral("nmcli"),
+                           {QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME"),
+                            QStringLiteral("connection"), QStringLiteral("show"), device},
+                           &out, &err, 10000)
+            && !out.trimmed().isEmpty()) {
+        return device;
+    }
+
+    // Then reuse the profile currently active on this device. This avoids creating
+    // repeated NetworkManager profiles such as iface-<uuid>.nmconnection.
+    if (runProcessBlocking(QStringLiteral("nmcli"),
+                           {QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME,DEVICE"),
+                            QStringLiteral("connection"), QStringLiteral("show"), QStringLiteral("--active")},
+                           &out, &err, 10000)) {
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            const QStringList fields = splitNmcliEscaped(line, 2);
+            if (fields.value(1).trimmed() == device)
+                return fields.value(0).trimmed();
+        }
+    }
+
+    // Finally reuse an inactive Ethernet profile already pinned to this interface.
+    if (runProcessBlocking(QStringLiteral("nmcli"),
+                           {QStringLiteral("-t"), QStringLiteral("-f"), QStringLiteral("NAME,connection.interface-name"),
+                            QStringLiteral("connection"), QStringLiteral("show")},
+                           &out, &err, 10000)) {
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            const QStringList fields = splitNmcliEscaped(line, 2);
+            if (fields.value(1).trimmed() == device)
+                return fields.value(0).trimmed();
+        }
+    }
+
+    return QString();
+}
+
 static bool commandExists(const QString &command)
 {
     QString out, err;
@@ -534,38 +581,163 @@ static QVariantMap parseDeviceIpv4(const QString &iface)
 }
 
 
+static QString readTrimmedTextFile(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return QString();
+
+    return QString::fromUtf8(file.readAll()).trimmed();
+}
+
+static QString friendlyLanStatus(const QString &state,
+                                 const QString &carrier,
+                                 const QString &flags)
+{
+    const QString s = state.trimmed().toLower();
+    const QString c = carrier.trimmed().toLower();
+    const QString f = flags.trimmed().toLower();
+
+    if (c == QStringLiteral("0") || c == QStringLiteral("off"))
+        return QStringLiteral("No cable");
+
+    if (s.contains(QStringLiteral("connected")) ||
+        s == QStringLiteral("up") ||
+        s == QStringLiteral("1") ||
+        c == QStringLiteral("1") ||
+        c == QStringLiteral("on") ||
+        f.contains(QStringLiteral("lower_up"))) {
+        return QStringLiteral("Connected");
+    }
+
+    if (s.contains(QStringLiteral("unavailable")))
+        return QStringLiteral("No cable");
+
+    if (s.contains(QStringLiteral("disconnected")) ||
+        s == QStringLiteral("down") ||
+        f.contains(QStringLiteral("no-carrier"))) {
+        return QStringLiteral("Disconnected");
+    }
+
+    if (!state.trimmed().isEmpty())
+        return state.trimmed();
+
+    return QStringLiteral("Unknown");
+}
+
+static void mergeSysfsLanInfo(QVariantMap &result, const QString &iface)
+{
+    const QString base = QStringLiteral("/sys/class/net/%1/").arg(iface);
+
+    const QString mac = readTrimmedTextFile(base + QStringLiteral("address"));
+    if (!mac.isEmpty()) {
+        result[QStringLiteral("mac")] = mac;
+        result[QStringLiteral("macAddress")] = mac;
+        result[QStringLiteral("address")] = mac;
+    }
+
+    const QString operState = readTrimmedTextFile(base + QStringLiteral("operstate"));
+    const QString carrier = readTrimmedTextFile(base + QStringLiteral("carrier"));
+    const QString speed = readTrimmedTextFile(base + QStringLiteral("speed"));
+    const QString duplex = readTrimmedTextFile(base + QStringLiteral("duplex"));
+
+    if (!operState.isEmpty()) {
+        result[QStringLiteral("operstate")] = operState;
+        if (!result.contains(QStringLiteral("state")))
+            result[QStringLiteral("state")] = operState;
+    }
+
+    if (!carrier.isEmpty()) {
+        result[QStringLiteral("carrier")] = carrier;
+        result[QStringLiteral("carrierOn")] = (carrier == QStringLiteral("1"));
+    }
+
+    if (!speed.isEmpty() && speed != QStringLiteral("-1")) {
+        const QString speedText = speed.endsWith(QStringLiteral("Mb/s"))
+                                  ? speed
+                                  : QStringLiteral("%1 Mb/s").arg(speed);
+        result[QStringLiteral("speed")] = speedText;
+        result[QStringLiteral("linkSpeed")] = speedText;
+    }
+
+    if (!duplex.isEmpty())
+        result[QStringLiteral("duplex")] = duplex.left(1).toUpper() + duplex.mid(1).toLower();
+}
+
 static QVariantMap parseDeviceShow(const QString &iface)
 {
     QVariantMap result;
+    result[QStringLiteral("iface")] = iface;
+    result[QStringLiteral("interface")] = iface;
 
     QString out, err;
     if (!runProcessBlocking(QStringLiteral("nmcli"),
                             {QStringLiteral("device"), QStringLiteral("show"), iface},
                             &out, &err, 10000)) {
         result[QStringLiteral("error")] = err.isEmpty() ? out : err;
+        mergeSysfsLanInfo(result, iface);
+        result[QStringLiteral("status")] = friendlyLanStatus(
+            result.value(QStringLiteral("state")).toString(),
+            result.value(QStringLiteral("carrier")).toString(),
+            result.value(QStringLiteral("flags")).toString());
+        result[QStringLiteral("link")] = result.value(QStringLiteral("status"));
+        result[QStringLiteral("linkStatus")] = result.value(QStringLiteral("status"));
         return result;
     }
 
-    QRegExp ipRegex(QStringLiteral("IP4.ADDRESS\\[\\d+\\]:\\s+([\\d.]+)/\\d+"));
+    QRegExp ipRegex(QStringLiteral("IP4.ADDRESS\\[\\d+\\]:\\s+([\\d.]+)/(\\d+)"));
     QRegExp gwRegex(QStringLiteral("IP4.GATEWAY:\\s+([\\d.]+)"));
     QRegExp dnsRegex(QStringLiteral("IP4.DNS\\[\\d+\\]:\\s+([\\d.]+)"));
     QRegExp stateRegex(QStringLiteral("GENERAL.STATE:\\s+(.+)"));
     QRegExp connRegex(QStringLiteral("GENERAL.CONNECTION:\\s+(.+)"));
+    QRegExp macRegex(QStringLiteral("GENERAL.HWADDR:\\s+(.+)"));
+    QRegExp typeRegex(QStringLiteral("GENERAL.TYPE:\\s+(.+)"));
+    QRegExp mtuRegex(QStringLiteral("GENERAL.MTU:\\s+(\\d+)"));
+    QRegExp speedRegex(QStringLiteral("GENERAL.SPEED:\\s+(.+)"));
+    QRegExp carrierRegex(QStringLiteral("WIRED-PROPERTIES.CARRIER:\\s+(.+)"));
 
     QStringList dnsList;
     for (const QString &line : out.split(QLatin1Char('\n'))) {
         const QString l = line.trimmed();
 
-        if (ipRegex.indexIn(l) != -1)
+        if (ipRegex.indexIn(l) != -1) {
             result[QStringLiteral("ip")] = ipRegex.cap(1);
-        else if (gwRegex.indexIn(l) != -1)
+            result[QStringLiteral("dev_ip4_plain")] = ipRegex.cap(1);
+            result[QStringLiteral("dev_ip4_prefix")] = ipRegex.cap(2);
+            result[QStringLiteral("dev_ip4_address")] = ipRegex.cap(1) + QStringLiteral("/") + ipRegex.cap(2);
+            result[QStringLiteral("netmask")] = prefixToMask(ipRegex.cap(2).toInt());
+            result[QStringLiteral("dev_ip4_netmask")] = result.value(QStringLiteral("netmask"));
+        } else if (gwRegex.indexIn(l) != -1) {
             result[QStringLiteral("gateway")] = gwRegex.cap(1);
-        else if (dnsRegex.indexIn(l) != -1)
+            result[QStringLiteral("dev_ip4_gateway")] = gwRegex.cap(1);
+        } else if (dnsRegex.indexIn(l) != -1) {
             dnsList << dnsRegex.cap(1);
-        else if (stateRegex.indexIn(l) != -1)
+        } else if (stateRegex.indexIn(l) != -1) {
             result[QStringLiteral("state")] = stateRegex.cap(1).trimmed();
-        else if (connRegex.indexIn(l) != -1)
+            result[QStringLiteral("rawState")] = stateRegex.cap(1).trimmed();
+        } else if (connRegex.indexIn(l) != -1) {
             result[QStringLiteral("connection")] = connRegex.cap(1).trimmed();
+        } else if (macRegex.indexIn(l) != -1) {
+            const QString mac = macRegex.cap(1).trimmed();
+            result[QStringLiteral("mac")] = mac;
+            result[QStringLiteral("macAddress")] = mac;
+            result[QStringLiteral("address")] = mac;
+        } else if (typeRegex.indexIn(l) != -1) {
+            result[QStringLiteral("type")] = typeRegex.cap(1).trimmed();
+        } else if (mtuRegex.indexIn(l) != -1) {
+            result[QStringLiteral("mtu")] = mtuRegex.cap(1).trimmed();
+        } else if (speedRegex.indexIn(l) != -1) {
+            const QString speed = speedRegex.cap(1).trimmed();
+            if (!speed.isEmpty() && speed != QStringLiteral("unknown")) {
+                result[QStringLiteral("speed")] = speed;
+                result[QStringLiteral("linkSpeed")] = speed;
+            }
+        } else if (carrierRegex.indexIn(l) != -1) {
+            const QString carrier = carrierRegex.cap(1).trimmed();
+            result[QStringLiteral("carrier")] = carrier;
+            result[QStringLiteral("carrierOn")] = (carrier.compare(QStringLiteral("on"), Qt::CaseInsensitive) == 0 ||
+                                                     carrier == QStringLiteral("1"));
+        }
     }
 
     if (!dnsList.isEmpty())
@@ -585,16 +757,26 @@ static QVariantMap parseDeviceShow(const QString &iface)
         const QString gw = dev.value(QStringLiteral("dev_ip4_gateway")).toString().trimmed();
         const QString mask = dev.value(QStringLiteral("dev_ip4_netmask")).toString().trimmed();
 
-        if (!plainIp.isEmpty() && !result.contains(QStringLiteral("ip")))
+        if (!plainIp.isEmpty())
             result[QStringLiteral("ip")] = plainIp;
-        if (!gw.isEmpty() && !result.contains(QStringLiteral("gateway")))
+        if (!gw.isEmpty())
             result[QStringLiteral("gateway")] = gw;
         if (!mask.isEmpty())
             result[QStringLiteral("netmask")] = mask;
     }
 
+    mergeSysfsLanInfo(result, iface);
+
     if (!result.contains(QStringLiteral("netmask")))
         result[QStringLiteral("netmask")] = QStringLiteral("255.255.255.0");
+
+    const QString status = friendlyLanStatus(result.value(QStringLiteral("state")).toString(),
+                                             result.value(QStringLiteral("carrier")).toString(),
+                                             result.value(QStringLiteral("flags")).toString());
+    result[QStringLiteral("status")] = status;
+    result[QStringLiteral("link")] = status;
+    result[QStringLiteral("linkStatus")] = status;
+    result[QStringLiteral("connected")] = (status == QStringLiteral("Connected"));
 
     return result;
 }
@@ -1376,24 +1558,21 @@ void NetworkController::applyNetworkConfig(const QString &iface,
             nmOk = true;
             nmMsg = QStringLiteral("nmcli skipped for end* iface");
         } else {
-            bool connectionExists = false;
-            {
-                QString out, err;
-                connectionExists = runProcessBlocking("nmcli",
-                                                      {"connection", "show", iface},
-                                                      &out, &err, 10000);
-            }
+            QString connectionName = findNmEthernetConnectionForInterface(iface);
+            const bool connectionExists = !connectionName.isEmpty();
+            if (!connectionExists)
+                connectionName = iface;
 
             if (connectionExists) {
                 if (isDhcp) {
-                    nmOk = nmOk && runNmcliBlocking({ "connection", "modify", iface,
+                    nmOk = nmOk && runNmcliBlocking({ "connection", "modify", connectionName,
                                                      "connection.interface-name", iface,
                                                      "ipv4.method", "auto",
                                                      "ipv4.addresses", "",
                                                      "ipv4.gateway", "",
                                                      "ipv4.dns", "" }, &nmMsg);
                 } else {
-                    nmOk = nmOk && runNmcliBlocking({ "connection", "modify", iface,
+                    nmOk = nmOk && runNmcliBlocking({ "connection", "modify", connectionName,
                                                      "connection.interface-name", iface,
                                                      "ipv4.method", "manual",
                                                      "ipv4.addresses", ipNorm,
@@ -1404,14 +1583,16 @@ void NetworkController::applyNetworkConfig(const QString &iface,
                 if (isDhcp) {
                     nmOk = nmOk && runNmcliBlocking({ "connection", "add", "type", "ethernet",
                                                      "ifname", iface,
-                                                     "con-name", iface,
+                                                     "con-name", connectionName,
                                                      "connection.interface-name", iface,
+                                                     "connection.autoconnect", "yes",
                                                      "ipv4.method", "auto" }, &nmMsg);
                 } else {
                     nmOk = nmOk && runNmcliBlocking({ "connection", "add", "type", "ethernet",
                                                      "ifname", iface,
-                                                     "con-name", iface,
+                                                     "con-name", connectionName,
                                                      "connection.interface-name", iface,
+                                                     "connection.autoconnect", "yes",
                                                      "ipv4.method", "manual",
                                                      "ipv4.addresses", ipNorm,
                                                      "ipv4.gateway", gwNorm,
@@ -1419,7 +1600,7 @@ void NetworkController::applyNetworkConfig(const QString &iface,
                 }
             }
 
-            nmOk = nmOk && runNmcliBlocking({ "connection", "up", iface }, &nmMsg);
+            nmOk = nmOk && runNmcliBlocking({ "connection", "up", connectionName }, &nmMsg);
             if (nmMsg.isEmpty())
                 nmMsg = nmOk ? QStringLiteral("nmcli applied OK") : QStringLiteral("nmcli apply failed");
         }
@@ -1453,42 +1634,204 @@ void NetworkController::saveConfigToJson(const QJsonObject &obj)
 // ============================================================
 // LAN config load
 // ============================================================
+static int lanKeyOrder(const QString &key)
+{
+    if (key == QStringLiteral("lan1"))   return 0;
+    if (key == QStringLiteral("lan2"))   return 1;
+    if (key == QStringLiteral("rfsoc1")) return 2;
+    if (key == QStringLiteral("rfsoc2")) return 3;
+    return 100;
+}
+
+static QString lanDisplayNameFromKey(const QString &key, int fallbackIndex)
+{
+    if (key == QStringLiteral("lan1"))   return QStringLiteral("LAN1");
+    if (key == QStringLiteral("lan2"))   return QStringLiteral("LAN2");
+    if (key == QStringLiteral("rfsoc1")) return QStringLiteral("LAN3");
+    if (key == QStringLiteral("rfsoc2")) return QStringLiteral("LAN4");
+
+    if (fallbackIndex >= 0 && fallbackIndex < 100)
+        return QStringLiteral("LAN%1").arg(fallbackIndex + 1);
+
+    return key.toUpper();
+}
+
+static QStringList dnsListFromJsonValue(const QJsonValue &dnsVal)
+{
+    QString dnsText;
+    if (dnsVal.isArray()) {
+        QStringList tmp;
+        for (const QJsonValue &v : dnsVal.toArray()) {
+            const QString d = v.toString().trimmed();
+            if (!d.isEmpty())
+                tmp << d;
+        }
+        dnsText = tmp.join(',');
+    } else {
+        dnsText = dnsVal.toString().trimmed();
+    }
+
+    dnsText.replace(';', ',');
+    dnsText.replace(' ', ',');
+    QStringList dnsParts;
+    for (const QString &part : dnsText.split(',', QString::SkipEmptyParts)) {
+        const QString d = part.trimmed();
+        if (!d.isEmpty())
+            dnsParts << d;
+    }
+    return dnsParts;
+}
+
+static void mergeNonEmpty(QVariantMap &dst, const QVariantMap &src)
+{
+    for (auto it = src.constBegin(); it != src.constEnd(); ++it) {
+        const QString value = it.value().toString().trimmed();
+        if (!it.value().isNull() && (!value.isEmpty() || it.value().type() == QVariant::Bool))
+            dst[it.key()] = it.value();
+    }
+}
+
+static QVariantMap lanObjectToMap(const QString &lanKey,
+                                  const QJsonObject &lan,
+                                  int displayIndex,
+                                  bool includeLive)
+{
+    QVariantMap oneLan;
+    const QString iface = lan.value(QStringLiteral("interface")).toString().trimmed();
+    const QString configuredIp = lan.value(QStringLiteral("ip")).toString().trimmed();
+    const QString configuredGateway = lan.value(QStringLiteral("gateway")).toString().trimmed();
+    const QString configuredMode = lan.value(QStringLiteral("mode")).toString(QStringLiteral("dhcp")).trimmed();
+    const QStringList dnsParts = dnsListFromJsonValue(lan.value(QStringLiteral("dns")));
+
+    oneLan[QStringLiteral("key")] = lanKey;
+    oneLan[QStringLiteral("name")] = lanDisplayNameFromKey(lanKey, displayIndex);
+    oneLan[QStringLiteral("label")] = oneLan.value(QStringLiteral("name"));
+    oneLan[QStringLiteral("iface")] = iface;
+    oneLan[QStringLiteral("interface")] = iface;
+    oneLan[QStringLiteral("mode")] = configuredMode.isEmpty() ? QStringLiteral("dhcp") : configuredMode;
+    oneLan[QStringLiteral("configuredIp")] = configuredIp;
+    oneLan[QStringLiteral("configuredGateway")] = configuredGateway;
+    oneLan[QStringLiteral("ip")] = configuredIp;
+    oneLan[QStringLiteral("gateway")] = configuredGateway;
+    oneLan[QStringLiteral("dns")] = dnsParts.value(0);
+    oneLan[QStringLiteral("dns2")] = dnsParts.value(1);
+    oneLan[QStringLiteral("dnsList")] = dnsParts.join(',');
+
+    if (includeLive && !iface.isEmpty()) {
+        const QVariantMap live = parseDeviceShow(iface);
+        oneLan[QStringLiteral("liveIp")] = live.value(QStringLiteral("ip")).toString();
+        oneLan[QStringLiteral("liveGateway")] = live.value(QStringLiteral("gateway")).toString();
+        oneLan[QStringLiteral("liveNetmask")] = live.value(QStringLiteral("netmask")).toString();
+        mergeNonEmpty(oneLan, live);
+
+        // For DHCP, the saved IP is normally blank/placeholder. Prefer the real runtime IP.
+        const QString runtimeIp = live.value(QStringLiteral("ip")).toString().trimmed();
+        if (!runtimeIp.isEmpty())
+            oneLan[QStringLiteral("ip")] = runtimeIp;
+
+        const QString runtimeGateway = live.value(QStringLiteral("gateway")).toString().trimmed();
+        if (!runtimeGateway.isEmpty())
+            oneLan[QStringLiteral("gateway")] = runtimeGateway;
+
+        const QString runtimeDns = live.value(QStringLiteral("dns")).toString().trimmed();
+        const QString runtimeDns2 = live.value(QStringLiteral("dns2")).toString().trimmed();
+        if (!runtimeDns.isEmpty())
+            oneLan[QStringLiteral("dns")] = runtimeDns;
+        if (!runtimeDns2.isEmpty())
+            oneLan[QStringLiteral("dns2")] = runtimeDns2;
+    }
+
+    return oneLan;
+}
+
+static QStringList discoverEthernetInterfaces()
+{
+    QString out, err;
+    QStringList interfaces;
+
+    if (runProcessBlocking(QStringLiteral("nmcli"),
+                           {QStringLiteral("-t"), QStringLiteral("-f"),
+                            QStringLiteral("DEVICE,TYPE"), QStringLiteral("device"), QStringLiteral("status")},
+                           &out, &err, 10000)) {
+        for (const QString &line : out.split('\n', QString::SkipEmptyParts)) {
+            const QStringList parts = splitNmcliEscaped(line, 2);
+            const QString iface = parts.value(0).trimmed();
+            const QString type = parts.value(1).trimmed();
+            if (iface.isEmpty() || iface == QStringLiteral("lo"))
+                continue;
+            if (type == QStringLiteral("ethernet") || type == QStringLiteral("802-3-ethernet"))
+                interfaces << iface;
+        }
+    }
+
+    if (interfaces.isEmpty()) {
+        QDir netDir(QStringLiteral("/sys/class/net"));
+        for (const QString &iface : netDir.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            if (iface == QStringLiteral("lo") ||
+                iface.startsWith(QStringLiteral("wl")) ||
+                iface.startsWith(QStringLiteral("wlan")) ||
+                iface.startsWith(QStringLiteral("rmnet")) ||
+                iface.startsWith(QStringLiteral("wwan")) ||
+                iface.startsWith(QStringLiteral("docker")) ||
+                iface.startsWith(QStringLiteral("br-")) ||
+                iface.startsWith(QStringLiteral("veth"))) {
+                continue;
+            }
+            interfaces << iface;
+        }
+    }
+
+    interfaces.removeDuplicates();
+    std::sort(interfaces.begin(), interfaces.end());
+    return interfaces;
+}
+
 QVariantMap NetworkController::loadAllLanConfig()
 {
     QVariantMap result;
     const QJsonObject root = readNetworkConfigRoot();
-    const QJsonObject lanObj = root.value("lan").toObject();
+    const QJsonObject lanObj = root.value(QStringLiteral("lan")).toObject();
 
     QVariantMap lanMap;
+    QVariantList lanList;
 
-    for (const QString &lanKey : lanObj.keys()) {
-        QJsonObject lan = lanObj.value(lanKey).toObject();
+    QStringList orderedKeys = lanObj.keys();
+    std::sort(orderedKeys.begin(), orderedKeys.end(), [](const QString &a, const QString &b) {
+        const int ao = lanKeyOrder(a);
+        const int bo = lanKeyOrder(b);
+        return ao == bo ? a < b : ao < bo;
+    });
 
-        QVariantMap oneLan;
-        oneLan["interface"] = lan.value("interface").toString();
-        oneLan["mode"]      = lan.value("mode").toString();
-        oneLan["ip"]        = lan.value("ip").toString();
-        oneLan["gateway"]   = lan.value("gateway").toString();
+    int displayIndex = 0;
+    for (const QString &lanKey : orderedKeys) {
+        const QJsonObject lan = lanObj.value(lanKey).toObject();
+        const QVariantMap oneLan = lanObjectToMap(lanKey, lan, displayIndex, true);
+        if (oneLan.value(QStringLiteral("iface")).toString().trimmed().isEmpty())
+            continue;
 
-        QString dnsCsv;
-        const QJsonValue dnsVal = lan.value("dns");
-        if (dnsVal.isString()) {
-            dnsCsv = dnsVal.toString();
-        } else if (dnsVal.isArray()) {
-            QStringList tmp;
-            for (const QJsonValue &v : dnsVal.toArray())
-                tmp << v.toString().trimmed();
-            dnsCsv = tmp.join(",");
-        } else {
-            dnsCsv = "0.0.0.0,0.0.0.0";
-        }
-
-        oneLan["dns"] = dnsCsv;
         lanMap[lanKey] = oneLan;
+        lanList << oneLan;
+        ++displayIndex;
     }
 
-    result["menuID"] = "network";
-    result["lan"] = lanMap;
+    // Safety fallback: if the JSON has no LAN block, still show real Linux ethernet devices.
+    if (lanList.isEmpty()) {
+        const QStringList ifaces = discoverEthernetInterfaces();
+        for (const QString &iface : ifaces) {
+            QJsonObject lan;
+            lan[QStringLiteral("interface")] = iface;
+            lan[QStringLiteral("mode")] = QStringLiteral("dhcp");
+            const QString lanKey = ifaceToLanKey(iface);
+            const QVariantMap oneLan = lanObjectToMap(lanKey, lan, displayIndex, true);
+            lanMap[lanKey] = oneLan;
+            lanList << oneLan;
+            ++displayIndex;
+        }
+    }
+
+    result[QStringLiteral("menuID")] = QStringLiteral("network");
+    result[QStringLiteral("lan")] = lanMap;
+    result[QStringLiteral("lanList")] = lanList;
     return result;
 }
 
@@ -1500,53 +1843,54 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
     const QJsonObject root = readNetworkConfigRoot();
 
     // New schema: { "lan": { "lan1": {...} } }
-    const QJsonObject lanObj = root.value("lan").toObject();
+    const QJsonObject lanObj = root.value(QStringLiteral("lan")).toObject();
     QJsonObject lan = lanObj.value(lanKey).toObject();
+    QString resolvedKey = lanKey;
 
     // Fallback: find by interface.
     if (lan.isEmpty()) {
         for (const QString &key : lanObj.keys()) {
             const QJsonObject candidate = lanObj.value(key).toObject();
-            if (candidate.value("interface").toString() == iface) {
+            if (candidate.value(QStringLiteral("interface")).toString() == iface) {
                 lan = candidate;
+                resolvedKey = key;
                 break;
             }
         }
     }
 
     if (!lan.isEmpty()) {
-        result["menuID"] = "network";
-        result["mode"] = lan.value("mode").toString();
-        result["ip"] = lan.value("ip").toString();
-        result["gateway"] = lan.value("gateway").toString();
-
-        const QJsonValue dnsVal = lan.value("dns");
-        QString dnsText;
-        if (dnsVal.isArray()) {
-            QStringList tmp;
-            for (const QJsonValue &v : dnsVal.toArray())
-                tmp << v.toString();
-            dnsText = tmp.join(",");
-        } else {
-            dnsText = dnsVal.toString();
-        }
-
-        const QStringList dnsParts = dnsText.split(',', QString::SkipEmptyParts);
-        result["dns"] = dnsParts.value(0).trimmed();
-        result["dns2"] = dnsParts.value(1).trimmed();
+        result = lanObjectToMap(resolvedKey, lan, lanKeyOrder(resolvedKey), true);
+        result[QStringLiteral("menuID")] = QStringLiteral("network");
         return result;
     }
 
     // Legacy schema fallback.
-    if (root.value("interface").toString() != iface)
+    if (root.value(QStringLiteral("interface")).toString() == iface) {
+        QJsonObject legacyLan;
+        legacyLan[QStringLiteral("interface")] = iface;
+        legacyLan[QStringLiteral("mode")] = root.value(QStringLiteral("mode")).toString();
+        legacyLan[QStringLiteral("ip")] = root.value(QStringLiteral("ip")).toString();
+        legacyLan[QStringLiteral("gateway")] = root.value(QStringLiteral("gateway")).toString();
+        legacyLan[QStringLiteral("dns")] = root.value(QStringLiteral("dns")).toString();
+        result = lanObjectToMap(lanKey, legacyLan, lanKeyOrder(lanKey), true);
+        result[QStringLiteral("dns2")] = root.value(QStringLiteral("dns2")).toString();
+        result[QStringLiteral("menuID")] = QStringLiteral("network");
         return result;
+    }
 
-    result["menuID"] = "network";
-    result["mode"] = root.value("mode").toString();
-    result["ip"] = root.value("ip").toString();
-    result["gateway"] = root.value("gateway").toString();
-    result["dns"] = root.value("dns").toString();
-    result["dns2"] = root.value("dns2").toString();
+    // Last fallback: requested iface exists in the OS but has no saved JSON entry.
+    const QVariantMap live = parseDeviceShow(iface);
+    if (!live.isEmpty()) {
+        result = live;
+        result[QStringLiteral("menuID")] = QStringLiteral("network");
+        result[QStringLiteral("key")] = lanKey;
+        result[QStringLiteral("name")] = lanDisplayNameFromKey(lanKey, lanKeyOrder(lanKey));
+        result[QStringLiteral("iface")] = iface;
+        result[QStringLiteral("interface")] = iface;
+        result[QStringLiteral("mode")] = QStringLiteral("dhcp");
+    }
+
     return result;
 }
 

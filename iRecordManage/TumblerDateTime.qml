@@ -10,6 +10,8 @@ Item {
     property int wYear: 160
     property int wMonth: 160
     property int wDay: 160
+    property int wHour: 140
+    property int wMin: 140
 
     /* ===================== API ===================== */
     function pad2(n) { n = Number(n); return (n < 10 ? "0" : "") + n }

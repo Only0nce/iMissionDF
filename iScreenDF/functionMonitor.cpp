@@ -508,22 +508,21 @@ void iScreenDF::NetworkAppen(int id, const QString &dhcp, const QString &ip,cons
     m_network2List.at(i)->secdns       = secondaryDns;
     m_network2List.at(i)->phyName      = phyName;
     m_network2List.at(i)->krakenserver = krakenserver;
+
+    // DatabaseDF emits Network2 rows one by one. Push a snapshot each time so
+    // TopNetworkDrawer gets live DB data instead of keeping mock/empty values.
+    emitNetworkRowsSnapshot(id);
 }
 
-void iScreenDF::getNetworkfromDb(int id)
+void iScreenDF::emitNetworkRowsSnapshot(int selectedId)
 {
-    // updateIPServerDF();
-    if (m_parameter.isEmpty() || !m_parameter.first()) {
-        qWarning() << "[iScreenDF] applyRfsocParameterToServer: no parameter";
-        return;
-    }
-    Parameter *p = m_parameter.first();
-    emit updateGlobalOffsets( p->m_offset_value, p->m_compass_offset);
-
     QJsonArray allRows;
+    Network2 *selected = nullptr;
 
     for (int i = 0; i < m_network2List.size(); ++i) {
         Network2 *n = m_network2List.at(i);
+        if (!n)
+            continue;
 
         QJsonObject obj;
         obj["id"]            = n->id;
@@ -535,35 +534,79 @@ void iScreenDF::getNetworkfromDb(int id)
         obj["SECONDARY_DNS"] = n->secdns;
         obj["phyName"]       = n->phyName;
         obj["krakenserver"]  = n->krakenserver;
-
         allRows.append(obj);
+
+        if (!selected && selectedId > 0 && n->id == selectedId)
+            selected = n;
     }
+
+    if (!selected && !m_network2List.isEmpty())
+        selected = m_network2List.first();
 
     QJsonObject root;
     root["rows"] = allRows;
+    const QString allJson = QString::fromUtf8(
+        QJsonDocument(root).toJson(QJsonDocument::Compact));
 
-    QJsonDocument doc(root);
-    const QString allJson = QString::fromUtf8(doc.toJson(QJsonDocument::Compact));
-    for (int i = 0; i < m_network2List.size(); ++i) {
-        Network2 *n = m_network2List.at(i);
-        if (n->id != id)
-            continue;
-
-        QVariantMap row;
-        row["id"]            = n->id;
-        row["DHCP"]          = n->dhcpmethod;
-        row["IP_ADDRESS"]    = n->ip_address;
-        row["SUBNETMASK"]    = n->subnet;
-        row["GATEWAY"]       = n->ip_gateway;
-        row["PRIMARY_DNS"]   = n->pridns;
-        row["SECONDARY_DNS"] = n->secdns;
-        row["phyName"]       = n->phyName;
-        row["krakenserver"]  = n->krakenserver;
-        row["all"] = allJson;
-
-        emit networkRowUpdated(row);
-        break;
+    QVariantMap row;
+    if (selected) {
+        row["id"]            = selected->id;
+        row["DHCP"]          = selected->dhcpmethod;
+        row["IP_ADDRESS"]    = selected->ip_address;
+        row["SUBNETMASK"]    = selected->subnet;
+        row["GATEWAY"]       = selected->ip_gateway;
+        row["PRIMARY_DNS"]   = selected->pridns;
+        row["SECONDARY_DNS"] = selected->secdns;
+        row["phyName"]       = selected->phyName;
+        row["krakenserver"]  = selected->krakenserver;
+    } else {
+        row["id"] = selectedId;
     }
+    row["all"] = allJson;
+
+    emit networkRowUpdated(row);
+}
+
+void iScreenDF::requestNetworkRows()
+{
+    // Force a real DB refresh from Network2. TopNetworkDrawer.qml checks for
+    // this API before falling back to getNetworkfromDb(id).
+    if (db) {
+        QTimer::singleShot(0, db, [database = db]() {
+            database->getNetworkfromDb();
+        });
+    }
+
+    // Also update QML from cache immediately while the DB refresh is queued.
+    if (!m_network2List.isEmpty())
+        emitNetworkRowsSnapshot(0);
+}
+
+void iScreenDF::refreshNetworkRows()
+{
+    requestNetworkRows();
+}
+
+void iScreenDF::getNetworkAll()
+{
+    requestNetworkRows();
+}
+
+void iScreenDF::getNetworkfromDb(int id)
+{
+    // Network2 display must not be blocked by unrelated RFSoC Parameter data.
+    // Offset metadata is optional and emitted only when available.
+    if (!m_parameter.isEmpty() && m_parameter.first()) {
+        Parameter *p = m_parameter.first();
+        emit updateGlobalOffsets(p->m_offset_value, p->m_compass_offset);
+    }
+
+    if (m_network2List.isEmpty()) {
+        requestNetworkRows();
+        return;
+    }
+
+    emitNetworkRowsSnapshot(id);
 }
 
 void iScreenDF::updateNetworkfromDisplayIndex(int index,const QString &dhcp,const QString &ip,const QString &mask,const QString &gw,const QString &dns1,const QString &dns2)

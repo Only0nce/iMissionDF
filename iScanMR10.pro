@@ -23,6 +23,35 @@ CONFIG(release, debug|release) {
 }
 
 # ============================================================
+# UI feature selector: Top Network Configuration Drawer only
+#
+# This flag controls only the top-center grab handle and the
+# TopNetworkDrawer opened from the top bar.
+#
+# It does NOT disable:
+#   - Setting.qml
+#   - LAN Settings
+#   - WiFi Settings
+#   - 5G Modem Settings
+#   - Side Settings -> Network Settings
+#   - NetworkController backend
+#
+# Enable the top drawer:
+#   CONFIG += FEATURE_TOP_NETWORK_DRAWER
+#
+# Default below is DISABLED so the top-bar drawer is removed.
+# ============================================================
+# CONFIG += FEATURE_TOP_NETWORK_DRAWER
+
+contains(CONFIG, FEATURE_TOP_NETWORK_DRAWER) {
+    message("Feature: Top Network Drawer ENABLED")
+    DEFINES += FEATURE_TOP_NETWORK_DRAWER=1
+} else {
+    message("Feature: Top Network Drawer DISABLED")
+    DEFINES += FEATURE_TOP_NETWORK_DRAWER=0
+}
+
+# ============================================================
 # Hardware version selector
 #
 # Current project policy hard-codes one hardware CONFIG below.

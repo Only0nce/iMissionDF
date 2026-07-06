@@ -27,6 +27,10 @@ Item {
     property bool keyfreqEdit: false
     signal receiverParamsUpdated(string signalStrength, string receiverGain)
     property string currentPageSource: "qrc:/HomeDisplay.qml"
+    readonly property bool topNetworkDrawerEnabled:
+        (typeof FeatureTopNetworkDrawer === "undefined")
+        ? false
+        : FeatureTopNetworkDrawer
 
     property var originalVfoConfig: ({
         spectrum: "Single Ch",
@@ -97,13 +101,98 @@ Item {
         property string gpsDateText: ""
         property string uptimeText: ""
 
+        // Clock ownership:
+        // - C++ updateLocalTime is the primary source while it is alive.
+        // - Date.now() is a fallback only, so the two sources never fight over
+        //   gpsTimeText/gpsDateText and make the date format flip on screen.
+        property bool backendClockActive: false
+        property double lastBackendClockMs: 0
+        readonly property int backendClockTimeoutMs: 3500
+
         // =================== LOCAL CLOCK (Date.now) ===================
-        function pad2(v) { v = Math.floor(v); return (v < 10 ? "0" + v : "" + v) }
+        function pad2(v) {
+            v = Math.floor(Number(v))
+            return v < 10 ? "0" + v : "" + v
+        }
+
+        function monthShortName(monthIndex) {
+            var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                          "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+            return monthIndex >= 0 && monthIndex < months.length ? months[monthIndex] : "---"
+        }
+
+        function formatHomeDate(dateValue) {
+            if (!dateValue || isNaN(dateValue.getTime()))
+                return "-- --- ----"
+
+            return pad2(dateValue.getDate()) + " " +
+                   monthShortName(dateValue.getMonth()) + " " +
+                   dateValue.getFullYear()
+        }
+
+        function normalizeBackendTime(value) {
+            var text = value === undefined || value === null ? "" : String(value).trim()
+            var match = /^(\d{1,2}):(\d{1,2}):(\d{1,2})$/.exec(text)
+            if (!match)
+                return text
+
+            return pad2(Number(match[1])) + ":" +
+                   pad2(Number(match[2])) + ":" +
+                   pad2(Number(match[3]))
+        }
+
+        function normalizeBackendDate(value) {
+            var text = value === undefined || value === null ? "" : String(value).trim()
+            var match
+
+            // yyyy-MM-dd -> dd MMM yyyy
+            match = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(text)
+            if (match) {
+                var isoDate = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
+                return formatHomeDate(isoDate)
+            }
+
+            // dd/MM/yyyy or dd-MM-yyyy -> dd MMM yyyy
+            match = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})$/.exec(text)
+            if (match) {
+                var dmyDate = new Date(Number(match[3]), Number(match[2]) - 1, Number(match[1]))
+                return formatHomeDate(dmyDate)
+            }
+
+            // Already human-readable, for example "01 Jan 1970".
+            match = /^(\d{1,2})\s+([A-Za-z]{3})\s+(\d{4})$/.exec(text)
+            if (match)
+                return pad2(Number(match[1])) + " " + match[2] + " " + match[3]
+
+            // Preserve an unknown backend format rather than guessing an
+            // ambiguous month/day ordering.
+            return text
+        }
 
         function updateLocalClock() {
-            var d = new Date(Date.now())
+            var nowMs = Date.now()
+
+            if (backendClockActive && (nowMs - lastBackendClockMs) <= backendClockTimeoutMs)
+                return
+
+            backendClockActive = false
+            var d = new Date(nowMs)
             gpsTimeText = pad2(d.getHours()) + ":" + pad2(d.getMinutes()) + ":" + pad2(d.getSeconds())
-            gpsDateText = d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate())
+            gpsDateText = formatHomeDate(d)
+        }
+
+        function applyBackendClock(currentTime, currentDate, uptime) {
+            backendClockActive = true
+            lastBackendClockMs = Date.now()
+
+            var normalizedTime = normalizeBackendTime(currentTime)
+            var normalizedDate = normalizeBackendDate(currentDate)
+
+            if (normalizedTime.length > 0)
+                gpsTimeText = normalizedTime
+            if (normalizedDate.length > 0)
+                gpsDateText = normalizedDate
+            uptimeText = uptime === undefined || uptime === null ? "" : String(uptime)
         }
 
         Timer {
@@ -252,6 +341,8 @@ Item {
             width: 92
             height: 34
             z: 10
+            visible: mainPage.topNetworkDrawerEnabled
+            enabled: mainPage.topNetworkDrawerEnabled
 
             property color accent: "#00FFF0"
             property color idleBar: "#7AE2CF"
@@ -381,6 +472,9 @@ Item {
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
+                    if (!mainPage.topNetworkDrawerEnabled)
+                        return
+
                     rippleAnim.stop()
                     ripple.opacity = 0.35
                     ripple.scale = 0.2
@@ -409,6 +503,7 @@ Item {
                 }
 
                 onCentroidChanged: {
+                    if (!mainPage.topNetworkDrawerEnabled) return
                     if (!active || centerGrabHandle.actionDone) return
                     var dy = centroid.position.y - centerGrabHandle.startY
 
@@ -431,10 +526,7 @@ Item {
         ignoreUnknownSignals: true
 
         function onUpdateLocalTime(currentTime, currentDate, uptime) {
-            // ถ้าต้องการให้ C++ เป็นตัวจริง ให้ทับของ Date.now ได้เลย
-            navBar.gpsTimeText = currentTime
-            navBar.gpsDateText = currentDate
-            navBar.uptimeText  = uptime
+            navBar.applyBackendClock(currentTime, currentDate, uptime)
         }
 
         function onUpdateLocationLatLongFromGPS(latStr, lonStr, altStr, utmText, mgrsText) {
@@ -561,6 +653,8 @@ Item {
         id: topDrawer
         krakenmapval: Krakenmapval
         keyfreqEdit: mainPage.keyfreqEdit
+        enabled: mainPage.topNetworkDrawerEnabled
+        interactive: mainPage.topNetworkDrawerEnabled
     }
 
     ModePopup { id: remoteModePopup }

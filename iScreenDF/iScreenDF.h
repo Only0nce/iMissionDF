@@ -161,6 +161,7 @@ public:
     void onDoAResultReceived(const QJsonObject &obj);
     void applyRfsocParameterToServer(bool needAck);
     void sendRfsocJsonLine(const QJsonObject &obj, bool addNewline);
+    void emitNetworkRowsSnapshot(int selectedId = 0);
 
     void updateReceiverParametersFreqOffsetBw(qint64 rfHz, double offsetHz, double bwHz);
     void updateIPServerDF();
@@ -186,6 +187,7 @@ signals:
     void networkRowUpdated(const QVariantMap &row);
     void setSelectedGroupByUniqueId(const QString &uid);
     void updatecurrentFromGPSTime(const QString &GPS_DateStr, const QString &GPS_TimeStr);
+    void updateLocalTime(const QString &currentTime, const QString &currentDate, const QString &uptime);
     void updateLocationLatLongFromGPS(
         const QString &lat,
         const QString &lon,
@@ -265,6 +267,9 @@ public slots:
 
     void updateNetworkfromDisplayIndex(int index,const QString &dhcp,const QString &ip,const QString &mask,const QString &gw,const QString &dns1,const QString &dns2);
     void restartNetworkIndex(int index);
+    void requestNetworkRows();
+    void refreshNetworkRows();
+    void getNetworkAll();
 
     // void appendNewClient(int id = 0, QString name = "", QString ipAddress = "", uint16_t socketPort = 0);
     void appendNewActiveClient(const QString &deviceUniqueId,

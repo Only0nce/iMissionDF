@@ -1,4 +1,4 @@
-import QtQuick 2.15
+import QtQuick 2.12
 
 Text {
     property color textColor: "#9aa6b2"

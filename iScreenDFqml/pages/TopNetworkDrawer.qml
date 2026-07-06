@@ -256,9 +256,19 @@ Drawer {
         _dhcpChanging = false
 
         function setIfNotEmpty(field, key) {
+            if (!field)
+                return
+
             var v = g(i, key)
             if (v !== undefined && v !== null && String(v).length > 0) {
-                field.text = field.originalValue = String(v)
+                var textValue = String(v)
+                field.text = textValue
+
+                // Not every TextField in this drawer keeps an originalValue cache.
+                // Assign it only when the field explicitly declares the property,
+                // otherwise QML raises: Cannot assign to non-existent property.
+                if (field.originalValue !== undefined)
+                    field.originalValue = textValue
             }
             // ถ้า v ว่าง -> อย่าทับ (กันเคสยังไม่โหลดข้อมูล)
         }
@@ -268,6 +278,7 @@ Drawer {
         setIfNotEmpty(gwField,   "gw")
         setIfNotEmpty(dns1Field, "dns1")
         setIfNotEmpty(dns2Field, "dns2")
+        setIfNotEmpty(serverField, "server")
     }
 
     onSelectedNicChanged: {
@@ -577,10 +588,19 @@ Drawer {
             gwField.text   = row.GATEWAY
             dns1Field.text = row.PRIMARY_DNS
             dns2Field.text = row.SECONDARY_DNS
+            _blockServerFieldSignal = true
+            serverField.text = row.krakenserver
+            serverField.originalValue = serverField.text
+            _blockServerFieldSignal = false
             dhcpCombo.currentIndex = (row.DHCP === "off") ? 1 : 0
         }
 
-        function onUpdateServeripDfserver(ip) { serverField.text = ip }
+        function onUpdateServeripDfserver(ip) {
+            _blockServerFieldSignal = true
+            serverField.text = ip
+            serverField.originalValue = serverField.text
+            _blockServerFieldSignal = false
+        }
 
         function onUpdateGlobalOffsets(offsetValue, compassOffset) {
             compassField.text = Number(compassOffset).toFixed(6)
@@ -612,7 +632,7 @@ Drawer {
     }
 
     /* ========= TOP + CONTENT ========= */
-    Column {
+    Item {
         id: topArea
         anchors.fill: parent
 
@@ -1521,6 +1541,7 @@ Drawer {
 
                                 TextField {
                                     id: serverField
+                                    property string originalValue: ""
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 34
                                     placeholderText: "192.168.10.200"

@@ -83,7 +83,7 @@ Item {
                 spacing: 10
 
                 Image {
-                    source: "qrc:/icons/wifi-lock.png"
+                    source: "qrc:/images/lockIcon.png"
                     width: 28; height: 28
                 }
 
@@ -173,9 +173,10 @@ Item {
     // ==== SIGNAL FROM C++ ====
     Connections {
         target: Krakenmapval
-        onUpdateParameterMode: {
+        function onUpdateParameterMode(mode) {
             modePopup.remoteStatus = mode
-            if (!modePopup.visible) return
+            if (!modePopup.visible)
+                return
 
             if (mode === "LOCAL" && !countdownCanceled) {
                 secondsLeft = waitSeconds

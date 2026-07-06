@@ -1,6 +1,6 @@
 // /pages/SideSettingsDrawer.qml  (FULL FILE)
 // 1920x1080 overlay + drawer width เดิม 500
-// ✅ ADD: WIFI/5G toolbar icon opens qrc:/Wifi5GSetting.qml directly
+// ✅ Network toolbar icon opens the unified Network Settings page (LAN / WiFi / 5G tabs)
 // click นอก drawer => close (ชัวร์สุด)
 //
 // ✅ ADD: ONLINE/OFFLINE button next to LOCAL/REMOTES
@@ -206,7 +206,7 @@ Item {
 
     property string mapSourceUrl: "qrc:/iScreenDFqml/pages/QMLMap.qml"
     property string sideLogsSourceUrl: "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
-    property string wifi5gSourceUrl: "qrc:/Wifi5GSetting.qml"
+    property string wifi5gSourceUrl: "qrc:/Setting.qml"
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
 
     function toolbarPages() {
@@ -228,13 +228,13 @@ Item {
             }
         ]
 
-        if (settingsPanel.hardwareHasWireless) {
-            pages.push({
-                           title: "WIFI\n5G",
-                           icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
-                           source: settingsPanel.wifi5gSourceUrl
-                       })
-        }
+        // KP-6JUL2026: Keep the full Network Settings page available.
+        // FEATURE_TOP_NETWORK_DRAWER controls only the top-bar drawer.
+        pages.push({
+                       title: "NETWORK\nSETTINGS",
+                       icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
+                       source: settingsPanel.wifi5gSourceUrl
+                   })
 
         pages.push({
                        title: "RECORDER",
@@ -705,8 +705,8 @@ Item {
                 Row {
                     id: toolbar
                     spacing: pages.length > 5 ? 8 : 16
-                    anchors.margins: 10
-                    anchors.horizontalCenter: parent.horizontalCenter
+                    Layout.alignment: Qt.AlignHCenter
+                    Layout.margins: 10
 
                     property int hoveredIndex: -1
 
@@ -855,7 +855,7 @@ Item {
                         ]
 
                         onTriggered: function(i) {
-                            const item = bar.model[i]
+                            var item = bar.model[i]
 
                             if (item && item.sidePanel) {
                                 bar.currentIndex = i
@@ -1146,18 +1146,15 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    Layout.leftMargin: 1
                     radius: 10
                     color: "#111212"
                     border.color: "#111212"
                     border.width: 1
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.leftMargin: 1
 
-                    Column {
+                    Item {
                         anchors.fill: parent
                         anchors.margins: 10
-                        spacing: 8
 
                         Loader {
                             id: sideLoader

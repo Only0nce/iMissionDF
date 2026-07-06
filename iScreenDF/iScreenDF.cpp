@@ -574,6 +574,7 @@ void iScreenDF::loopGetInfo() {
                                   .arg(currentDate)
                                   .arg(uptimeStr);
             sendToWeb(message);
+            emit updateLocalTime(currentTime, currentDate, uptimeStr.trimmed());
         }
         if (count == 15){
             memUsage = getMemUsage();
