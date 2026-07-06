@@ -20,6 +20,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import QtQuick.Window 2.15
+import "../.." as SharedComponents
 
 Drawer {
     id: topDrawer
@@ -63,8 +64,7 @@ Drawer {
     property bool _dhcpChanging: false
     property bool _blockServerFieldSignal: false
 
-    /* ===== Advanced password ===== */
-    property string advancedPassword: "ifz8zean6969**"
+    /* ===== Advanced mode security ===== */
     property bool _isSwitchingMode: false
 
     // ==========================
@@ -406,142 +406,37 @@ Drawer {
     }
 
     /* ===== Password Popup for Advanced ===== */
-    Popup {
+    SharedComponents.NetworkPasswordPopup {
         id: advPassPopup
-        modal: true
-        focus: true
-        closePolicy: Popup.NoAutoClose
+        titleText: "Advanced Mode"
+        messageText: "Enter password to continue"
+        backgroundColor: topDrawer.colCard
+        borderColor: topDrawer.colBorder
+        textColor: topDrawer.colText
+        subTextColor: topDrawer.colSub
+        fieldColor: topDrawer.colField
+        fieldFocusColor: topDrawer.colFieldHi
+        accentColor: topDrawer.colAccent
+        cancelColor: topDrawer.colInfo
 
-        width: 360
-        height: 210
-        x: Math.max(10, (topDrawer.width - width) / 2)
-        y: Math.max(10, (topDrawer.height - height) / 3)
+        onAuthorized: {
+            advancedMode = true
+            basicTab = 0
 
-        background: Rectangle {
-            radius: 14
-            color: colCard
-            border.color: colBorder
-            border.width: 1
+            _isSwitchingMode = true
+            modeCombo.currentIndex = 0
+            _isSwitchingMode = false
+
+            requestNetworkRefresh()
         }
 
-        property string typed: ""
+        onCancelled: {
+            _isSwitchingMode = true
+            modeCombo.currentIndex = 1
+            _isSwitchingMode = false
 
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 16
-            spacing: 10
-
-            Text {
-                text: "Advanced Mode"
-                color: colText
-                font.pixelSize: 18
-                font.bold: true
-            }
-
-            Text {
-                text: "Enter password to continue"
-                color: colSub
-                font.pixelSize: 13
-            }
-
-            TextField {
-                id: advPassField
-                Layout.fillWidth: true
-                Layout.preferredHeight: 40
-                echoMode: TextInput.Password
-                placeholderText: "Password"
-                color: colText
-                placeholderTextColor: colSub
-                background: fieldBox.createObject(this, { "control": advPassField })
-                leftPadding: 10
-                rightPadding: 10
-                font.pixelSize: 15
-
-                onTextChanged: advPassPopup.typed = text
-                Keys.onReturnPressed: okBtn.clicked()
-            }
-
-            Text {
-                id: advError
-                text: ""
-                color: "#f87171"
-                font.pixelSize: 12
-                visible: text.length > 0
-            }
-
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-
-                Button {
-                    id: cancelBtn
-                    text: "Cancel"
-                    Layout.fillWidth: true
-                    background: Rectangle {
-                        radius: 10
-                        color: cancelBtn.pressed ? Qt.darker(colInfo, 1.2) : colInfo
-                    }
-                    contentItem: Text {
-                        text: cancelBtn.text
-                        color: "white"
-                        anchors.centerIn: parent
-                        font.bold: true
-                    }
-                    onClicked: {
-                        advError.text = ""
-                        advPassField.text = ""
-                        advPassPopup.close()
-
-                        _isSwitchingMode = true
-                        modeCombo.currentIndex = 1
-                        _isSwitchingMode = false
-
-                        advancedMode = false
-                        basicTab = 0
-                    }
-                }
-
-                Button {
-                    id: okBtn
-                    text: "Unlock"
-                    Layout.fillWidth: true
-                    background: Rectangle {
-                        radius: 10
-                        color: okBtn.pressed ? Qt.darker(colAccent, 1.2) : colAccent
-                    }
-                    contentItem: Text {
-                        text: okBtn.text
-                        color: "white"
-                        anchors.centerIn: parent
-                        font.bold: true
-                    }
-                    onClicked: {
-                        if (advPassPopup.typed === topDrawer.advancedPassword) {
-                            advError.text = ""
-                            advPassField.text = ""
-                            advPassPopup.close()
-
-                            advancedMode = true
-                            basicTab = 0
-
-                            _isSwitchingMode = true
-                            modeCombo.currentIndex = 0
-                            _isSwitchingMode = false
-
-                            requestNetworkRefresh()
-                        } else {
-                            advError.text = "Wrong password"
-                        }
-                    }
-                }
-            }
-        }
-
-        onOpened: {
-            advError.text = ""
-            advPassPopup.typed = ""
-            advPassField.text = ""
-            advPassField.forceActiveFocus()
+            advancedMode = false
+            basicTab = 0
         }
     }
 
@@ -683,7 +578,7 @@ Drawer {
                                 _isSwitchingMode = true
                                 modeCombo.currentIndex = 1
                                 _isSwitchingMode = false
-                                advPassPopup.open()
+                                advPassPopup.requestUnlock()
                             } else {
                                 advancedMode = false
                                 basicTab = 0

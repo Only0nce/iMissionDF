@@ -334,6 +334,26 @@ Item {
                                              dns)
     }
 
+    function requestProtectedLanApply() {
+        // KP-6JUL2026 : Do not call the mutating backend until password verification succeeds.
+        lanApplyPasswordPopup.requestUnlock()
+    }
+
+    NetworkPasswordPopup {
+        id: lanApplyPasswordPopup
+        titleText: "Network Settings"
+        messageText: "Enter password to apply LAN configuration"
+        accentColor: ui.accent
+        backgroundColor: ui.card
+        borderColor: ui.border
+        textColor: ui.text
+        subTextColor: ui.subText
+        fieldColor: ui.field
+        fieldFocusColor: "#16283d"
+
+        onAuthorized: networkManager.applyLanSetting()
+    }
+
     Connections {
         target: NetworkController
         function onApplyNetworkConfigFinished(iface, ok, message, gatewayValue, dnsValue) {
@@ -893,7 +913,7 @@ Item {
                     x: 30
                     y: parent.height - 92
                     spacing: 20
-                    Button { width: 220; height: 48; text: "Apply / Save"; onClicked: applyLanSetting()
+                    Button { width: 220; height: 48; text: "Apply / Save"; onClicked: requestProtectedLanApply()
                         contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
                         background: Rectangle { radius: 10; color: ui.accent; border.color: ui.accent } }
                     Button { width: 220; height: 48; text: "Refresh"; onClicked: loadLanInterfaces()

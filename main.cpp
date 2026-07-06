@@ -49,6 +49,7 @@
 // -------- App Controllers --------
 #include "Mainwindows.h"
 #include "NetworkController.h"
+#include "NetworkSecurityController.h"
 #include "ReceiverConfigManager.h"
 #include "ReceiverRecorderConfigManager.h"
 #include "websocketclient.h"
@@ -234,6 +235,10 @@ int main(int argc, char *argv[])
     NetworkController* netCtrl = new NetworkController();
     qmlRegisterSingletonInstance("App", 1, 0, "NetworkController", netCtrl);
 
+    // KP-6JUL2026 : Centralized password verification for protected network changes.
+    // QML never receives the expected plaintext password.
+    NetworkSecurityController networkSecurity;
+
     ImageProvider *imageProvider = new ImageProvider();
     qmlRegisterSingletonInstance("App1", 1, 0, "Screenshots", imageProvider);
 
@@ -257,6 +262,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty("HardwareHasWireless", bool(HARDWARE_HAS_WIRELESS));
     engine.rootContext()->setContextProperty("FeatureTopNetworkDrawer",
                                              bool(FEATURE_TOP_NETWORK_DRAWER));
+    engine.rootContext()->setContextProperty("networkSecurity", &networkSecurity);
     // Runtime QML pages use this context property, while Design mode can omit it.
     engine.rootContext()->setContextProperty("networkController", netCtrl);
 

@@ -110,6 +110,7 @@ X86_SOURCES += \
     InputEventReader.cpp \
     Mainwindows.cpp \
     NetworkController.cpp \
+    NetworkSecurityController.cpp \
     Wifi5GController.cpp \
     OpenWebRxConfig.cpp \
     PCM3168A.cpp \
@@ -163,6 +164,7 @@ X86_HEADERS += \
     InputEventReader.h \
     Mainwindows.h \
     NetworkController.h \
+    NetworkSecurityController.h \
     Wifi5GController.h \
     OpenWebRxConfig.h \
     PCM3168A.h \
@@ -206,6 +208,7 @@ JETSON_SOURCES += \
     InputEventReader.cpp \
     Mainwindows.cpp \
     NetworkController.cpp \
+    NetworkSecurityController.cpp \
     Wifi5GController.cpp \
     OpenWebRxConfig.cpp \
     PCM3168A.cpp \
@@ -273,6 +276,7 @@ JETSON_HEADERS += \
     InputEventReader.h \
     Mainwindows.h \
     NetworkController.h \
+    NetworkSecurityController.h \
     Wifi5GController.h \
     OpenWebRxConfig.h \
     PCM3168A.h \

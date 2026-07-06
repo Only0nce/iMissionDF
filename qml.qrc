@@ -170,6 +170,7 @@
         <file>RecConfigPage.qml</file>
         <file>images/rec.png</file>
         <file>Setting.qml</file>
+        <file>NetworkPasswordPopup.qml</file>
         <file>MyMenuBotomBar.qml</file>
         <file>BandwidthScaleControl.qml</file>
         <file>icon/heart-rate-black.png</file>

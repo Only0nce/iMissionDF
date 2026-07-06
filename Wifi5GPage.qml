@@ -48,6 +48,10 @@ Item {
     property bool wifiRuntimeStarted: false
     property bool cellularRuntimeStarted: false
 
+    // KP-6JUL2026 : Hold only the pending non-secret IPv4 settings while auth is open.
+    // The password is owned and immediately cleared by NetworkPasswordPopup.
+    property var pendingWifiAdvancedSettings: null
+
     property alias wifiEnabled: pageView.wifiEnabled
     property alias wifiIface: pageView.wifiIface
     property alias wifiSsid: pageView.wifiSsid
@@ -1081,6 +1085,30 @@ Item {
         }
     }
 
+    function requestProtectedWifiAdvancedSave(settings) {
+        if (!root.wifiPageActive)
+            return
+
+        // Snapshot the values at the exact Apply click. The backend is not called yet.
+        pendingWifiAdvancedSettings = copyObject(settings || {})
+        wifiApplyPasswordPopup.requestUnlock()
+    }
+
+    function clearPendingWifiAdvancedSave() {
+        pendingWifiAdvancedSettings = null
+    }
+
+    function commitProtectedWifiAdvancedSave() {
+        if (!root.wifiPageActive) {
+            clearPendingWifiAdvancedSave()
+            return
+        }
+
+        var payload = copyObject(pendingWifiAdvancedSettings || {})
+        clearPendingWifiAdvancedSave()
+        saveWifiAdvanced(payload)
+    }
+
     function saveWifiAdvanced(settings) {
         if (!root.wifiPageActive)
             return
@@ -1440,6 +1468,7 @@ Item {
     }
 
     Component.onDestruction: {
+        clearPendingWifiAdvancedSave()
         deactivateWifiPageRuntime()
         deactivateCellularPageRuntime()
     }
@@ -1577,6 +1606,15 @@ Item {
         }
     }
 
+    NetworkPasswordPopup {
+        id: wifiApplyPasswordPopup
+        titleText: "Network Settings"
+        messageText: "Enter password to apply WiFi IPv4 configuration"
+
+        onAuthorized: root.commitProtectedWifiAdvancedSave()
+        onCancelled: root.clearPendingWifiAdvancedSave()
+    }
+
     Wifi5GView {
         id: pageView
         selectedNetworkPage: root.initialNetworkPage
@@ -1606,7 +1644,7 @@ Item {
             root.openWifiAdvanced(iface, ssid, bssid, profileName)
         }
         onWifiAdvancedSaveRequested: function(settings) {
-            root.saveWifiAdvanced(settings)
+            root.requestProtectedWifiAdvancedSave(settings)
         }
         onCellularRefreshRequested: root.refreshCellularStatus()
         onCellularConnectRequested: function(apn, iface, autoConnect) {
