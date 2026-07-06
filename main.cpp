@@ -161,7 +161,7 @@ static void setupRuntimeEnv()
         qputenv("QTWEBGL_PORT", QByteArray("8081"));
     }
 
-    // qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
+    qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
 }
 
 // ======================================================
