@@ -720,10 +720,22 @@ Item {
         scanFilteredModel.clear()
     }
 
+    // Batch rapid model mutations. profileScan is commonly filled with many
+    // append() calls; rebuilding after each countChanged creates O(N^2) work.
+    Timer {
+        id: groupedScanRebuildTimer
+        interval: 75
+        repeat: false
+        onTriggered: rebuildGroupedScan()
+    }
+
     Connections {
         target: (typeof profileScan !== "undefined") ? profileScan : null
         ignoreUnknownSignals: true
-        function onCountChanged() { rebuildGroupedScan() }
+        function onCountChanged() {
+            if (!groupedScanRebuildTimer.running)
+                groupedScanRebuildTimer.start()
+        }
     }
 
     Component.onCompleted: {

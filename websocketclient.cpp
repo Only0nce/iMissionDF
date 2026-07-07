@@ -2,8 +2,88 @@
 #include "websocketclient.h"
 #include "pcmImaadpcmcodec.h"
 #include <QDebug>
+#include <QMetaMethod>
+#include <algorithm>
 #include <cmath>
+#include <cstring>
+#include <limits>
 WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent) {}
+
+void WebSocketClient::setFftUiActive(bool active)
+{
+    if (m_fftUiActive == active)
+        return;
+
+    m_fftUiActive = active;
+    qInfo().noquote() << "[FFT Runtime]"
+                      << (m_fftUiActive ? "ACTIVE" : "SUSPENDED")
+                      << "(audio remains active)";
+    emit fftUiActiveChanged(m_fftUiActive);
+}
+
+void WebSocketClient::setMaxHoldEnabled(bool enabled)
+{
+    if (m_maxHoldEnabled == enabled)
+        return;
+
+    m_maxHoldEnabled = enabled;
+    if (m_maxHoldEnabled && !m_maxHoldPublishTimer.isValid())
+        m_maxHoldPublishTimer.start();
+
+    emit maxHoldEnabledChanged(m_maxHoldEnabled);
+}
+
+void WebSocketClient::resetMaxHold()
+{
+    m_maxHold.clear();
+    if (m_maxHoldPublishTimer.isValid())
+        m_maxHoldPublishTimer.restart();
+    emit maxHoldUpdated(QVariantList());
+}
+
+QVariantList WebSocketClient::maxHoldToVariantList() const
+{
+    QVariantList snapshot;
+    snapshot.reserve(m_maxHold.size());
+    for (float value : m_maxHold)
+        snapshot.append(value);
+    return snapshot;
+}
+
+QVariantList WebSocketClient::maxHoldSnapshot() const
+{
+    return maxHoldToVariantList();
+}
+
+void WebSocketClient::updateMaxHold(const QVariantList &fftFrame)
+{
+    if (!m_maxHoldEnabled || fftFrame.isEmpty())
+        return;
+
+    const int count = fftFrame.size();
+    if (m_maxHold.size() != count) {
+        m_maxHold.resize(count);
+        std::fill(m_maxHold.begin(),
+                  m_maxHold.end(),
+                  -std::numeric_limits<float>::infinity());
+    }
+
+    for (int i = 0; i < count; ++i) {
+        const float value = fftFrame.at(i).toFloat();
+        if (std::isfinite(value) && value > m_maxHold[i])
+            m_maxHold[i] = value;
+    }
+
+    if (!m_maxHoldPublishTimer.isValid())
+        m_maxHoldPublishTimer.start();
+
+    // The display does not need a second full-span Qt->QML transfer for every
+    // FFT frame. Publish at 10 Hz while accumulating every frame natively.
+    if (m_maxHoldPublishTimer.elapsed() >= m_maxHoldPublishIntervalMs) {
+        emit maxHoldUpdated(maxHoldToVariantList());
+        m_maxHoldPublishTimer.restart();
+    }
+}
 
 void WebSocketClient::connectToServer(const QUrl &url) {
     connect(&webSocket, &QWebSocket::connected, this, &WebSocketClient::onConnected);
@@ -40,200 +120,151 @@ void WebSocketClient::resetSQLCount()
 }
 void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 {
-    if (message.isEmpty()) return;
+    if (message.isEmpty())
+        return;
 
-    // qDebug() << "onBinaryMessageReceived" << message;
-    quint8 type = static_cast<quint8>(message.at(0));
-    QByteArray data = message.mid(1);
+    const quint8 type = static_cast<quint8>(message.at(0));
 
-    // Track network speed if needed:
-    // networkSpeedMeasurement.add(message.size());
+    // Page-scoped FFT optimization: primary FFT is discarded before decode,
+    // allocation, QVariant boxing and QML delivery when the Spectrum page is
+    // inactive. Audio frame types 2/4 continue unchanged.
+    if (!m_fftUiActive && type == 1)
+        return;
 
-    QVector<float> waterfallF32;
+    // Secondary FFT currently has no active consumer in this project. The old
+    // path decoded a full frame into secondaryF32 and immediately discarded it
+    // because secondary_demod_waterfall_add() is disabled. Drop it before the
+    // payload copy/decode. Re-enable only together with a real consumer.
+    if (type == 3)
+        return;
 
     switch (type)
     {
-    case 1: { // FFT data
-        // qDebug() << "rxconfig.fft_compression " << rxconfig.fft_compression ;
-        if (rxconfig.fft_compression == "none")
-        {
-            int sampleCount = data.size() / sizeof(float);
-            const float* floatData = reinterpret_cast<const float*>(data.constData());
-            waterfallF32 = QVector<float>(floatData, floatData + sampleCount);
+    case 1: { // primary full-span FFT
+        QVariantList fftFrame;
+        const int payloadBytes = message.size() - 1;
+        if (payloadBytes <= 0)
+            break;
 
+        if (rxconfig.fft_compression == "none") {
+            // Do not create message.mid(1) and do not allocate QVector<float>.
+            // The payload starts at byte 1 and may be unaligned on ARM, so copy
+            // each float with memcpy instead of reinterpret_cast<float*>.
+            const int sampleCount = payloadBytes / static_cast<int>(sizeof(float));
+            fftFrame.reserve(sampleCount);
+
+            const char *payload = message.constData() + 1;
+            for (int i = 0; i < sampleCount; ++i) {
+                float value = 0.0f;
+                std::memcpy(&value,
+                            payload + i * static_cast<int>(sizeof(float)),
+                            sizeof(float));
+                fftFrame.append(value);
+            }
         }
         else if (rxconfig.fft_compression == "adpcm") {
             fft_codec.reset();
 
-            // Decode from ADPCM to int16_t
-            QVector<qint16> waterfallI16 = fft_codec.decode(QByteArray(data));  // fft_codec should implement decode(QByteArray)
-
-            // qDebug() << "Decode from ADPCM to int16_t" << waterfallI16;
-            int count = waterfallI16.size() - COMPRESS_FFT_PAD_N;
-            if (count > 0) {
-                waterfallF32.resize(count);
-                for (int i = 0; i < count; ++i)
-                    waterfallF32[i] = static_cast<float>(waterfallI16[i + COMPRESS_FFT_PAD_N]) / 100.0f;
-            }
+            // No-copy QByteArray view over the WebSocket payload. The codec
+            // walks the full ADPCM frame exactly as before, but writes scaled
+            // FFT values directly to QVariantList after the protocol pad.
+            const QByteArray payloadView = QByteArray::fromRawData(
+                        message.constData() + 1,
+                        payloadBytes);
+            fftFrame = fft_codec.decodeScaledToVariantList(
+                        payloadView,
+                        COMPRESS_FFT_PAD_N,
+                        0.01f);
         }
 
-        QVariantList list;
-        list.reserve(waterfallF32.size());
+        if (!fftFrame.isEmpty()) {
+            updateMaxHold(fftFrame);
+            emit fftFrameUpdated(fftFrame);
 
-        for (float f : waterfallF32) {
-            list.append(f);
+            // Preserve legacy direct consumers without paying duplicate signal
+            // delivery cost in the normal project path. Mainwindows now uses
+            // fftFrameUpdated(), so these are emitted only when someone else
+            // explicitly connects to the old signals.
+            static const QMetaMethod spectrumSignal =
+                    QMetaMethod::fromSignal(&WebSocketClient::spectrumUpdated);
+            static const QMetaMethod waterfallSignal =
+                    QMetaMethod::fromSignal(&WebSocketClient::waterfallUpdated);
+
+            if (isSignalConnected(spectrumSignal))
+                emit spectrumUpdated(fftFrame);
+            if (isSignalConnected(waterfallSignal))
+                emit waterfallUpdated(fftFrame);
         }
-        // qDebug() << "spectrumUpdated list" << list;
-        emit spectrumUpdated(list);
-        emit waterfallUpdated(list);
-
-        // QVariantList line;
-        // for (float val : waterfallF32)
-        //     line.append(val);
-        // emit waterfallUpdated(line);
-
-        // waterfall_add(waterfallF32);
-        // spectrum.update(waterfallF32);
-        // scanner.update(waterfallF32);
-        // monitorLevels(waterfallF32);
         break;
     }
 
-    case 2: { // audio data
+    case 2: { // SD audio data
+        QByteArray data = message.mid(1);
         if (rxconfig.audio_compression == "none") {
-            // const qint16* raw = reinterpret_cast<const qint16*>(data.constData());
-            // qDebug() << "audio data rxconfig.audio_compression";
-            int sampleCount = data.size() / sizeof(qint16);
+            const int sampleCount = data.size() / static_cast<int>(sizeof(qint16));
             if (sampleCount > 0) {
-
                 applySoftwareVolume(data);
 
-                if (sdAudioPlayer) {
-                    // qDebug() << "[WebSocketClient] sdAudioPlayer is success";
+                if (sdAudioPlayer)
                     sdAudioPlayer->pushAudio(data);
-                } else {
-                    // qWarning() << "[WebSocketClient] sdAudioPlayer is null";
-                }
             } else {
                 qWarning() << "Invalid PCM size:" << data.size();
             }
+
             sqlCount = 0;
-            if(sqlOn != true){
+            if (!sqlOn) {
                 sqlOn = true;
                 emit onSQLChanged(sqlOn);
-                qDebug() << "sd audio data" << "data" << data.size() << "rxconfig.audio_compression" << rxconfig.audio_compression;
+                qDebug() << "sd audio data"
+                         << "data" << data.size()
+                         << "rxconfig.audio_compression" << rxconfig.audio_compression;
             }
-
         }
         break;
     }
 
-    case 3: { // secondary FFT
-        QVector<float> secondaryF32;
-
-        if (rxconfig.fft_compression == "none") {
-            int sampleCount = data.size() / sizeof(float);
-            const float* floatData = reinterpret_cast<const float*>(data.constData());
-            secondaryF32 = QVector<float>(floatData, floatData + sampleCount);
-        } else if (rxconfig.fft_compression == "adpcm") {
-            fft_codec.reset();
-            QVector<qint16> waterfallI16 = fft_codec.decode(QByteArray(data));
-            int count = waterfallI16.size() - COMPRESS_FFT_PAD_N;
-            if (count > 0) {
-                secondaryF32.resize(count);
-                for (int i = 0; i < count; ++i)
-                    secondaryF32[i] = static_cast<float>(waterfallI16[i + COMPRESS_FFT_PAD_N]) / 100.0f;
-            }
-        }
-
-        // secondary_demod_waterfall_add(secondaryF32);
-        break;
-    }
-
-    case 4: { // hd audio data
-        if (rxconfig.audio_compression == "none")
-        {
-            int sampleCount = data.size() / sizeof(qint16);
+    case 4: { // HD audio data
+        QByteArray data = message.mid(1);
+        if (rxconfig.audio_compression == "none") {
+            const int sampleCount = data.size() / static_cast<int>(sizeof(qint16));
             if (sampleCount > 0) {
-                // ปรับเสียงบน buffer data โดยตรง
                 applySoftwareVolume(data);
-                // qDebug() << "m_volumePercent" << m_volumePercent;
 
-                if (hdAudioPlayer) {
-                    // qDebug() << "[WebSocketClient] hdAudioPlayer is success";
+                if (hdAudioPlayer)
                     hdAudioPlayer->pushAudio(data);
-                } else {
-                    // qWarning() << "[WebSocketClient] hdAudioPlayer is null";
-                }
             } else {
                 qWarning() << "Invalid PCM size:" << data.size();
             }
         }
-        else if (rxconfig.audio_compression == "adpcm")
-        {
+        else if (rxconfig.audio_compression == "adpcm") {
             PCMImaAdpcmCodec decoder;
-            QByteArray adpcmChunk = data; // from WebSocket
-
-            QVector<qint16> pcmSamples = decoder.decodeWithSync(adpcmChunk);
+            const QVector<qint16> pcmSamples = decoder.decodeWithSync(data);
 
             QByteArray pcm(reinterpret_cast<const char*>(pcmSamples.constData()),
-                           pcmSamples.size() * sizeof(qint16));
-
-            // ★ ปรับ volume หลัง decode แล้ว
+                           pcmSamples.size() * static_cast<int>(sizeof(qint16)));
             applySoftwareVolume(pcm);
-            // qDebug() << "m_volumePercent" << m_volumePercent;
 
-            if (hdAudioPlayer) {
+            if (hdAudioPlayer)
                 hdAudioPlayer->pushAudio(pcm);
-            } else {
-                // qWarning() << "[WebSocketClient] hdAudioPlayer is null";
-            }
         }
 
         sqlCount = 0;
         if (!sqlOn) {
             sqlOn = true;
-            qDebug() << "hd audio data" << "data" << data.size()
+            qDebug() << "hd audio data"
+                     << "data" << data.size()
                      << "rxconfig.audio_compression" << rxconfig.audio_compression;
             emit onSQLChanged(sqlOn);
         }
-
         break;
     }
-
 
     default:
         qWarning() << "Unknown binary message type:" << type;
         break;
     }
 }
-// void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
-// {
-//     if (message.isEmpty()) return;
 
-//     quint8 type = static_cast<quint8>(message.at(0));
-//     QByteArray data = message.mid(1);
-
-//     switch (type)
-//     {
-//         case 1: // FFT data
-//             QVariantList spectrum;
-//             const int floatSize = sizeof(float);
-//             int count = message.size() / floatSize;
-
-//             for (int i = 0; i < count; ++i)
-//             {
-//                 float value;
-//                 memcpy(&value, message.constData() + i * floatSize, floatSize);
-//                 if (!std::isnan(value))
-//                     spectrum.append(value);
-//             }
-
-//             // qDebug() << "spectrumUpdated" << spectrum;
-//             emit spectrumUpdated(spectrum);
-//         break;
-//     }
-// }
 void WebSocketClient::handleConfigMessage(const QJsonObject &config)
 {
     rxconfig.fromJson(config);

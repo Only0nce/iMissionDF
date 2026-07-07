@@ -18,14 +18,53 @@ Item {
     property real priStart: 0
     property real priStop: 0
 
+    // Page lifecycle gate. When false, C++ drops FFT frame types 1/3 before
+    // decode/boxing while audio frame types 2/4 continue uninterrupted.
+    property bool runtimeActive: false
+    property bool runtimeInitialized: false
+
+    // Virtual zoom width only. Render surfaces stay fixed at root.width so
+    // zoom never allocates 2x..20x Canvas/FBO backing stores.
     property real plotWidth: root.width
+    readonly property real zoomFactor: Math.max(1.0, plotWidth / Math.max(1.0, root.width))
+    property real viewPanRatio: 0.0
+    readonly property real visibleSpanHz: Math.max(1.0, sampRate / zoomFactor)
+    readonly property real fullStartFreq: centerFreq - sampRate / 2.0
+    readonly property real viewStartFreq: fullStartFreq
+                                              + Math.max(0.0, sampRate - visibleSpanHz)
+                                                * Math.max(0.0, Math.min(1.0, viewPanRatio))
+    readonly property real viewStopFreq: viewStartFreq + visibleSpanHz
+
     property real dataCount : 0
     property real smeterLevel: -100
     property var  spectrumData: []
-    property var  waterfallBuffer: []
+    // Keep only the newest waterfall FFT row. The painted Canvas already owns
+    // the visual history, so retaining one JS array per historical row wastes RAM.
+    property var  latestWaterfallLine: []
     property var  waterfallColorMap: []
+    // Prebuilt CSS colors avoid allocating "rgb(r,g,b)" strings per FFT bin/frame.
+    property var  waterfallCssPalette: []
+
+    // Phase 4 runtime budgets. Full-span FFT is preserved; only UI delivery and
+    // rendering cadence are bounded to avoid saturating one CPU core.
+    property int waterfallTargetFps: 25
+    property int waterfallMaxColumns: 1280
+    property int offsetCommandIntervalMs: 20
+    property real pendingOffsetCommand: 0
+    property bool offsetCommandPending: false
+    property bool offsetRecenterInProgress: false
+
+    // Max Hold is accumulated in C++ on every FFT frame and published to QML
+    // at a lower display rate. Peak Scan requests an exact native snapshot.
+    property var maxHoldDisplayData: []
+
     property real smeterBuffered: smeterLevel
 
+    // Single FFT delivery from C++. The same full-span frame feeds Spectrum and
+    // Waterfall, cutting duplicate Qt->QML signal traffic per FFT frame.
+    signal fftFrameUpdated(var frame)
+
+    // Legacy local signals retained for source compatibility with older helpers.
     signal spectrumUpdated(var spectrum)
     signal waterfallUpdated(var line)
     signal waterfallColorUpdate(var colors)
@@ -78,13 +117,161 @@ Item {
         id: spectrumPaintTimer
         interval: 33
         repeat: false
-        onTriggered: spectrumCanvas.requestPaint()
+        onTriggered: {
+            if (root.runtimeActive)
+                spectrumCanvas.requestPaint()
+        }
     }
 
     function scheduleSpectrumPaint() {
+        if (!root.runtimeActive)
+            return
         if (!spectrumPaintTimer.running)
             spectrumPaintTimer.start()
     }
+
+    // Latest-frame-wins Waterfall cadence. 25 FPS is visually continuous while
+    // cutting full-surface scroll/composite frequency versus the previous 30 FPS.
+    Timer {
+        id: waterfallPaintTimer
+        interval: Math.max(16, Math.round(1000 / Math.max(1, root.waterfallTargetFps)))
+        repeat: false
+        onTriggered: {
+            if (root.runtimeActive && latestWaterfallLine && latestWaterfallLine.length)
+                waterfallCanvas.requestPaint()
+        }
+    }
+
+    function scheduleWaterfallPaint() {
+        if (!root.runtimeActive)
+            return
+        if (!waterfallPaintTimer.running)
+            waterfallPaintTimer.start()
+    }
+
+    function rebuildWaterfallCssPalette(colors) {
+        waterfallColorMap = colors || []
+
+        var css = []
+        const count = waterfallColorMap.length
+        for (var i = 0; i < count; ++i) {
+            const rgb = Number(waterfallColorMap[i]) || 0
+            const r = (rgb >> 16) & 0xFF
+            const g = (rgb >> 8) & 0xFF
+            const b = rgb & 0xFF
+            css.push("rgb(" + r + "," + g + "," + b + ")")
+        }
+
+        if (css.length === 0)
+            css.push("rgb(0,0,0)")
+
+        waterfallCssPalette = css
+    }
+
+    function nativeMaxHoldAvailable() {
+        return typeof wsClient !== "undefined"
+                && wsClient
+                && wsClient.setMaxHoldEnabled
+                && wsClient.resetMaxHold
+                && wsClient.maxHoldSnapshot
+    }
+
+    function syncNativeMaxHoldState() {
+        if (!nativeMaxHoldAvailable())
+            return
+
+        const needed = root.runtimeActive
+                && (spectrumCanvas.showMaxHold || peakScan.running)
+        wsClient.setMaxHoldEnabled(needed)
+    }
+
+    function resetNativeMaxHold() {
+        maxHoldDisplayData = []
+        maxHoldKept = []
+        if (nativeMaxHoldAvailable())
+            wsClient.resetMaxHold()
+    }
+
+    function peakScanMaxHoldSnapshot() {
+        if (nativeMaxHoldAvailable()) {
+            const snapshot = wsClient.maxHoldSnapshot()
+            return snapshot && snapshot.length ? snapshot : []
+        }
+        return maxHoldDisplayData && maxHoldDisplayData.length
+                ? maxHoldDisplayData.slice() : []
+    }
+
+    Connections {
+        target: (typeof wsClient !== "undefined") ? wsClient : null
+        ignoreUnknownSignals: true
+
+        function onMaxHoldUpdated(data) {
+            if (!root.runtimeActive)
+                return
+            root.maxHoldDisplayData = data || []
+            if (spectrumCanvas.showMaxHold)
+                root.scheduleSpectrumPaint()
+        }
+    }
+
+    Connections {
+        target: root
+
+        function onFftFrameUpdated(frame) {
+            if (!root.runtimeActive || !frame || frame.length < 2)
+                return
+
+            // One frame object is reused by both render paths. Spectrum and
+            // Waterfall remain full-span; no bandwidth crop is introduced.
+            spectrumData = frame
+            latestWaterfallLine = frame
+            root.scheduleSpectrumPaint()
+            root.scheduleWaterfallPaint()
+        }
+    }
+
+    function syncFftRuntime() {
+        if (!runtimeInitialized)
+            return
+
+        if (typeof wsClient !== "undefined" && wsClient && wsClient.setFftUiActive)
+            wsClient.setFftUiActive(runtimeActive)
+
+        if (runtimeActive) {
+            syncNativeMaxHoldState()
+            if (spectrumGridCanvas)
+                spectrumGridCanvas.invalidate()
+            return
+        }
+
+        if (nativeMaxHoldAvailable())
+            wsClient.setMaxHoldEnabled(false)
+
+        // Stop UI-owned realtime work when this page is not active.
+        spectrumPaintTimer.stop()
+        waterfallPaintTimer.stop()
+        scanTimer.stop()
+        resetCenterFreqTimer.stop()
+        zoomNavTimer.stop()
+        zoomTimer.stop()
+        spectrumCanvas.clearPeakTimer.stop()
+
+        scanning = false
+
+        // Peak scan depends on FFT/max-hold. Stop it cleanly instead of letting
+        // its timers continue with stale data after the FFT gate closes.
+        if (peakScan.running)
+            peakScan.stopRange()
+
+        // Release large QML/JS-side FFT buffers. The next active frame repopulates them.
+        spectrumData = []
+        latestWaterfallLine = []
+        maxHoldDisplayData = []
+        maxHoldKept = []
+        spectrumCanvas.clearPeaks()
+    }
+
+    onRuntimeActiveChanged: syncFftRuntime()
 
     // ===== Timer ที่ใช้แทน for loop =====
     Timer {
@@ -99,8 +286,38 @@ Item {
         }
     }
 
+    // Coalesce rapid offset changes (scan timer and touch drag) into one DSP
+    // command every ~20 ms. The scan progression remains unchanged at 5 ms;
+    // only redundant JSON/WebSocket/backend traffic is bounded.
+    Timer {
+        id: offsetCommandTimer
+        interval: root.offsetCommandIntervalMs
+        repeat: false
+        onTriggered: root.flushOffsetCommand()
+    }
+
+    function sendOffsetCommandNow(value) {
+        mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + value + '}}')
+        mainWindows.updateCurrentOffsetFreq(value, centerFreq)
+    }
+
+    function queueOffsetCommand(value) {
+        pendingOffsetCommand = value
+        offsetCommandPending = true
+        if (!offsetCommandTimer.running)
+            offsetCommandTimer.start()
+    }
+
+    function flushOffsetCommand() {
+        if (!offsetCommandPending)
+            return
+        const value = pendingOffsetCommand
+        offsetCommandPending = false
+        sendOffsetCommandNow(value)
+    }
+
     function startScan() {
-        if (scanning) return
+        if (!runtimeActive || scanning) return
         currentOffset = offsetStart
         scanning = true
         scanTimer.start()
@@ -109,11 +326,17 @@ Item {
     function stopScan() {
         scanning = false
         scanTimer.stop()
+        if (offsetCommandPending)
+            flushOffsetCommand()
     }
 
     onBandwidthChanged: {
         console.log("Bandwidth:", bandwidth, low_cut, high_cut)
+        if (runtimeActive)
+            overlayCanvas.requestPaint()
     }
+    onLow_cutChanged: { if (runtimeActive) overlayCanvas.requestPaint() }
+    onHigh_cutChanged: { if (runtimeActive) overlayCanvas.requestPaint() }
 
     onStart_modChanged: {
         let idx = getReceiverIndex(start_mod);
@@ -122,22 +345,39 @@ Item {
     }
 
     onOffsetFrequencyChanged: {
+        if (runtimeActive)
+            overlayCanvas.requestPaint()
+
+        if (offsetRecenterInProgress)
+            return
+
         if (((centerFreq + offsetFrequency) > (centerFreq + (sampRate / 2))) ||
             ((centerFreq + offsetFrequency) < (centerFreq - (sampRate / 2)))) {
+            // Re-centering changes the RF center and must remain immediate. Drop
+            // any queued stale offset command before applying the new center.
+            offsetCommandTimer.stop()
+            offsetCommandPending = false
+            offsetRecenterInProgress = true
+
             centerFreq = centerFreq + offsetFrequency
             offsetFrequency = 0
             mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFreq + ',"key":"memagic"}}')
+            sendOffsetCommandNow(0)
             updateFrequency()
+
+            offsetRecenterInProgress = false
         } else {
-            mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
             freqScan = centerFreq + offsetFrequency
             updateFrequency()
+            queueOffsetCommand(offsetFrequency)
         }
-        mainWindows.updateCurrentOffsetFreq(offsetFrequency, centerFreq)
     }
 
     onCenterFreqChanged: {
-        spectrumCanvas.clearPeakTimer.start()
+        if (runtimeActive) {
+            spectrumCanvas.clearPeakTimer.start()
+            overlayCanvas.requestPaint()
+        }
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
@@ -145,25 +385,43 @@ Item {
         if (setCenterFreq !== centerFreq) {
             mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + setCenterFreq + ',"key":"memagic"}}')
         }
-        spectrumCanvas.clearPeakTimer.start()
+        if (runtimeActive)
+            spectrumCanvas.clearPeakTimer.start()
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
     onSampRateChanged: {
-        scheduleSpectrumPaint()
-        waterfallCanvas.requestPaint()
-        overlayCanvas.requestPaint()
+        if (runtimeActive) {
+            scheduleSpectrumPaint()
+            waterfallCanvas.requestPaint()
+            overlayCanvas.requestPaint()
+        }
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
     onWaterfallMinDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
     onWaterfallMaxDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
 
+    onWidthChanged: {
+        // Keep the virtual zoom factor stable across window-size changes without
+        // ever resizing render surfaces beyond the visible page width.
+        if (plotWidth < width)
+            plotWidth = width
+        Qt.callLater(syncZoomNavFromRatio)
+        invalidateViewport(true)
+    }
+
+    onViewPanRatioChanged: {
+        if (runtimeActive)
+            invalidateViewport(true)
+    }
+
     Component.onCompleted: {
+        runtimeInitialized = true
+
         mainWindows.updateCenterFreq.connect(updateCenterFreq)
 
-        mainWindows.spectrumUpdated.connect(spectrumUpdated)
-        mainWindows.waterfallUpdated.connect(waterfallUpdated)
+        mainWindows.fftFrameUpdated.connect(fftFrameUpdated)
         mainWindows.waterfallColorUpdate.connect(waterfallColorUpdate)
 
         mainWindows.findBandsWithProfile.connect(findBandsWithProfile)
@@ -172,7 +430,19 @@ Item {
             smeterValueUpdated(smeter)
         })
 
-        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+        if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
+
+        // Enable the C++ FFT path only after all QML signal handlers are connected.
+        syncFftRuntime()
+    }
+
+    Component.onDestruction: {
+        offsetCommandTimer.stop()
+        offsetCommandPending = false
+        if (nativeMaxHoldAvailable())
+            wsClient.setMaxHoldEnabled(false)
+        if (typeof wsClient !== "undefined" && wsClient && wsClient.setFftUiActive)
+            wsClient.setFftUiActive(false)
     }
 
     function setOffset(freqOffset) {
@@ -184,27 +454,64 @@ Item {
         offsetFrequency = freqOffset;
         overlayCanvas.requestPaint()
         scheduleSpectrumPaint()
-        waterfallCanvas.requestPaint()
+    }
+
+    function clamp01(value) {
+        return Math.max(0.0, Math.min(1.0, Number(value) || 0.0))
+    }
+
+    function syncZoomNavFromRatio() {
+        if (!zoomNav || !zoomNav.rectangle)
+            return
+
+        const travel = Math.max(0.0, zoomNav.width - zoomNav.rectangle.width)
+        zoomNav.rectangle.x = travel > 0.0 ? clamp01(viewPanRatio) * travel : 0.0
+    }
+
+    function updateViewPanFromNav() {
+        if (!zoomNav || !zoomNav.rectangle)
+            return
+
+        const travel = Math.max(0.0, zoomNav.width - zoomNav.rectangle.width)
+        const nextRatio = travel > 0.0 ? zoomNav.rectangle.x / travel : 0.0
+        const clamped = clamp01(nextRatio)
+        if (Math.abs(clamped - viewPanRatio) > 0.000001)
+            viewPanRatio = clamped
+    }
+
+    function invalidateViewport(clearWaterfallHistory) {
+        scheduleSpectrumPaint()
+        if (overlayCanvas)
+            overlayCanvas.requestPaint()
+        if (spectrumGridCanvas)
+            spectrumGridCanvas.invalidate()
+
+        if (clearWaterfallHistory && waterfallCanvas) {
+            waterfallCanvas.clearBeforeNextPaint = true
+            if (runtimeActive)
+                waterfallCanvas.requestPaint()
+        }
     }
 
     function zoomIn() {
         plotWidth += zoomStep
-        if (plotWidth > root.width * 20) plotWidth = root.width * 20
+        if (plotWidth > root.width * 20)
+            plotWidth = root.width * 20
         applyZoom()
     }
 
     function zoomOut() {
         plotWidth -= zoomStep
-        if (plotWidth < root.width) plotWidth = root.width
+        if (plotWidth < root.width)
+            plotWidth = root.width
         applyZoom()
     }
 
     function applyZoom() {
-        scheduleSpectrumPaint()
-        waterfallCanvas.requestPaint()
-        overlayCanvas.requestPaint()
+        viewPanRatio = clamp01(viewPanRatio)
+        Qt.callLater(syncZoomNavFromRatio)
         zoomNav.rectangle.opacity = 1
-        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+        invalidateViewport(true)
     }
 
     function smeterValueUpdated(smeter) { smeterLevel = smeter }
@@ -223,13 +530,13 @@ Item {
         start_mod = mainWindows.start_mod()
         freqScan = centerFreq
         updateFrequency()
-        resetCenterFreqTimer.start()
+        if (runtimeActive)
+            resetCenterFreqTimer.start()
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
     function autoScaleWaterfallColor() {
-        if (waterfallBuffer.length === 0) return;
-        var latestLine = waterfallBuffer[waterfallBuffer.length - 1];
+        var latestLine = latestWaterfallLine;
         if (!latestLine || latestLine.length < 2) return;
 
         var minVal = latestLine[0];
@@ -273,8 +580,11 @@ Item {
         id: autoScaleTimer
         interval: 500
         repeat: true
-        running: autoScaleEnabled
-        onTriggered: autoScaleWaterfallColor()
+        running: root.runtimeActive && autoScaleEnabled
+        onTriggered: {
+            if (root.runtimeActive)
+                autoScaleWaterfallColor()
+        }
     }
 
     /* ============================================================
@@ -283,12 +593,16 @@ Item {
        ============================================================ */
     Canvas {
         id: spectrumGridCanvas
+        x: spectrumCanvas.x
+        y: spectrumCanvas.y
         width: spectrumCanvas.width
         height: spectrumCanvas.height
 
+        // Real static layer: render grid only when frequency/range/size changes.
+        // Spectrum no longer composites this full canvas every 33 ms.
         visible: true
-        opacity: 0.0
-        z: -1000
+        opacity: 1.0
+        z: 0
 
         renderTarget: Canvas.FramebufferObject
         renderStrategy: Canvas.Immediate
@@ -299,7 +613,8 @@ Item {
 
         function invalidate() {
             ready = false
-            requestPaint()
+            if (root.runtimeActive)
+                requestPaint()
         }
 
         onWidthChanged:  invalidate()
@@ -335,8 +650,10 @@ Item {
             const xAxisH   = 18
             const yAxisBot = xAxisH
 
-            let startFreq = root.centerFreq - root.sampRate / 2
-            let stopFreq  = root.centerFreq + root.sampRate / 2
+            // Draw only the logical viewport. Canvas width remains fixed,
+            // while zoom/pan changes the visible frequency range.
+            let startFreq = root.viewStartFreq
+            let stopFreq  = root.viewStopFreq
             let freqRange = Math.max(1, (stopFreq - startFreq))
 
             // baseline (top axis line)
@@ -349,7 +666,7 @@ Item {
 
             // label step by pixel spacing
             ctx.font = "11px monospace"
-            let pixelsPerHz = w / Math.max(1, root.sampRate)
+            let pixelsPerHz = w / Math.max(1, root.visibleSpanHz)
             let minLabelSpacingPx = 160
             let rawStep = minLabelSpacingPx / Math.max(1e-12, pixelsPerHz)
             let pow10 = Math.pow(10, Math.floor(Math.log10(rawStep)))
@@ -398,29 +715,28 @@ Item {
             }
 
             ready = true
-
-            // ✅ IMPORTANT: grid finished -> paint spectrum once (no loop)
-            root.scheduleSpectrumPaint()
         }
     }
 
     Canvas {
         id: spectrumCanvas
-        width: plotWidth
+        z: 1
+        // Fixed-size render surface: logical zoom changes bin mapping only.
+        width: root.width
         height: parent.height / 4
         renderTarget: Canvas.FramebufferObject
         renderStrategy: Canvas.Cooperative
         antialiasing: false
         smooth: false
-        x: plotWidth > root.width ? zoomNav.rectangle.x * (plotWidth / root.width) * (-1) : 0
+        x: 0
 
         property alias clearPeakTimer: clearPeakTimer
-        property var maxHold: []
         property bool showMaxHold: true
 
+        onShowMaxHoldChanged: root.syncNativeMaxHoldState()
+
         function clearPeaks() {
-            maxHold = []
-            maxHoldKept = []
+            root.resetNativeMaxHold()
         }
 
         Timer {
@@ -443,11 +759,6 @@ Item {
             if (!spectrumData || spectrumData.length < 2)
                 return;
 
-            // ✅ draw cached grid ONLY if ready (no requestPaint here -> avoids CPU loop)
-            if (spectrumGridCanvas && spectrumGridCanvas.ready) {
-                ctx.drawImage(spectrumGridCanvas, 0, 0, w, h)
-            }
-
             const minDb = root.waterfallMinDb;
             const maxDb = root.waterfallMaxDb;
             const rangeDb = Math.max(1e-6, (maxDb - minDb));
@@ -457,61 +768,67 @@ Item {
 
             function yOf(v) { return plotH - ((v - minDb) / rangeDb) * plotH; }
 
+            // Map the full-span FFT into the current logical viewport.
+            const fullBins = spectrumData.length
+            const startRatio = Math.max(0.0, Math.min(1.0,
+                (root.viewStartFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
+            const stopRatio = Math.max(startRatio, Math.min(1.0,
+                (root.viewStopFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
+            const startBin = Math.max(0, Math.min(fullBins - 1,
+                Math.floor(startRatio * (fullBins - 1))))
+            const endBin = Math.max(startBin + 1, Math.min(fullBins - 1,
+                Math.ceil(stopRatio * (fullBins - 1))))
+            const visibleBins = Math.max(2, endBin - startBin + 1)
+
             // Spectrum line
             ctx.beginPath();
             ctx.strokeStyle = "#00FF00";
             ctx.lineWidth = 1;
-            ctx.moveTo(0, yOf(spectrumData[0]));
+            ctx.moveTo(0, yOf(spectrumData[startBin]));
 
-            // (optional) speed: sample step by pixel width
-            let step = Math.max(1, Math.floor(spectrumData.length / Math.max(1, w)))
-            for (var i = step; i < spectrumData.length; i += step) {
-                let x = i / (spectrumData.length - 1) * w;
+            // Draw no more samples than the fixed display width needs.
+            let step = Math.max(1, Math.floor(visibleBins / Math.max(1, w)))
+            for (var i = startBin + step; i <= endBin; i += step) {
+                let x = (i - startBin) / Math.max(1, endBin - startBin) * w;
                 let y = yOf(spectrumData[i]);
                 ctx.lineTo(x, y);
             }
+            if ((endBin - startBin) % step !== 0)
+                ctx.lineTo(w, yOf(spectrumData[endBin]))
             ctx.stroke();
 
-            // Max hold
-            for (var j = 0; j < spectrumData.length; ++j) {
-                if (maxHold.length < spectrumData.length)
-                    maxHold.push(spectrumData[j]);
-                else if (spectrumData[j] > maxHold[j])
-                    maxHold[j] = spectrumData[j];
-            }
-            maxHoldKept = maxHold
-
-            if (showMaxHold && maxHold.length === spectrumData.length) {
+            // Max Hold accumulation runs natively in WebSocketClient on every
+            // FFT frame. QML only paints the throttled display snapshot, removing
+            // the full FFT-sized JavaScript comparison loop from Canvas::onPaint.
+            const maxHold = root.maxHoldDisplayData
+            if (showMaxHold && maxHold && maxHold.length === spectrumData.length) {
                 ctx.beginPath();
                 ctx.strokeStyle = theme.maxHoldLine;
                 ctx.lineWidth = 1;
-                ctx.moveTo(0, yOf(maxHold[0]));
+                ctx.moveTo(0, yOf(maxHold[startBin]));
 
-                let step2 = Math.max(1, Math.floor(maxHold.length / Math.max(1, w)))
-                for (var k = step2; k < maxHold.length; k += step2) {
-                    let x2 = k / (maxHold.length - 1) * w;
+                let step2 = Math.max(1, Math.floor(visibleBins / Math.max(1, w)))
+                for (var k = startBin + step2; k <= endBin; k += step2) {
+                    let x2 = (k - startBin) / Math.max(1, endBin - startBin) * w;
                     let y2 = yOf(maxHold[k]);
                     ctx.lineTo(x2, y2);
                 }
+                if ((endBin - startBin) % step2 !== 0)
+                    ctx.lineTo(w, yOf(maxHold[endBin]))
                 ctx.stroke();
             }
         }
 
-        Connections {
-            target: root
-            function onSpectrumUpdated(spectrum) {
-                spectrumData = spectrum
-                root.scheduleSpectrumPaint()   // ✅ throttle (fix CPU)
-            }
-        }
     }
 
     Canvas {
         id: waterfallCanvas
+        z: 1
         y: spectrumCanvas.height
-        x: spectrumCanvas.x
-        width: spectrumCanvas.width
+        x: 0
+        width: root.width
         height: parent.height / 4
+        property bool clearBeforeNextPaint: false
 
         onPaint: {
             const minDb = waterfallMinDb;
@@ -519,44 +836,97 @@ Item {
             const rangeDb = maxDb - minDb;
             var ctx = getContext("2d");
 
-            // Scroll down by 1px
-            ctx.drawImage(waterfallCanvas, 0, 0, width, height - 1, 0, 1, width, height - 1);
+            if (clearBeforeNextPaint) {
+                ctx.clearRect(0, 0, width, height)
+                clearBeforeNextPaint = false
+            } else {
+                // Scroll down by 1px only for a new FFT paint.
+                ctx.drawImage(waterfallCanvas, 0, 0, width, height - 1,
+                              0, 1, width, height - 1);
+            }
 
-            var line = waterfallBuffer[waterfallBuffer.length - 1];
+            var line = latestWaterfallLine;
             if (!line || typeof line.length === "undefined") return;
 
-            const canvasWidth = width;
+            const canvasWidth = Math.max(1, Math.floor(width));
             const bins = line.length;
+            if (bins < 1)
+                return;
 
-            for (let i = 0; i < bins; ++i) {
-                const x = Math.floor(i / (bins - 1) * canvasWidth);
+            // Select only bins inside the logical viewport. The underlying FFT
+            // remains full-span; this is display mapping only, not partial decode.
+            const startRatio = Math.max(0.0, Math.min(1.0,
+                (root.viewStartFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
+            const stopRatio = Math.max(startRatio, Math.min(1.0,
+                (root.viewStopFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
+            const startBin = Math.max(0, Math.min(bins - 1,
+                Math.floor(startRatio * (bins - 1))))
+            const endBin = Math.max(startBin, Math.min(bins - 1,
+                Math.ceil(stopRatio * (bins - 1))))
+            const visibleBins = Math.max(1, endBin - startBin + 1)
 
-                const dB = Math.max(minDb, Math.min(maxDb, line[i]));
-                const norm = (dB - minDb) / Math.max(1e-9, rangeDb);
-                const colorIndex = Math.floor(norm * (waterfallColorMap.length - 1));
+            // Fixed-size renderer: no matter whether zoom is 1x or 20x, at most
+            // one aggregation pass per screen column is performed.
+            const columns = Math.max(1, Math.min(
+                canvasWidth, visibleBins, root.waterfallMaxColumns));
+            const palette = waterfallCssPalette.length > 0
+                          ? waterfallCssPalette
+                          : ["rgb(0,0,0)"];
+            const paletteLast = palette.length - 1;
+            const safeRangeDb = Math.max(1e-9, rangeDb);
 
-                const rgb = waterfallColorMap[colorIndex] || 0;
-                const r = (rgb >> 16) & 0xFF;
-                const g = (rgb >> 8) & 0xFF;
-                const b = rgb & 0xFF;
+            var runColor = -1;
+            var runStartX = 0;
 
-                ctx.fillStyle = `rgb(${r},${g},${b})`;
-                ctx.fillRect(x, 0, 1, 1);
+            function flushRun(endX) {
+                if (runColor < 0 || endX <= runStartX)
+                    return;
+                ctx.fillStyle = palette[runColor];
+                ctx.fillRect(runStartX, 0, endX - runStartX, 1);
+            }
+
+            for (var column = 0; column < columns; ++column) {
+                const srcStart = startBin + Math.floor(column * visibleBins / columns);
+                const srcEnd = Math.min(endBin + 1, Math.max(srcStart + 1,
+                    startBin + Math.floor((column + 1) * visibleBins / columns)));
+
+                var peakDb = Number(line[srcStart]);
+                if (!isFinite(peakDb))
+                    peakDb = minDb;
+
+                for (var src = srcStart + 1; src < srcEnd; ++src) {
+                    const sampleDb = Number(line[src]);
+                    if (isFinite(sampleDb) && sampleDb > peakDb)
+                        peakDb = sampleDb;
+                }
+
+                const clampedDb = Math.max(minDb, Math.min(maxDb, peakDb));
+                const norm = (clampedDb - minDb) / safeRangeDb;
+                const colorIndex = Math.max(0, Math.min(
+                    paletteLast, Math.floor(norm * paletteLast)));
+
+                const x0 = Math.floor(column * canvasWidth / columns);
+                const x1 = Math.max(x0 + 1,
+                                    Math.floor((column + 1) * canvasWidth / columns));
+
+                if (runColor < 0) {
+                    runColor = colorIndex;
+                    runStartX = x0;
+                } else if (colorIndex !== runColor) {
+                    flushRun(x0);
+                    runColor = colorIndex;
+                    runStartX = x0;
+                }
+
+                if (column === columns - 1)
+                    flushRun(Math.min(canvasWidth, x1));
             }
         }
 
         Connections {
             target: root
-            function onWaterfallColorUpdate(colors) { waterfallColorMap = colors }
-        }
-
-        Connections {
-            target: root
-            function onWaterfallUpdated(line) {
-                if (waterfallBuffer.length >= waterfallCanvas.height)
-                    waterfallBuffer.shift();
-                waterfallBuffer.push(line);
-                waterfallCanvas.requestPaint();
+            function onWaterfallColorUpdate(colors) {
+                root.rebuildWaterfallCssPalette(colors)
             }
         }
     }
@@ -578,8 +948,8 @@ Item {
             let ctx = getContext("2d");
             ctx.clearRect(0, 0, width, height);
 
-            let startFreq = centerFreq - sampRate / 2;
-            let freqRange = sampRate;
+            let startFreq = root.viewStartFreq;
+            let freqRange = root.visibleSpanHz;
             let canvasWidth = width;
             let canvasHeight = height;
 
@@ -615,8 +985,8 @@ Item {
             onPressed: {
                 let x = mouse.x;
                 let canvasWidth = overlayCanvas.width;
-                let startFreq = centerFreq - sampRate / 2;
-                let freqRange = sampRate;
+                let startFreq = root.viewStartFreq;
+                let freqRange = root.visibleSpanHz;
 
                 let offsetFreqAbs = centerFreq + offsetFrequency;
                 let targetX = ((offsetFreqAbs - startFreq) / freqRange) * canvasWidth;
@@ -633,7 +1003,6 @@ Item {
 
                     overlayCanvas.requestPaint();
                     root.scheduleSpectrumPaint()
-                    waterfallCanvas.requestPaint();
 
                     if (mainWindows.setOffsetFrequency)
                         mainWindows.setOffsetFrequency(Math.round(offsetFrequency));
@@ -649,7 +1018,7 @@ Item {
                 let deltaX = x - dragX;
                 dragX = x;
 
-                let deltaFreq = (deltaX / overlayCanvas.width) * sampRate;
+                let deltaFreq = (deltaX / overlayCanvas.width) * root.visibleSpanHz;
                 let newOffset = offsetFrequency + deltaFreq;
 
                 newOffset = Math.round(newOffset / offsetSnapStep) * offsetSnapStep;
@@ -657,18 +1026,12 @@ Item {
 
                 overlayCanvas.requestPaint();
                 root.scheduleSpectrumPaint()
-                waterfallCanvas.requestPaint();
 
                 if (mainWindows.setOffsetFrequency)
                     mainWindows.setOffsetFrequency(Math.round(offsetFrequency));
             }
         }
 
-        Connections {
-            target: root
-            function onSpectrumUpdated(_)  { overlayCanvas.requestPaint() }
-            function onWaterfallUpdated(_) { overlayCanvas.requestPaint() }
-        }
     }
 
     Item {
@@ -680,11 +1043,11 @@ Item {
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         z:97
-        visible: spectrumCanvas.width > root.width
+        visible: root.zoomFactor > 1.0001
         property alias rectangle: rectangle
         Rectangle {
             id: rectangle
-            width: root.width*(root.width/spectrumCanvas.width)
+            width: Math.max(8, root.width / root.zoomFactor)
             color: theme.zoomViewportCss
             radius: 2
             anchors.top: parent.top
@@ -703,12 +1066,7 @@ Item {
                 drag.minimumX: 0
                 drag.maximumX: zoomNav.width - parent.width
 
-                onReleased: {
-                    // Optional: calculate new offsetFrequency or view based on parent.x
-                    const ratio = parent.x / (zoomNav.width - parent.width);
-                    console.log("Slider moved to %:", Math.round(ratio * 100));
-                    // You could adjust offsetFrequency or trigger repaint here
-                }
+                onReleased: root.updateViewPanFromNav()
                 onClicked:
                     zoomNavTimer.restart()
 
@@ -716,6 +1074,15 @@ Item {
             onXChanged: {
                 zoomNavTimer.restart()
                 rectangle.opacity = 1
+                // onViewPanRatioChanged performs the single coalesced viewport invalidation.
+                root.updateViewPanFromNav()
+            }
+
+            onWidthChanged: {
+                const maxX = Math.max(0, zoomNav.width - width)
+                if (x > maxX)
+                    x = maxX
+                root.updateViewPanFromNav()
             }
 
         }
@@ -804,6 +1171,9 @@ Item {
         buttonReset.onClicked: {
             zoomTimer.restart()
             plotWidth = root.width
+            viewPanRatio = 0.0
+            zoomNav.rectangle.x = 0
+            applyZoom()
         }
         buttonClear.onClicked: {
             zoomTimer.restart()
@@ -907,6 +1277,7 @@ Item {
 
         /* ===== CONFIG / RUNTIME PROPS ===== */
         property bool   running: false
+        onRunningChanged: root.syncNativeMaxHoldState()
         property real   startHz: 0
         property real   stopHz: 0
         property real   spanHz: 0
@@ -1110,6 +1481,10 @@ Item {
 
         /* ===== Start (queue-aware) ===== */
         function startRange(sHz, eHz, opts) {
+            if (!root.runtimeActive) {
+                console.log("[PeakScan] ignored while spectrum page is inactive")
+                return
+            }
             console.log("sHz:",sHz," eHz:",eHz," opts:",opts)
             if (running) {
                 jobQueue.push({ sHz: sHz, eHz: eHz, opt: (opts||{}) })
@@ -1192,7 +1567,7 @@ Item {
             repeat: false
             interval: peakScan.dwellMs
             onTriggered: {
-                const data = (root.maxHoldKept && root.maxHoldKept.length) ? root.maxHoldKept.slice() : []
+                const data = root.peakScanMaxHoldSnapshot()
                 if (data.length) {
                     for (var i = 0; i < peakScan.modes.length; ++i) {
                         const m = peakScan.modes[i]

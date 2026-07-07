@@ -40,6 +40,33 @@ QVector<qint16> ImaAdpcmCodec::decode(const QByteArray &data)
     return output;
 }
 
+QVariantList ImaAdpcmCodec::decodeScaledToVariantList(const QByteArray &data,
+                                                       int skipSamples,
+                                                       float scale)
+{
+    const int normalizedSkip = std::max(0, skipSamples);
+    const int totalSamples = data.size() * 2;
+
+    QVariantList output;
+    output.reserve(std::max(0, totalSamples - normalizedSkip));
+
+    int sampleIndex = 0;
+    for (int i = 0; i < data.size(); ++i)
+    {
+        const quint8 byte = static_cast<quint8>(data.at(i));
+
+        const qint16 lowSample = decodeNibble(byte & 0x0F);
+        if (sampleIndex++ >= normalizedSkip)
+            output.append(QVariant::fromValue(static_cast<float>(lowSample) * scale));
+
+        const qint16 highSample = decodeNibble((byte >> 4) & 0x0F);
+        if (sampleIndex++ >= normalizedSkip)
+            output.append(QVariant::fromValue(static_cast<float>(highSample) * scale));
+    }
+
+    return output;
+}
+
 qint16 ImaAdpcmCodec::decodeNibble(quint8 nibble)
 {
     stepIndex += indexTable[nibble];

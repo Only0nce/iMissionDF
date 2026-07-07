@@ -62,8 +62,10 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     InputEventReader *buttons = new InputEventReader("/dev/input/by-path/platform-gpio-keys-event");
     // connect(iPatchServerSocket,&SocketClient::newCommandProcess,this,&Mainwindows::newCommandProcess);
     connect(socketClientReconnectTimer,&QTimer::timeout,this,&Mainwindows::socketClientReconnect);
-    connect(&wsClient,&WebSocketClient::spectrumUpdated,this,&Mainwindows::spectrumUpdated);
-    connect(&wsClient,&WebSocketClient::waterfallUpdated,this,&Mainwindows::waterfallUpdated);
+    // One Qt signal crossing per FFT frame. QML reuses the same frame for
+    // Spectrum and Waterfall instead of receiving two duplicate deliveries.
+    connect(&wsClient, &WebSocketClient::fftFrameUpdated,
+            this, &Mainwindows::fftFrameUpdated);
     connect(&wsClient,&WebSocketClient::smeterValueUpdated,this,&Mainwindows::smeterValueUpdated);
     connect(&wsClient,&WebSocketClient::waterfallColorMap,this,&Mainwindows::waterfallColorUpdate);
     connect(&wsClient,&WebSocketClient::waterfallLevelsChanged,this,&Mainwindows::waterfallLevelsChanged);
@@ -1595,34 +1597,74 @@ int Mainwindows::vpnRunCmd(const QString &program,
     return p.exitCode();
 }
 
-bool Mainwindows::vpnSystemctlIsActive() const
+void Mainwindows::vpnRefreshRuntimeCache(bool forceRefresh) const
 {
-    QProcess p;
-    p.start("systemctl", {"is-active", vpnServiceName});
-    p.waitForFinished(1500);
-    const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
-    return (out == "active");
-}
+    // A single VPN poll publishes to both WebSocket clients and QML. Reuse one
+    // service/interface snapshot for a short window instead of spawning
+    // systemctl multiple times back-to-back.
+    static constexpr qint64 kVpnSnapshotTtlMs = 250;
 
-QString Mainwindows::vpnGetTun0Ip() const
-{
+    if (!forceRefresh
+            && vpnRuntimeCacheValid
+            && vpnRuntimeCacheTimer.isValid()
+            && vpnRuntimeCacheTimer.elapsed() < kVpnSnapshotTtlMs) {
+        return;
+    }
+
+    bool activeSvc = false;
+    QProcess p;
+    p.start(QStringLiteral("systemctl"),
+            {QStringLiteral("is-active"), vpnServiceName});
+    if (p.waitForStarted(500) && p.waitForFinished(1500)) {
+        const QString out = QString::fromUtf8(p.readAllStandardOutput()).trimmed();
+        activeSvc = (out == QStringLiteral("active"));
+    } else if (p.state() != QProcess::NotRunning) {
+        p.kill();
+        p.waitForFinished(200);
+    }
+
+    QString tunIp = QStringLiteral("--");
     const auto ifaces = QNetworkInterface::allInterfaces();
     for (const QNetworkInterface &iface : ifaces) {
-        if (iface.name() != "tun0")
+        if (iface.name() != QStringLiteral("tun0"))
             continue;
 
-        if (!iface.flags().testFlag(QNetworkInterface::IsUp) ||
-            !iface.flags().testFlag(QNetworkInterface::IsRunning))
+        if (!iface.flags().testFlag(QNetworkInterface::IsUp)
+                || !iface.flags().testFlag(QNetworkInterface::IsRunning)) {
             continue;
+        }
 
         const auto entries = iface.addressEntries();
         for (const QNetworkAddressEntry &e : entries) {
             const QHostAddress ip = e.ip();
-            if (ip.protocol() == QAbstractSocket::IPv4Protocol)
-                return ip.toString();
+            if (ip.protocol() == QAbstractSocket::IPv4Protocol) {
+                tunIp = ip.toString();
+                break;
+            }
         }
+        break;
     }
-    return "--";
+
+    vpnRuntimeCacheActiveSvc = activeSvc;
+    vpnRuntimeCacheTunIp = tunIp;
+    vpnRuntimeCacheValid = true;
+
+    if (vpnRuntimeCacheTimer.isValid())
+        vpnRuntimeCacheTimer.restart();
+    else
+        vpnRuntimeCacheTimer.start();
+}
+
+bool Mainwindows::vpnSystemctlIsActive() const
+{
+    vpnRefreshRuntimeCache(false);
+    return vpnRuntimeCacheActiveSvc;
+}
+
+QString Mainwindows::vpnGetTun0Ip() const
+{
+    vpnRefreshRuntimeCache(false);
+    return vpnRuntimeCacheTunIp;
 }
 
 bool Mainwindows::vpnEnsureDir(const QString &dir) const

@@ -41,7 +41,7 @@ CONFIG(release, debug|release) {
 #
 # Default below is DISABLED so the top-bar drawer is removed.
 # ============================================================
-# CONFIG += FEATURE_TOP_NETWORK_DRAWER
+CONFIG += FEATURE_TOP_NETWORK_DRAWER
 
 contains(CONFIG, FEATURE_TOP_NETWORK_DRAWER) {
     message("Feature: Top Network Drawer ENABLED")

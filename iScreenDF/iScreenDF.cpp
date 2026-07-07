@@ -595,9 +595,40 @@ void iScreenDF::loopGetInfo() {
 }
 
 QString iScreenDF::getUPTime() {
-    system("uptime -p > /etc/uptime");
-    QString fileName = QString("/etc/uptime");
-    return readLine(fileName);
+    // Read kernel uptime directly. Avoid spawning a shell/process and writing
+    // /etc/uptime once per second from the monitor loop.
+    QFile uptimeFile(QStringLiteral("/proc/uptime"));
+    if (!uptimeFile.open(QIODevice::ReadOnly | QIODevice::Text))
+        return QString();
+
+    const QByteArray raw = uptimeFile.readLine().trimmed();
+    uptimeFile.close();
+
+    const QList<QByteArray> fields = raw.split(' ');
+    if (fields.isEmpty())
+        return QString();
+
+    bool ok = false;
+    const double secondsValue = fields.constFirst().toDouble(&ok);
+    if (!ok || secondsValue < 0.0)
+        return QString();
+
+    qint64 totalSeconds = static_cast<qint64>(secondsValue);
+    const qint64 days = totalSeconds / 86400;
+    totalSeconds %= 86400;
+    const qint64 hours = totalSeconds / 3600;
+    totalSeconds %= 3600;
+    const qint64 minutes = totalSeconds / 60;
+
+    QStringList parts;
+    if (days > 0)
+        parts << QStringLiteral("%1 day%2").arg(days).arg(days == 1 ? QString() : QStringLiteral("s"));
+    if (hours > 0)
+        parts << QStringLiteral("%1 hour%2").arg(hours).arg(hours == 1 ? QString() : QStringLiteral("s"));
+    if (minutes > 0 || parts.isEmpty())
+        parts << QStringLiteral("%1 minute%2").arg(minutes).arg(minutes == 1 ? QString() : QStringLiteral("s"));
+
+    return QStringLiteral("up ") + parts.join(QStringLiteral(", "));
 }
 
 QString iScreenDF::readLine(const QString &fileName) {

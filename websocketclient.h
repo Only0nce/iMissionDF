@@ -21,12 +21,15 @@
 
 #include <QtMath>
 #include <QDebug>
+#include <QElapsedTimer>
 
 typedef QVector<float> Float32BitArray;
 
 class WebSocketClient : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool muted READ isMute NOTIFY mutedChanged)
+    Q_PROPERTY(bool fftUiActive READ fftUiActive WRITE setFftUiActive NOTIFY fftUiActiveChanged)
+    Q_PROPERTY(bool maxHoldEnabled READ maxHoldEnabled WRITE setMaxHoldEnabled NOTIFY maxHoldEnabledChanged)
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
 
@@ -37,6 +40,18 @@ public:
 
     // ===== property สำหรับ QML =====
     Q_INVOKABLE int isMute() const { return m_isMuted; }
+
+    // FFT UI runtime gate. Audio and the WebSocket connection remain active.
+    bool fftUiActive() const noexcept { return m_fftUiActive; }
+    Q_INVOKABLE void setFftUiActive(bool active);
+
+    // Native max-hold engine. Keeping the O(N) accumulation loop in C++ avoids
+    // running a full FFT-sized JavaScript loop inside Canvas::onPaint.
+    bool maxHoldEnabled() const noexcept { return m_maxHoldEnabled; }
+    Q_INVOKABLE void setMaxHoldEnabled(bool enabled);
+    Q_INVOKABLE void resetMaxHold();
+    Q_INVOKABLE QVariantList maxHoldSnapshot() const;
+
     Q_INVOKABLE int  volumePercent() const;           // 0–100
     Q_INVOKABLE void setVolumePercent(int percent);   // 0–100
 
@@ -176,6 +191,15 @@ public:
 
 signals:
     void mutedChanged(bool muted);
+    void fftUiActiveChanged(bool active);
+    void maxHoldEnabledChanged(bool enabled);
+    void maxHoldUpdated(QVariantList maxHoldData);
+
+    // Primary full-span FFT frame. Spectrum and Waterfall consume this single
+    // delivery in QML to avoid crossing the C++/QML boundary twice per frame.
+    void fftFrameUpdated(QVariantList fftData);
+    // Legacy compatibility signals are intentionally retained in the public
+    // API, but the optimized primary FFT path emits fftFrameUpdated() only.
     void spectrumUpdated(QVariantList spectrumData);
     void waterfallUpdated(QVariantList spectrumData);
     void smeterValueUpdated(double smeterValue);
@@ -190,6 +214,15 @@ signals:
     void volumePercentChanged(int newVolume);
 
 private:
+    bool m_fftUiActive = false;
+    bool m_maxHoldEnabled = false;
+    QVector<float> m_maxHold;
+    QElapsedTimer m_maxHoldPublishTimer;
+    int m_maxHoldPublishIntervalMs = 100;
+
+    void updateMaxHold(const QVariantList &fftFrame);
+    QVariantList maxHoldToVariantList() const;
+
     ImaAdpcmCodec fft_codec;
     ImaAdpcmCodec pcm_codec;
 

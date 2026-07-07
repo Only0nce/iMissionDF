@@ -939,6 +939,11 @@ Item {
             initialItem: RadioScanner {
                 id: radioScanner
                 objectName: "radioScanner"
+
+                // FFT/Spectrum/Waterfall run only when both navigation levels
+                // actually show the RadioScanner page. Audio is independent.
+                runtimeActive: homeDisplay.StackView.status === StackView.Active
+                               && stackView.currentItem === radioScanner
             }
         }
         ListView

@@ -32,6 +32,7 @@
 
 #include <QtConcurrent/QtConcurrent>
 #include <QAtomicInteger>
+#include <QElapsedTimer>
 
 #pragma once
 
@@ -293,6 +294,10 @@ signals:
     void addNewProfile(const QJsonObject &config);
     void updateCardProfile();
     void cppCommand(const QVariant& jsonMsg);
+    // Single primary FFT delivery used by both Spectrum and Waterfall.
+    void fftFrameUpdated(QVariantList fftData);
+
+    // Legacy compatibility signals retained for source/API stability.
     void spectrumUpdated(QVariantList spectrumData);
     void onTemperatureChanged(double value);
     void onRecStatusChanged(bool recStatus);
@@ -539,6 +544,13 @@ private:
     // UI switch state ที่ "ผู้ใช้ต้องการ"
     bool vpnDesiredEnabled = false;
 
+    // Short-lived runtime snapshot shared by web/QML status publishing.
+    // This prevents multiple synchronous systemctl processes in one poll tick.
+    mutable QElapsedTimer vpnRuntimeCacheTimer;
+    mutable bool vpnRuntimeCacheValid = false;
+    mutable bool vpnRuntimeCacheActiveSvc = false;
+    mutable QString vpnRuntimeCacheTunIp = QStringLiteral("--");
+
     // ชื่อ service ของคุณ (ใช้ตามที่คุณมีอยู่แล้ว)
     const QString vpnServiceName = QStringLiteral("openvpn-client@myvpn");
 
@@ -557,6 +569,7 @@ private:
                                      bool ok,
                                      const QString &detail) const;
 
+    void vpnRefreshRuntimeCache(bool forceRefresh = false) const;
     bool vpnSystemctlIsActive() const;
     QString vpnGetTun0Ip() const;
 

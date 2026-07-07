@@ -16,6 +16,10 @@ Item {
     property real frequencyUnitValueButton: frequencyUnitValue
     property bool componentNotCompleted: false
 
+    // True only while this receiver/spectrum page is the active navigation page.
+    // HomeDisplay owns the authoritative binding because it knows both StackViews.
+    property bool runtimeActive: false
+
     property string freqScanUnit: freqUnit
 
     property real size: notificationList.count
@@ -921,6 +925,7 @@ Item {
         id: spectrumGLPlot
         anchors.fill: parent
         anchors.topMargin: 70
+        runtimeActive: scanpage.runtimeActive
     }
 
     MyDrawer {
