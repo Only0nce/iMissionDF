@@ -25,6 +25,15 @@ public:
     QVariantList decodeScaledToVariantList(const QByteArray &data,
                                            int skipSamples,
                                            float scale);
+
+    // Decode a complete scaled frame into a reusable native vector. This is
+    // used by the FFT hot path so frames that are intentionally not delivered
+    // to QML never pay QVariant boxing cost. The caller may reuse `output`
+    // across frames to keep heap churn low.
+    void decodeScaledToVector(const QByteArray &data,
+                              int skipSamples,
+                              float scale,
+                              QVector<float> &output);
     void applyVolumeToPcm16(QVector<qint16> &samples, int volumePercent);
 
 private:

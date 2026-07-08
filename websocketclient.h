@@ -215,12 +215,26 @@ signals:
 
 private:
     bool m_fftUiActive = false;
+
+    // UI delivery budget. Incoming FFT can be much faster than the display.
+    // Drop excess frames before QVariant boxing and the Qt->QML signal bridge.
+    QElapsedTimer m_fftUiPublishTimer;
+    int m_fftUiPublishIntervalMs = 40; // 25 Hz maximum QML FFT delivery
+
     bool m_maxHoldEnabled = false;
     QVector<float> m_maxHold;
     QElapsedTimer m_maxHoldPublishTimer;
-    int m_maxHoldPublishIntervalMs = 100;
+    int m_maxHoldPublishIntervalMs = 200; // 5 Hz display snapshots
 
-    void updateMaxHold(const QVariantList &fftFrame);
+    // Reused ADPCM scratch buffer. Avoid allocating a full frame for every
+    // dropped UI frame while keeping exact native max-hold accumulation.
+    QVector<float> m_fftDecodeScratch;
+
+    bool shouldPublishFftUiFrame();
+    void prepareMaxHold(int count);
+    void updateMaxHoldValue(int index, float value);
+    void updateMaxHold(const QVector<float> &fftFrame);
+    void publishMaxHoldIfDue();
     QVariantList maxHoldToVariantList() const;
 
     ImaAdpcmCodec fft_codec;

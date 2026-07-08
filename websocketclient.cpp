@@ -15,6 +15,11 @@ void WebSocketClient::setFftUiActive(bool active)
         return;
 
     m_fftUiActive = active;
+
+    // Make the first frame after entering the Spectrum page immediate, while
+    // ensuring an old timer state cannot burst several QML deliveries.
+    m_fftUiPublishTimer.invalidate();
+
     qInfo().noquote() << "[FFT Runtime]"
                       << (m_fftUiActive ? "ACTIVE" : "SUSPENDED")
                       << "(audio remains active)";
@@ -55,34 +60,73 @@ QVariantList WebSocketClient::maxHoldSnapshot() const
     return maxHoldToVariantList();
 }
 
-void WebSocketClient::updateMaxHold(const QVariantList &fftFrame)
+bool WebSocketClient::shouldPublishFftUiFrame()
 {
-    if (!m_maxHoldEnabled || fftFrame.isEmpty())
+    if (!m_fftUiPublishTimer.isValid()) {
+        m_fftUiPublishTimer.start();
+        return true;
+    }
+
+    if (m_fftUiPublishTimer.elapsed() >= m_fftUiPublishIntervalMs) {
+        m_fftUiPublishTimer.restart();
+        return true;
+    }
+
+    return false;
+}
+
+void WebSocketClient::prepareMaxHold(int count)
+{
+    if (!m_maxHoldEnabled || count <= 0)
         return;
 
-    const int count = fftFrame.size();
     if (m_maxHold.size() != count) {
         m_maxHold.resize(count);
         std::fill(m_maxHold.begin(),
                   m_maxHold.end(),
                   -std::numeric_limits<float>::infinity());
     }
+}
 
-    for (int i = 0; i < count; ++i) {
-        const float value = fftFrame.at(i).toFloat();
-        if (std::isfinite(value) && value > m_maxHold[i])
-            m_maxHold[i] = value;
-    }
+void WebSocketClient::updateMaxHoldValue(int index, float value)
+{
+    if (!m_maxHoldEnabled
+            || index < 0
+            || index >= m_maxHold.size()
+            || !std::isfinite(value))
+        return;
+
+    if (value > m_maxHold[index])
+        m_maxHold[index] = value;
+}
+
+void WebSocketClient::publishMaxHoldIfDue()
+{
+    if (!m_maxHoldEnabled || m_maxHold.isEmpty())
+        return;
 
     if (!m_maxHoldPublishTimer.isValid())
         m_maxHoldPublishTimer.start();
 
-    // The display does not need a second full-span Qt->QML transfer for every
-    // FFT frame. Publish at 10 Hz while accumulating every frame natively.
+    // Max Hold is accumulated on every native FFT frame, but the visual line
+    // needs only a low-rate snapshot. 5 Hz removes another full-span
+    // QVariantList transfer without changing the held peak data itself.
     if (m_maxHoldPublishTimer.elapsed() >= m_maxHoldPublishIntervalMs) {
         emit maxHoldUpdated(maxHoldToVariantList());
         m_maxHoldPublishTimer.restart();
     }
+}
+
+void WebSocketClient::updateMaxHold(const QVector<float> &fftFrame)
+{
+    if (!m_maxHoldEnabled || fftFrame.isEmpty())
+        return;
+
+    prepareMaxHold(fftFrame.size());
+    for (int i = 0; i < fftFrame.size(); ++i)
+        updateMaxHoldValue(i, fftFrame.at(i));
+
+    publishMaxHoldIfDue();
 }
 
 void WebSocketClient::connectToServer(const QUrl &url) {
@@ -141,17 +185,30 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
     switch (type)
     {
     case 1: { // primary full-span FFT
-        QVariantList fftFrame;
         const int payloadBytes = message.size() - 1;
         if (payloadBytes <= 0)
             break;
 
+        // Critical CPU gate: the display cannot use every incoming FFT frame.
+        // Decide before QVariant allocation/boxing and before Qt->QML delivery.
+        // Native Max Hold may still consume every frame when enabled.
+        const bool publishUiFrame = shouldPublishFftUiFrame();
+        const bool needNativeFrame = m_maxHoldEnabled;
+
+        if (!publishUiFrame && !needNativeFrame)
+            break;
+
+        QVariantList fftFrame;
+
         if (rxconfig.fft_compression == "none") {
-            // Do not create message.mid(1) and do not allocate QVector<float>.
-            // The payload starts at byte 1 and may be unaligned on ARM, so copy
-            // each float with memcpy instead of reinterpret_cast<float*>.
             const int sampleCount = payloadBytes / static_cast<int>(sizeof(float));
-            fftFrame.reserve(sampleCount);
+            if (sampleCount <= 0)
+                break;
+
+            if (publishUiFrame)
+                fftFrame.reserve(sampleCount);
+            if (needNativeFrame)
+                prepareMaxHold(sampleCount);
 
             const char *payload = message.constData() + 1;
             for (int i = 0; i < sampleCount; ++i) {
@@ -159,32 +216,46 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
                 std::memcpy(&value,
                             payload + i * static_cast<int>(sizeof(float)),
                             sizeof(float));
-                fftFrame.append(value);
+
+                if (needNativeFrame)
+                    updateMaxHoldValue(i, value);
+                if (publishUiFrame)
+                    fftFrame.append(value);
             }
+
+            if (needNativeFrame)
+                publishMaxHoldIfDue();
         }
         else if (rxconfig.fft_compression == "adpcm") {
             fft_codec.reset();
 
-            // No-copy QByteArray view over the WebSocket payload. The codec
-            // walks the full ADPCM frame exactly as before, but writes scaled
-            // FFT values directly to QVariantList after the protocol pad.
             const QByteArray payloadView = QByteArray::fromRawData(
                         message.constData() + 1,
                         payloadBytes);
-            fftFrame = fft_codec.decodeScaledToVariantList(
+
+            // Decode into one reusable native vector. Dropped UI frames never
+            // allocate/box QVariant values; Max Hold can still see every frame.
+            fft_codec.decodeScaledToVector(
                         payloadView,
                         COMPRESS_FFT_PAD_N,
-                        0.01f);
+                        0.01f,
+                        m_fftDecodeScratch);
+
+            if (needNativeFrame)
+                updateMaxHold(m_fftDecodeScratch);
+
+            if (publishUiFrame) {
+                fftFrame.reserve(m_fftDecodeScratch.size());
+                for (float value : m_fftDecodeScratch)
+                    fftFrame.append(value);
+            }
         }
 
-        if (!fftFrame.isEmpty()) {
-            updateMaxHold(fftFrame);
+        if (publishUiFrame && !fftFrame.isEmpty()) {
             emit fftFrameUpdated(fftFrame);
 
-            // Preserve legacy direct consumers without paying duplicate signal
-            // delivery cost in the normal project path. Mainwindows now uses
-            // fftFrameUpdated(), so these are emitted only when someone else
-            // explicitly connects to the old signals.
+            // Preserve legacy direct consumers without duplicate cost in the
+            // normal project path.
             static const QMetaMethod spectrumSignal =
                     QMetaMethod::fromSignal(&WebSocketClient::spectrumUpdated);
             static const QMetaMethod waterfallSignal =

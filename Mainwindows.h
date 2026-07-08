@@ -114,6 +114,11 @@ public:
     Q_INVOKABLE int samp_rate() const { return wsClient.rxconfig.samp_rate; }
     Q_INVOKABLE QString start_mod() const { return wsClient.rxconfig.start_mod; }
 
+    // Replayable SQL state for QML. QML reads the current value when the
+    // page is created, then follows sqlActiveChanged(bool) for live updates.
+    // This avoids Q_PROPERTY accessor parsing issues on older Qt5 moc tools.
+    Q_INVOKABLE bool getSqlActive() const;
+
     Q_INVOKABLE QVariantList getWaterfallColorMap() const {
         QVariantList list;
         for (int color : wsClient.rxconfig.waterfall_colors)
@@ -301,6 +306,7 @@ signals:
     void spectrumUpdated(QVariantList spectrumData);
     void onTemperatureChanged(double value);
     void onRecStatusChanged(bool recStatus);
+    void sqlActiveChanged(bool active);
     void waterfallUpdated(QVariantList spectrumData);
     void smeterValueUpdated(double smeterValue);
     void waterfallColorUpdate(QVariantList waterfallColors);

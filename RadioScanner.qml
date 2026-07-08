@@ -793,27 +793,39 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
+
+                // REC indication follows SQL directly. Read the current SQL
+                // state once when this button is created, then follow the
+                // live sqlActiveChanged(bool) signal. This preserves state
+                // replay without relying on Q_PROPERTY in older Qt5 moc.
                 property bool scanRecOn: false
-                property real blinkOpacity: 0.6
-                Component.onCompleted: {
-                    console.log("mainWindows=", mainWindows)
-                    console.log("has onRecStatusChanged?", mainWindows && mainWindows.onRecStatusChanged)
-                    mainWindows.onRecStatusChanged.connect(function(value){
-                        console.log("mainWindows.onRecStatusChanged.connect :: ",value)
-                        scanRecOn = value
-                    })
+                property bool blinkPhaseOn: true
+
+                function syncSqlState() {
+                    if (typeof mainWindows !== "undefined"
+                            && mainWindows
+                            && typeof mainWindows.getSqlActive === "function") {
+                        scanRecOn = mainWindows.getSqlActive()
+                    }
+                }
+
+                Component.onCompleted: syncSqlState()
+
+                Connections {
+                    target: (typeof mainWindows !== "undefined")
+                            ? mainWindows
+                            : null
+
+                    function onSqlActiveChanged(active) {
+                        toolButtonRec.scanRecOn = active
+                    }
                 }
 
                 onScanRecOnChanged: {
-                    console.log("onScanRecOnChanged",scanRecOn)
-                    if (scanRecOn) {
-                        blinkOpacity = 1.0;
-                        blinkTimer.start();
-                    } else {
-                        blinkOpacity = 0.6;
-                        blinkTimer.stop();
-                    }
+                    console.log("[REC ICON] SQL active =", scanRecOn)
+                    blinkPhaseOn = true
                 }
+
                 Rectangle {
                     color: "#aa009688"
                     radius: 5
@@ -828,25 +840,26 @@ Item {
                         anchors.rightMargin: 8
                         anchors.topMargin: 8
                         anchors.bottomMargin: 8
-                        source: toolButtonRec.scanRecOn ? "images/recOn.png" : "images/recOff.png"
+                        source: toolButtonRec.scanRecOn
+                                ? "images/recOn.png"
+                                : "images/recOff.png"
                         fillMode: Image.PreserveAspectFit
-                        opacity: toolButtonRec.scanRecOn ? toolButtonRec.blinkOpacity : 0.6
+                        opacity: toolButtonRec.scanRecOn
+                                 ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.25)
+                                 : 0.6
                     }
-
-                    // Blinking logic
-
 
                     Timer {
                         id: blinkTimer
                         interval: 500
-                        running: toolButtonRec.scanRecOn
                         repeat: true
+                        running: toolButtonRec.scanRecOn && scanpage.runtimeActive
                         onTriggered: {
-                            toolButtonRec.blinkOpacity = (toolButtonRec.blinkOpacity === 1.0) ? 0.3 : 1.0;
+                            toolButtonRec.blinkPhaseOn =
+                                    !toolButtonRec.blinkPhaseOn
                         }
                     }
                 }
-
             }
             Rectangle {
                 id : cputempCard

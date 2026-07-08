@@ -47,7 +47,7 @@ Item {
 
     // Phase 4 runtime budgets. Full-span FFT is preserved; only UI delivery and
     // rendering cadence are bounded to avoid saturating one CPU core.
-    property int waterfallTargetFps: 25
+    property int waterfallTargetFps: 20
     property int waterfallMaxColumns: 1280
     property int offsetCommandIntervalMs: 20
     property real pendingOffsetCommand: 0
@@ -276,7 +276,10 @@ Item {
     // ===== Timer ที่ใช้แทน for loop =====
     Timer {
         id: scanTimer
-        interval: 5
+        // 20 ms keeps scan progression responsive while avoiding 200 QML
+        // timer/property-notification cycles per second. DSP commands remain
+        // latest-value coalesced by offsetCommandTimer.
+        interval: 20
         repeat: true
         running: false
         onTriggered: {

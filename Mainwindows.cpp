@@ -15,6 +15,11 @@
 #include <QHostAddress>
 
 
+bool Mainwindows::getSqlActive() const
+{
+    return currentSQLValue;
+}
+
 Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
 {
     #ifdef PLATFORM_JETSON
@@ -586,18 +591,31 @@ void Mainwindows::updateCurrentOffsetFreq(const int value, const double centerFr
 void Mainwindows::onSQLChanged(bool sqlVal)
 {
     qDebug() << "onSQLChanged" << sqlVal;
-    if ((currentSQLValue != sqlVal) && (sqlVal == false)){
-        squelchOffTimer->start(100);  // 5 seconds
+
+    const bool sqlChanged = (currentSQLValue != sqlVal);
+
+    if (sqlChanged && !sqlVal) {
+        squelchOffTimer->start(100);
         qDebug() << "Scheduled squelch OFF in 100 msec";
     }
 
-    bool current;
-#ifdef PLATFORM_JETSON
-    if (shd_amp->getValue(current) == 0) {
+    // Keep SQL state valid on every platform. Previously this assignment lived
+    // inside PLATFORM_JETSON, so desktop/QML state could remain permanently
+    // false. Exposing it as a property also prevents a page loaded after SQL ON
+    // from missing the earlier transition signal.
+    currentSQLValue = sqlVal;
 
+    if (sqlChanged) {
+        qDebug() << "[SQL UI] sqlActiveChanged =" << currentSQLValue;
+        emit sqlActiveChanged(currentSQLValue);
     }
 
-    currentSQLValue = sqlVal;
+#ifdef PLATFORM_JETSON
+    bool current = false;
+    if (shd_amp->getValue(current) != 0) {
+        qWarning() << "[SQL] Failed to read SHD_AMP state";
+    }
+
     if (sqlVal)
     {
         if (current != 1) {
@@ -605,30 +623,31 @@ void Mainwindows::onSQLChanged(bool sqlVal)
             hs_mute->setValue(1);
         }
         led4->setValue(LED_ON);
-        // cancel pending OFF
+
+        // Cancel pending OFF.
         if (squelchOffTimer->isActive()) {
             squelchOffTimer->stop();
             isSquelchOffPending = false;
             qDebug() << "Cancelled pending squelch OFF due to ON";
         }
 
-
-        sendSquelchStatus(true);  // send immediately
+        sendSquelchStatus(true);
     } else {
         if (current != 0) {
             shd_amp->setValue(0);
             hs_mute->setValue(0);
         }
         led4->setValue(LED_OFF);
-        // schedule delayed squelch OFF
+
         isSquelchOffPending = true;
-        if (squelchOffTimer->isActive() == false){
-            squelchOffTimer->start(100);  // 5 seconds
+        if (!squelchOffTimer->isActive()) {
+            squelchOffTimer->start(100);
             qDebug() << "Scheduled squelch OFF in 100 msec";
         }
     }
 #endif
 }
+
 //void Mainwindows::sendSquelchStatus(bool sqlVal)
 //{
 //    QJsonObject message;
