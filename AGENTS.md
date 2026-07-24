@@ -1,62 +1,180 @@
 # AGENTS.md — iSense / iScanMR10
 
-## Project Structure & Module Organization
+## Application Purpose
 
-The application is a Qt 5 / QML / C++embedded UI project built from `iScanMR10.pro`. The main C++ entry point is `main.cpp`, and the primary QML entry point is loaded from `qrc:/main.qml`. Core QML screens live at the repository root, including `MainPage.qml`, `Setting.qml`, `Wifi5GPage.qml`, `Wifi5GView.qml`, `RecConfigPage.qml`, `RadioScanner.qml`, `OpenWebRXProfiles.qml`, and related shared controls such as `AppButton.qml`, `StatusBadge.qml`, `FieldLabel.qml`, and `SignalBar.qml`.
+iScanMR10 is a Qt 5 C++/QML application for receiver control, recording,
+direction finding and maps, DoA viewing, network configuration, and
+Jetson/Orin hardware integration. `main.cpp` loads `qrc:/main.qml`.
 
-Core backend logic is split across `Mainwindows.cpp/.h` for the QML bridge, `NetworkController.cpp/.h` for LAN/WiFi/5G/NTP/system networking, `Wifi5GController.cpp/.h` as the WiFi/5G UI adapter, `ReceiverConfigManager.*` and `ReceiverRecorderConfigManager.*` for receiver profiles, and `OpenWebRxConfig.*` for OpenWebRX integration. Direction finding and map logic is under `iScreenDF/`, recorder-specific logic is under `iRecordManage/`, and DoA viewer code is under `DoaViewer/`. Do not edit generated or build-output directories such as `build/`, `.qtc_clangd/`, generated `moc_*`, `qrc_*`, or object files.
+## Source Tree and Important Modules
 
-## Build, Test, and Development Commands
+- `main.cpp`: application setup, platform environment, QML registrations and
+  context properties, single-instance local socket, and C++/QML wiring.
+- `Mainwindows.cpp/.h`: primary QML bridge and command dispatcher.
+- `NetworkController.cpp/.h`: LAN, Wi-Fi, cellular, NTP, and system command
+  integration. Keep `nmcli`, `mmcli`, and interface parsing here.
+- `NetworkSecurityController.cpp/.h`: authorization for protected network
+  changes. Treat password hashes and related environment configuration as
+  sensitive.
+- `Wifi5GController.cpp/.h`: adapter between the Wi-Fi/5G QML workflow and
+  `NetworkController`; it must not become a second network implementation.
+- `ReceiverConfigManager.*`, `ReceiverRecorderConfigManager.*`, and
+  `OpenWebRxConfig.*`: receiver, recorder, and OpenWebRX configuration.
+- `iScreenDF/` and `iScreenDFqml/`: direction-finding, maps, logging, network,
+  and associated QML.
+- `iRecordManage/`: Jetson-only recorder backend and persistence.
+- `DoaViewer/`: direction-of-arrival client/viewer integration.
+- `DesignDSP_REC_V1/`: generated SigmaStudio data. Do not hand-edit it unless
+  the DSP export itself is intentionally replaced.
 
-Use qmake, not CMake, unless the project is explicitly migrated. For a normal desktop build, run:
+Root QML screens and components are compiled through `qml.qrc`. Important
+screens include `MainPage.qml`, `Setting.qml`, `Wifi5GPage.qml`,
+`Wifi5GView.qml`, `RecConfigPage.qml`, `RadioScanner.qml`, and
+`OpenWebRXProfiles.qml`.
+
+## Authoritative Build System
+
+The authoritative build definition is `iScanMR10.pro` using qmake. A generated
+root `Makefile` is tracked historically but is machine-specific and is not the
+source of truth. Do not migrate this project to CMake unless explicitly
+requested.
+
+Desktop:
+
+```bash
+./scripts/build-desktop.sh
+```
+
+Equivalent qmake configuration:
 
 ```bash
 qmake iScanMR10.pro -spec linux-g++
-make -j$(nproc)
+make -j"$(nproc)"
 ```
 
-For the Jetson Orin target build, run:
+Jetson/Orin:
 
 ```bash
-qmake iScanMR10.pro -spec linux-jetson-orin-g++
-make -j$(nproc)
+./scripts/build-target.sh
 ```
 
-Check the active Qt/mkspec configuration with:
+The target build requires the project-specific `linux-jetson-orin-g++` mkspec,
+sysroot, compiler, and libraries. A desktop build does not validate the target
+toolchain or hardware.
+
+## Hardware and Platform Selection
+
+Hardware capability and build platform are independent:
+
+- `HW_5G` versus `HW_NONE_5G` selects hardware features.
+- `PLATFORM_JETSON` versus `PLATFORM_X86` is selected by the qmake mkspec.
+
+At the inspected development commit, `iScanMR10.pro` actively selects
+`CONFIG+=HW_5G`; the nearby comment claiming a non-5G default is stale. Never
+enable both hardware selectors. Inspect the active source line before every
+build and record it in validation output.
+
+Keep Jetson-only recorder, GPIO, DSP, audio, RF, and device access behind the
+existing platform guards. Do not assume a desktop compile exercises those
+paths.
+
+## Qt, QML, and Threading Contracts
+
+- Preserve QObject ownership, parent-child lifetime, and thread affinity.
+- Create and start QTimers in the thread that owns them.
+- For worker objects, verify construction, `moveToThread`, queued connections,
+  shutdown, `deleteLater`, and QThread destruction as one lifecycle.
+- Never block the GUI thread with device, process, network, or database I/O.
+- Preserve signal/slot signatures, connection types, `Q_PROPERTY` names, and
+  NOTIFY semantics used by QML.
+- Keep `Wifi5GView.qml` presentation-focused. Runtime wiring belongs in
+  `Wifi5GPage.qml` and the controller layer.
+- Avoid binding loops, render-path JavaScript, unbounded models, and repeated
+  allocation in high-rate spectrum/waterfall paths.
+
+## Network and Protocol Contracts
+
+QML commonly submits JSON through
+`mainWindows.cppSubmitTextFiled(JSON.stringify(obj))`.
+`Mainwindows::cppSubmitTextFiled(const QString &)` dispatches the request and
+responses return through `cppCommand(QVariant)`.
+
+Preserve:
+
+- stable `menuID` values;
+- response keys such as `ok`, `message`, and existing payload fields;
+- WebSocket framing and reconnect behavior;
+- local socket name and single-instance commands;
+- network interface resolution and process timeouts;
+- the separation between read-only status operations and state-changing
+  network operations.
+
+Never log or return Wi-Fi passwords, VPN secrets, tokens, authorization values,
+or the network administrator password/hash. Existing code that reads saved
+NetworkManager secrets requires security review before expansion.
+
+## Database and Persistent-Data Contracts
+
+The repository contains multiple Qt SQL/SQLite implementations in the root,
+`iScreenDF/`, and `iRecordManage/`. Database filenames, table/column names,
+types, defaults, and migration behavior are compatibility contracts. Before a
+schema change, identify every reader/writer and define backup, migration, and
+rollback behavior. There is no verified centralized migration framework.
+
+Receiver, recorder, OpenWebRX, network, and QML settings files are also
+persistent contracts. Do not silently rename keys or paths.
+
+## Hardware Interfaces
+
+Hardware-facing code includes GPIO, SPI, I2C, ALSA, GPS, RFDC/NCO, DSP,
+recorder, modem, and RF/network control. Read-only inspection and active
+hardware testing are separate operations. Obtain approval before commands that
+can transmit RF, write buses/registers, toggle GPIO, reset a modem/device,
+change power, or alter network state.
+
+Never infer hardware correctness from source review or compilation. Record the
+target, firmware/hardware version, command, expected result, observed result,
+logs, and rollback.
+
+## Generated and Machine-Specific Files
+
+Do not edit or newly commit:
+
+- `build*/`, `.qtc_clangd/`, object files, binaries, and generated Qt files;
+- `Makefile`, `.qmake.stash`, `*.pro.user`, or `*.pro.user.*`;
+- `.claude/settings.local.json`, `CLAUDE.local.md`, local inventories, secrets,
+  credentials, sessions, caches, or histories.
+
+Some of these artifacts are already tracked historically. Ignore rules do not
+untrack them. Removing them requires a separately reviewed cleanup.
+
+## Validation
+
+Run before handoff:
 
 ```bash
-qmake -v
-qmake -query QMAKE_SPEC
+./scripts/verify-dev-env.sh
+git diff --check
+./scripts/build-desktop.sh
 ```
 
-Use `make clean` before comparing platform-specific builds or after changing qmake `CONFIG` values. The application target is `iScanMR10`; avoid committing compiled binaries unless explicitly requested.
+Run the target build only with the correct toolchain. No dedicated automated
+application test suite was found during migration; add focused tests when a
+change can be exercised deterministically.
 
-## Hardware and Platform Configuration
+Report static review, build, unit/integration tests, runtime checks, target
+build, and physical hardware tests as separate results.
 
-Hardware selection is controlled in `iScanMR10.pro` by enabling exactly one of `CONFIG+=HW_5G` or `CONFIG+=HW_NONE_5G`. Never enable both. The current safe default is `HW_NONE_5G`, which defines `HARDWARE_HAS_5G=0`, `HARDWARE_HAS_WIFI=0`, and `HARDWARE_HAS_WIRELESS=0`.
+## Known Risks and Unsupported Assumptions
 
-Platform selection is controlled by the qmake mkspec. `linux-g++` should define `PLATFORM_X86` behavior, while `linux-jetson-orin-g++` should define `PLATFORM_JETSON` behavior. Keep Jetson-only code, GPIO, recorder backend objects, and hardware-device access behind the existing platform guards so the desktop build continues to compile.
-
-## Coding Style & Naming Conventions
-
-Write C++ in the existing Qt style using `QObject`, signals/slots, `QString`, `QVariantMap`, `QJsonDocument`, and Qt containers where they already exist. Keep class names in `PascalCase`, method and variable names in `camelCase`, and existing file names unchanged unless a rename is requested. Prefer small helper functions over large repeated command blocks, especially in `NetworkController`.
-
-QML components should keep the current project style: component filenames in `PascalCase.qml`, clear property names, and UI logic separated from system command logic. Keep `Wifi5GView.qml` mostly UI-focused; route real WiFi/5G actions through `Wifi5GController` and `NetworkController`. Do not duplicate `nmcli`, `mmcli`, rmnet, or quectel-CM parsing logic in QML.
-
-## QML and C++ Communication Rules
-
-QML sends commands mainly through `mainWindows.cppSubmitTextFiled(JSON.stringify(obj))`. C++ receives them in `Mainwindows::cppSubmitTextFiled(const QString &qmlJson)` and sends responses back with `emit cppCommand(QVariant)`. When adding a command, use a stable `menuID`, return useful `ok`, `message`, or error fields, and preserve existing response keys used by QML.
-
-Do not log passwords, WiFi keys, VPN secrets, tokens, or private configuration values. For WiFi/5G features, `NetworkController` is the source of truth. `Wifi5GController` should remain a routing/adapter layer, not a second implementation of network control.
-
-## Testing Guidelines
-
-There is no dedicated automated test suite in this repository. Before submitting changes, at minimum build both the intended target and the unaffected target when practical. For UI changes, open the relevant QML page and verify that existing commands still return expected JSON. For network changes, test harmless read-only commands first, such as status, scan, profile list, modem list, or log tail, before applying changes that modify connections.
-
-For hardware-specific work, document the target platform, active hardware config, tested command, expected result, and observed result. When changing 5G, WiFi, GPIO, SPI, I2C, ALSA, recorder, or OpenWebRX behavior, make sure `HW_NONE_5G` or desktop builds do not break from missing device files.
-
-## Agent Safety Rules
-
-Preserve existing behavior unless the requested task requires changing it. Prefer minimal patches that keep current menuIDs, QML object names, signal names, database fields, and config file paths compatible. Do not remove legacy wrapper components such as `Wifi5GSetting.qml` unless all references are updated. Do not edit generated SigmaStudio assets in `DesignDSP_REC_V1/` unless the DSP firmware data itself is intentionally being updated.
-
-Before making broad changes, inspect `iScanMR10.pro`, `main.cpp`, the relevant QML page, and the matching C++ controller. After changing code, provide the exact files touched, build command used, and any hardware/runtime assumptions.
+- The development branch contains tracked IDE/cache/generated files with
+  machine-specific paths.
+- A legacy network administrator password hash is embedded in source as a
+  fallback. Its value is sensitive and should be rotated/removed in a separate
+  security change.
+- Current desktop Qt is not proof of compatibility with every target Qt 5
+  installation.
+- The README contains historical machine-specific paths and must not be treated
+  as portable setup data.
+- Exact production hardware, runtime services, database contents, and target
+  toolchain availability cannot be inferred from this repository alone.

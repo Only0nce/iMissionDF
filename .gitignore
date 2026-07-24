@@ -32,10 +32,33 @@ qrc_*.h
 ui_*.h
 *.qmlc
 *.jsc
-*.txt
+
+# Qt Creator and qmake local state
+*.pro.user
+*.pro.user.*
+.qtc_clangd/
+.qmake.stash
+Makefile
+Makefile.*
+
+# Claude project-local state and generated inventories
+.claude/settings.local.json
+CLAUDE.local.md
+claude-team-inventory.md
+claude-team-inventory.txt
+
+# Local environment and secret-bearing files
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Editor backups
+*~
+
 # ==============================
 # Your known large outputs
 # ==============================
 iScanMR10
 iRecordManage/qrc_qml.cpp
-
