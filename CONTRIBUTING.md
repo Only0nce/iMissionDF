@@ -22,6 +22,17 @@ git diff --check
 git diff --stat
 ```
 
+If the change touches `.claude/` (hooks, agents, skills, rules, settings),
+also run:
+
+```bash
+./scripts/test-claude-hooks.sh
+./scripts/validate-claude-team-config.sh
+```
+
+These are guardrail regression tests, not a security sandbox — see
+`docs/AI-WORKFLOW.md` for what the hooks do and do not cover.
+
 Run the relevant build and tests. Hardware-facing work also requires the review
 procedure in `docs/HARDWARE-SAFETY.md`.
 

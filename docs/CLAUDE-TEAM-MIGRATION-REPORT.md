@@ -1,5 +1,88 @@
 # Claude Team Migration Report
 
+## Hardening Follow-Up
+
+A second-pass audit of the migration commit (`9fb3392`, `chore/claude-team-migration`)
+found the two Bash-regex/`case`-glob hooks were bypassable, and no automated
+test suite backed the claimed protection. This was addressed on branch
+`fix/claude-team-migration-hardening` (based directly on `9fb3392`), in an
+isolated worktree so the dirty `main` worktree was never touched.
+
+**Root cause:** `block-destructive-git.sh` matched a fixed regex directly
+against the raw command string, so anything that changed the surface form
+without changing Git's behavior — a full path (`/usr/bin/git`), a wrapper
+(`env`, `command`), or a Git global option before the subcommand
+(`git -C <path> ...`, `git --git-dir=... ...`) — slipped past it uncaught.
+`check-generated-files.sh` matched a `case` glob that required a leading `/`
+(`*/Makefile`, `*/build/*`, `*/moc_*.cpp`), so a bare relative path
+(`Makefile`, `build/generated.cpp`, `moc_example.cpp`) never matched.
+
+**Confirmed bypasses** (reproduced against the pre-fix hooks by feeding
+synthetic JSON payloads — no destructive command was ever executed):
+
+```text
+git add --all
+git -C /tmp/example reset --hard HEAD
+git -C /tmp/example clean -fd
+git restore --source=HEAD .
+git --git-dir=.git reset --hard HEAD
+git add .
+git add :/
+false || git add --all
+Makefile / build/generated.cpp / moc_example.cpp / qrc_qml.cpp / ui_MainWindow.h
+  (as relative paths, without a leading "/")
+```
+
+An independent second-pass review of the *fixed* hook (Step 13 of the
+hardening task) found one more gap the initial fix introduced: a raw newline
+between two commands (`git status\ngit reset --hard HEAD`) was swallowed by
+`shlex`'s whitespace splitting and merged into a single token stream, so only
+the first subcommand (`status`) was ever inspected — the second line's
+`reset --hard` was never examined. This is now fixed by splitting on raw
+newlines (honoring `\`-newline continuation the way bash does) before
+tokenizing each line, and is covered by dedicated regression tests.
+
+**Fix:** both hooks now delegate to Python modules
+(`.claude/hooks/lib/destructive_git_policy.py`,
+`.claude/hooks/lib/generated_file_policy.py`) instead of Bash regex/glob:
+
+- The Git-command policy tokenizes with `shlex`, splits on raw newlines and
+  shell separators (`&&`, `||`, `;`, `|`, `&`), strips wrapper commands and
+  `VAR=value` assignments, and walks past Git global options to find the real
+  subcommand — see `docs/AI-WORKFLOW.md` for the exact blocked operations.
+- The generated-file policy normalizes every path with
+  `os.path.abspath(os.path.normpath(path))` before matching, so relative,
+  absolute, `./`-prefixed, and `..`-containing paths are treated identically.
+
+`check-secrets.sh` was reviewed and found to have no equivalent bug; it was
+left unchanged.
+
+A new adversarial test suite, `scripts/test-claude-hooks.sh`, replaces
+narrative validation with executable evidence: 61 assertions covering the
+allow-list, every bypass above (now blocked, including the newline gap found
+in review), the generated-file matrix, and the secret-detection matrix
+(including a check that no matched secret value is ever printed).
+`scripts/validate-claude-team-config.sh` wraps that suite together with
+syntax checks, inventory, executable-bit checks, `git diff --check`, a
+tracked-sensitive-file scan, and a machine-specific absolute-path scan, and
+prints a final `CLAUDE_CONFIG_VALIDATION=PASS|FAIL`.
+
+Known residual gaps this text-based approach cannot close (documented, not
+fixed, consistent with "hooks are guardrails, not a sandbox"): a destructive
+command hidden inside `$(...)`/backtick command substitution, a Git alias
+configured to do the same thing, or indirect execution through a wrapper
+script/`xargs` are not detected. These require executing or fully
+interpreting the shell to catch, which is out of scope for a lightweight
+pre-execution text check.
+
+See the hardening commit on `fix/claude-team-migration-hardening` (`git log`
+on that branch) for the exact diff; it touches only `.claude/hooks/`,
+`scripts/`, and documentation — no application C++, headers, QML, resources,
+DSP, device-control, network, RF, GPIO, SPI/I2C, DMA, audio, modem, database,
+or systemd file was changed. That commit had not been pushed to any remote
+branch at the time this section was written — confirm with
+`git branch -r --contains <hash>` before assuming otherwise.
+
 ## Executive Summary
 
 Local Claude expertise was converted into a repository-owned, Git-shareable

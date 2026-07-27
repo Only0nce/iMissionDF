@@ -27,6 +27,26 @@
 - Stage only intended paths; do not use `git add -A` by default.
 - Require independent review before merge.
 
+## Safety Hooks
+
+`.claude/hooks/` blocks destructive Git commands, edits to generated/machine
+files, and strong secret indicators before they run. **Hooks are guardrails,
+not a security boundary** — they inspect command/file text, not a sandbox, and
+cannot stop every way a shell can misbehave (e.g. commands hidden in
+`$(...)`/backtick substitution or custom aliases). Do not rely on them as the
+only safeguard for risky operations.
+
+Verify hook behavior and run the static validation before trusting a change to
+`.claude/`:
+
+```bash
+./scripts/test-claude-hooks.sh
+./scripts/validate-claude-team-config.sh
+```
+
+Full details, the exact blocked Git operations, and what remains explicitly
+allowed (e.g. `git add <specific-file>`) are in `docs/AI-WORKFLOW.md`.
+
 ## Project Skills
 
 - `/learn-codebase`

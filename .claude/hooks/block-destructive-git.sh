@@ -1,32 +1,16 @@
 #!/usr/bin/env bash
+# Thin wrapper: the actual command parsing/policy lives in
+# lib/destructive_git_policy.py (regex-on-raw-text was too easy to bypass
+# via git wrappers, global options, and shell separators - see
+# docs/CLAUDE-TEAM-MIGRATION-REPORT.md for the bypasses this replaced).
 set -u
-
-payload=$(sed -n '1,$p')
 
 if ! command -v python3 >/dev/null 2>&1; then
     echo "Blocked: python3 is required to parse the Claude hook payload safely." >&2
     exit 2
 fi
 
-command_text=$(
-    printf '%s' "$payload" |
-        python3 -c 'import json,sys; print(json.load(sys.stdin).get("tool_input", {}).get("command", ""))'
-) || {
-    echo "Blocked: could not parse the Claude Bash hook payload." >&2
-    exit 2
-}
+hook_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-git_prefix='(^|[;&|[:space:]])([^;&|[:space:]]*/)?git[[:space:]]+'
-blocked_pattern="${git_prefix}reset[[:space:]]+--hard|\
-${git_prefix}clean[^;&|]*(--force|-[A-Za-z]*f[A-Za-z]*)|\
-${git_prefix}checkout[[:space:]]+--[[:space:]]+\\.|\
-${git_prefix}restore[[:space:]]+\\.|\
-${git_prefix}push[^;&|]*--force(-with-lease)?|\
-${git_prefix}add[[:space:]]+-A"
-
-if printf '%s\n' "$command_text" | grep -Eq "$blocked_pattern"; then
-    echo "Blocked by project policy: destructive Git or bulk staging command." >&2
-    exit 2
-fi
-
-exit 0
+python3 "$hook_dir/lib/destructive_git_policy.py"
+exit $?
