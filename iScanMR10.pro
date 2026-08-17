@@ -103,7 +103,6 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 # --- X86 (linux-g++) ---
 X86_SOURCES += \
     Databases.cpp \
-    SetFreqWorker.cpp \
     FileUpdateWatcher.cpp \
     I2CReadWrite.cpp \
     ImaAdpcmCodec.cpp \
@@ -172,7 +171,6 @@ X86_HEADERS += \
     ReceiverRecorderConfigManager.h \
     RecorderSocketClient.h \
     SPI.h \
-    SetFreqWorker.h \
     SigmaStudioFW.h \
     SocketClient.h \
     alsaaudioplayer.h \
@@ -202,7 +200,6 @@ X86_HEADERS += \
 JETSON_SOURCES += \
     Databases.cpp \
     FileUpdateWatcher.cpp \
-    SetFreqWorker.cpp \
     I2CReadWrite.cpp \
     ImaAdpcmCodec.cpp \
     InputEventReader.cpp \
@@ -284,7 +281,6 @@ JETSON_HEADERS += \
     ReceiverRecorderConfigManager.h \
     RecorderSocketClient.h \
     SPI.h \
-    SetFreqWorker.h \
     SigmaStudioFW.h \
     SocketClient.h \
     alsaaudioplayer.h \

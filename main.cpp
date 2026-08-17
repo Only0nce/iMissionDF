@@ -23,7 +23,14 @@
 #include <QQmlError>
 #include <QProcessEnvironment>
 #include <QCursor>
+#include <QSocketNotifier>
 #include <csignal>
+#include <cerrno>
+#include <cstdlib>
+#include <exception>
+#include <memory>
+#include <fcntl.h>
+#include <unistd.h>
 
 #ifndef HARDWARE_HAS_5G
 #define HARDWARE_HAS_5G 0
@@ -74,6 +81,7 @@ static const char* SOCKET_NAME = "ifz_app1.sock";
 static const char* APP_TITLE   = "App iScan";
 
 static QTextStream qout(stdout);
+static int gSignalPipe[2] = {-1, -1};
 
 // ======================================================
 // Save state before exit
@@ -82,8 +90,57 @@ static void saveStateAndQuit() {
     QCoreApplication::quit();
 }
 
-static void handleSignal(int) {
-    QMetaObject::invokeMethod(qApp, [] { saveStateAndQuit(); }, Qt::QueuedConnection);
+// POSIX signal handlers may only call async-signal-safe functions. The old
+// implementation called QMetaObject::invokeMethod() directly from SIGTERM/INT,
+// which is undefined behavior and can fail during Qt Creator remote cancel.
+// Write the signal number to a non-blocking pipe and let the Qt event loop do
+// the real shutdown work.
+static void handleSignal(int signalNumber)
+{
+    const int savedErrno = errno;
+    if (gSignalPipe[1] >= 0) {
+        const int value = signalNumber;
+        (void)::write(gSignalPipe[1], &value, sizeof(value));
+    }
+    errno = savedErrno;
+}
+
+static bool installSignalBridge(QCoreApplication *app)
+{
+    if (::pipe(gSignalPipe) != 0) {
+        qCritical() << "[SIGNAL] pipe creation failed errno=" << errno;
+        return false;
+    }
+
+    for (int fd : gSignalPipe) {
+        const int flags = ::fcntl(fd, F_GETFL, 0);
+        if (flags >= 0)
+            ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+        const int fdFlags = ::fcntl(fd, F_GETFD, 0);
+        if (fdFlags >= 0)
+            ::fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC);
+    }
+
+    auto *notifier = new QSocketNotifier(gSignalPipe[0], QSocketNotifier::Read, app);
+    QObject::connect(notifier, &QSocketNotifier::activated, app, [notifier](int) {
+        notifier->setEnabled(false);
+        int signalNumber = 0;
+        while (::read(gSignalPipe[0], &signalNumber, sizeof(signalNumber)) == sizeof(signalNumber)) {
+            qWarning() << "[SIGNAL] graceful shutdown requested signal=" << signalNumber;
+        }
+        saveStateAndQuit();
+    });
+
+    struct sigaction action {};
+    action.sa_handler = handleSignal;
+    sigemptyset(&action.sa_mask);
+    action.sa_flags = 0;
+    if (::sigaction(SIGTERM, &action, nullptr) != 0 ||
+        ::sigaction(SIGINT, &action, nullptr) != 0) {
+        qCritical() << "[SIGNAL] sigaction install failed errno=" << errno;
+        return false;
+    }
+    return true;
 }
 
 // ======================================================
@@ -161,7 +218,10 @@ static void setupRuntimeEnv()
         qputenv("QTWEBGL_PORT", QByteArray("8081"));
     }
 
-    qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false;*.info=false;*.warning=false"));
+    // Keep info/warning/critical output available for remote stability faults.
+    // Suppress only verbose debug messages unless the deployment overrides it.
+    if (qEnvironmentVariableIsEmpty("QT_LOGGING_RULES"))
+        qputenv("QT_LOGGING_RULES", QByteArray("*.debug=false"));
 }
 
 // ======================================================
@@ -200,8 +260,12 @@ int main(int argc, char *argv[])
 
     app.setApplicationDisplayName(APP_TITLE);
 
-    std::signal(SIGTERM, handleSignal);
-    std::signal(SIGINT,  handleSignal);
+    installSignalBridge(&app);
+    std::set_terminate([]() {
+        static const char message[] = "[FATAL] std::terminate invoked\n";
+        (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+        std::abort();
+    });
 
     qInfo().noquote() << "[ENV] DISPLAY=" << qgetenv("DISPLAY");
     qInfo().noquote() << "[ENV] WAYLAND_DISPLAY=" << qgetenv("WAYLAND_DISPLAY");
@@ -248,36 +312,36 @@ int main(int argc, char *argv[])
     // ==================================================
     // QML ENGINE
     // ==================================================
-    QQmlApplicationEngine engine;
-    engine.setOutputWarningsToStandardError(true);
+    auto engine = std::make_unique<QQmlApplicationEngine>();
+    engine->setOutputWarningsToStandardError(true);
 
 #if HARDWARE_HAS_5G
-    engine.rootContext()->setContextProperty("HardwareHas5G", true);
-    engine.rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("5G"));
+    engine->rootContext()->setContextProperty("HardwareHas5G", true);
+    engine->rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("5G"));
 #else
-    engine.rootContext()->setContextProperty("HardwareHas5G", false);
-    engine.rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("NONE_5G"));
+    engine->rootContext()->setContextProperty("HardwareHas5G", false);
+    engine->rootContext()->setContextProperty("HardwareVersionName", QStringLiteral("NONE_5G"));
 #endif
-    engine.rootContext()->setContextProperty("HardwareHasWifi", bool(HARDWARE_HAS_WIFI));
-    engine.rootContext()->setContextProperty("HardwareHasWireless", bool(HARDWARE_HAS_WIRELESS));
-    engine.rootContext()->setContextProperty("FeatureTopNetworkDrawer",
+    engine->rootContext()->setContextProperty("HardwareHasWifi", bool(HARDWARE_HAS_WIFI));
+    engine->rootContext()->setContextProperty("HardwareHasWireless", bool(HARDWARE_HAS_WIRELESS));
+    engine->rootContext()->setContextProperty("FeatureTopNetworkDrawer",
                                              bool(FEATURE_TOP_NETWORK_DRAWER));
-    engine.rootContext()->setContextProperty("networkSecurity", &networkSecurity);
+    engine->rootContext()->setContextProperty("networkSecurity", &networkSecurity);
     // Runtime QML pages use this context property, while Design mode can omit it.
-    engine.rootContext()->setContextProperty("networkController", netCtrl);
+    engine->rootContext()->setContextProperty("networkController", netCtrl);
 
     ImageProviderDF *imageProviderDF = new ImageProviderDF();
     iScreenDF *kraken = new iScreenDF(imageProviderDF);
-    engine.rootContext()->setContextProperty("Krakenmapval", kraken);
+    engine->rootContext()->setContextProperty("Krakenmapval", kraken);
 
     Mainwindows mainWindows;
-    engine.rootContext()->setContextProperty("mainWindows", &mainWindows);
-    engine.rootContext()->setContextProperty("wsClient",  &mainWindows.wsClient);
+    engine->rootContext()->setContextProperty("mainWindows", &mainWindows);
+    engine->rootContext()->setContextProperty("wsClient",  &mainWindows.wsClient);
 
 #ifdef PLATFORM_JETSON
     mainwindowsiRec recMain("desktop");
-    engine.rootContext()->setContextProperty("mainwindows", &recMain);
-    engine.rootContext()->setContextProperty("Backend",     &recMain);
+    engine->rootContext()->setContextProperty("mainwindows", &recMain);
+    engine->rootContext()->setContextProperty("Backend",     &recMain);
 
     QObject::connect(&mainWindows, &Mainwindows::frequencyChangedToQml,
                      &recMain,     &mainwindowsiRec::onFrequencyChangedFromMain);
@@ -285,16 +349,16 @@ int main(int argc, char *argv[])
                      &recMain,     &mainwindowsiRec::RecevieCommandMainCpp);
 
     FileReader fileReader;
-    engine.rootContext()->setContextProperty("fileReader", &fileReader);
-    engine.rootContext()->setContextProperty("applicationDirPath", QGuiApplication::applicationDirPath());
+    engine->rootContext()->setContextProperty("fileReader", &fileReader);
+    engine->rootContext()->setContextProperty("applicationDirPath", QGuiApplication::applicationDirPath());
 #endif
 
     DoaClient doaClient;
-    engine.rootContext()->setContextProperty("doaClient", &doaClient);
+    engine->rootContext()->setContextProperty("doaClient", &doaClient);
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));
 
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreated, &app,
+    QObject::connect(engine.get(), &QQmlApplicationEngine::objectCreated, &app,
                      [url](QObject *obj, const QUrl &objUrl) {
                          if (!obj && url == objUrl) {
                              qCritical() << "QML objectCreated failed for:" << url;
@@ -302,14 +366,14 @@ int main(int argc, char *argv[])
                          }
                      }, Qt::QueuedConnection);
 
-    engine.load(url);
+    engine->load(url);
 
-    if (engine.rootObjects().isEmpty()) {
+    if (engine->rootObjects().isEmpty()) {
         qCritical() << "QML load failed (rootObjects empty)";
         return -1;
     }
 
-    QObject *topLevel = engine.rootObjects().first();
+    QObject *topLevel = engine->rootObjects().first();
     QQuickWindow *qmlWindow = qobject_cast<QQuickWindow *>(topLevel);
     if (!qmlWindow) {
         qCritical() << "Root QML is not a QQuickWindow. type=" << topLevel->metaObject()->className();
@@ -384,5 +448,16 @@ int main(int argc, char *argv[])
     //                  imageProviderDF, SLOT(makeScreenshot()));
 #endif
 
-    return app.exec();
+    const int exitCode = app.exec();
+
+    // Explicitly destroy the QML engine while every C++ context backend is
+    // still alive. This gives QML destruction callbacks a valid Mainwindows,
+    // recorder, network controller, and DOA backend during remote stop/restart.
+    gMainWin = nullptr;
+    engine.reset();
+
+    if (gSignalPipe[0] >= 0) { ::close(gSignalPipe[0]); gSignalPipe[0] = -1; }
+    if (gSignalPipe[1] >= 0) { ::close(gSignalPipe[1]); gSignalPipe[1] = -1; }
+
+    return exitCode;
 }

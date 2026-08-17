@@ -23,7 +23,6 @@
 #include "rfdc_nco_client.h"
 #include "alsarecconfigmanager.h"
 #include <QThread>
-#include "SetFreqWorker.h"
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -108,10 +107,18 @@ class Mainwindows : public QObject
 public:
 
     explicit Mainwindows(QObject *parent = nullptr);
+    ~Mainwindows() override;
     WebSocketClient wsClient;
 
-    Q_INVOKABLE int center_freq() const { return wsClient.rxconfig.center_freq; }
+    Q_INVOKABLE double center_freq() const { return static_cast<double>(wsClient.rxconfig.center_freq); }
     Q_INVOKABLE int samp_rate() const { return wsClient.rxconfig.samp_rate; }
+    Q_INVOKABLE int start_offset_freq() const { return wsClient.rxconfig.start_offset_freq; }
+    Q_INVOKABLE double receiver_freq() const {
+        if (wsClient.rxconfig.start_freq > 0)
+            return static_cast<double>(wsClient.rxconfig.start_freq);
+        return static_cast<double>(wsClient.rxconfig.center_freq)
+             + static_cast<double>(wsClient.rxconfig.start_offset_freq);
+    }
     Q_INVOKABLE QString start_mod() const { return wsClient.rxconfig.start_mod; }
 
     // Replayable SQL state for QML. QML reads the current value when the
@@ -313,6 +320,8 @@ signals:
     void findBandsWithProfile(QVariant mode);
     void waterfallLevelsChanged(int min, int max);
     void updateCenterFreq();
+    void updateReceiverFreq(double centerHz, int offsetHz, double receiverHz);
+    void frequencyTuneError(QString message);
     void updateProfiles(QJsonArray value);
     void updateGPIOKeyProfiles(int value);
     void updateRotaryProfiles(int dir);
@@ -326,7 +335,6 @@ signals:
                          const QString &detail);
 
 public slots:
-    void requestSetFreqAsync(quint64 freqHz, int timeoutMs);
     void initValueJson(const QJsonArray &arr);
     void profileWeb(QString);
     void profiles();
@@ -336,21 +344,35 @@ public slots:
     void sendmessage(const QString &jsonMessage);
     void onCenterFreqChanged()
     {
-        // rfdc->connectToServer();
-        // rfdc->setFrequency(center_freq());
-        requestSetFreqAsync(center_freq(),200);
+        // AstraRX is the single RF/source tuning owner. A config notification is
+        // state synchronization only; never open the legacy RFSoC :6000 control
+        // path from here.
+        const double newCenterHz = center_freq();
+        const int newSampleRate = samp_rate();
+        if (newCenterHz <= 0.0)
+            return;
+
+        const bool sourceSpanChanged =
+            qAbs(newCenterHz - currentCenterFreq) > 0.5
+            || newSampleRate != currentSampleRate;
+
 #ifdef PLATFORM_JETSON
-        qDebug() << "rfdc->setFrequency(center_freq());";
-        double freq = center_freq()/1e6;     // MHz
-        double bw = samp_rate()/1e6;        // MHz
-        RFPort port = selectRFByFreqAndBW(freq, bw);
-        // hmc->selectRF(port);
-        hmc->selectRFPair(port);
-        emit updateCenterFreq();
-        currentCenterFreq = center_freq();
-        qDebug() << "Selected RF:" << toString(port) << "current Center Frequency:" << currentCenterFreq;
+        // The local HMC path switch still follows the RF source center/sample
+        // span. This is local board routing, not RFSoC frequency ownership.
+        if (sourceSpanChanged) {
+            const double freqMHz = newCenterHz / 1e6;
+            const double bwMHz = newSampleRate / 1e6;
+            const RFPort port = selectRFByFreqAndBW(freqMHz, bwMHz);
+            hmc->selectRFPair(port);
+            qDebug() << "[ASTRARX-CENTER] Selected RF:" << toString(port)
+                     << "center=" << newCenterHz
+                     << "sampleRate=" << newSampleRate;
+        }
 #endif
-        // hmc->selectRF(RFPort::RF6);
+
+        currentCenterFreq = newCenterHz;
+        currentSampleRate = newSampleRate;
+        emit updateCenterFreq();
     }
 
 #ifdef PLATFORM_JETSON
@@ -361,16 +383,13 @@ public slots:
     void vpnRefresh();
 
 private:
-    QThread m_setFreqThread;
-
-    SetFreqWorker *m_setFreqWorker = nullptr;
-
     QString nc_host = "127.0.0.1";
     quint16 nc_port = 6000;
     int recRunningCount = -1;
     bool recEnable = true;
     bool currentSQLValue = false;
-    double currentCenterFreq = center_freq();//100e6;
+    double currentCenterFreq = 0.0;
+    int currentSampleRate = 0;
     int currentOffsetFreq = 0;
     double currentFreq = 100e6;
     SocketClient *iPatchServerSocket = nullptr;
@@ -536,10 +555,7 @@ private:
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,0.0,
                                                         0.0,0.0,1.0};
-    static void* ThreadFuncSqlWatcher(void* pTr);
-    typedef void * (*THREADFUNCPTRSQLWATCHER)(void *);
-    pthread_t idThreadSqlWatcher;
-    std::atomic_bool m_threadRunning{true};
+    QTimer *m_sqlWatcherTimer = nullptr;
     QString m_lastRecState;     // เช่น "RECORD", "PAUSE"
     bool m_lastRecIsRecord = false;
     bool m_emittedRecStatusOnRecord = false;
@@ -610,7 +626,6 @@ private:
     QStringList existingRtcDevs() const;
 
 private slots:
-    void onSetFreqDone(quint64 freqHz, bool ok);
     void startScanCardFn();
     void updateGPIOKeyProfilesSlot(int code);
     void updateRotaryProfilesSlot(int dir);

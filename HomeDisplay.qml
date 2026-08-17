@@ -76,8 +76,6 @@ Item {
     property var pendingCurrentRx: ({})
 
 
-    property var pendingDSPParams: ({})
-    property int pendingCenterFreq: 0
 
     property bool interlockUpdate: false
     property bool currentRxLoaded: false
@@ -524,8 +522,11 @@ Item {
     function loadCurrentConfig() {
         let config = configManager.getCurrentConfig() || {}
 
-        // ---- doubles / numbers (กัน undefined) ----
-        scanVolLevelHeadphone = numOr(config.scanVolLevelHeadphone, 50)   // <-- เลือก default ที่คุณต้องการ
+        // Local/operator preferences are still restored from the device config.
+        // RF center, DSP offset, mode, bandwidth and squelch belong to AstraRX
+        // after WebSocket connection and must not be overwritten by stale local
+        // OpenWebRX settings.
+        scanVolLevelHeadphone = numOr(config.scanVolLevelHeadphone, 50)
         scanVolLevel          = numOr(config.scanVolLevel, 50)
         scanAudioLevel        = numOr(config.scanAudioLevel, 50)
 
@@ -533,60 +534,16 @@ Item {
         mainWindows.setHeadphoneVolume(scanVolLevelHeadphone)
         wsClient.setVolumePercent(scanAudioLevel)
 
-        // waterfall levels (กัน undefined ด้วย)
-        var wfMin = numOr(config.waterfallMinDb, -120)
-        var wfMax = numOr(config.waterfallMaxDb, -20)
-        radioScanner.spectrumGLPlot.updateWaterfallLevels(wfMin, wfMax)
+        var wfMin = numOr(config.waterfallMinDb, -130)
+        var wfMax = numOr(config.waterfallMaxDb, -80)
+        if (!radioScanner.spectrumGLPlot.autoScaleEnabled)
+            radioScanner.spectrumGLPlot.updateWaterfallLevels(wfMin, wfMax)
 
-        currectmodString = strOr(config.mod, "FM")
+        currectmodString = strOr(mainWindows.start_mod(), "FM")
         initData = true
 
-        // ---- dspcontrol params (ตัวเลขก็กันไว้) ----
-        var dspcontrolParams = {
-            type: "dspcontrol",
-            params: {
-                "low_cut":          numOr(config.low_cut, -5000),
-                "high_cut":         numOr(config.high_cut, 5000),
-                "offset_freq":      numOr(config.offset_freq, 0),
-                "mod":              strOr(config.mod, "FM"),
-                "dmr_filter":       !!config.dmr_filter,
-                "audio_service_id": numOr(config.audio_service_id, 0),
-                "squelch_level":    numOr(config.squelch_level, 0),
-                "secondary_mod":    strOr(config.secondary_mod, "")
-            }
-        }
-
-        if (mainWindows && typeof mainWindows.sendmessage === "function") {
-            var cf = numOr(config.center_freq, 0)
-
-            // ส่งความถี่ทันที (กัน config.center_freq เป็น undefined)
-            mainWindows.sendmessage(
-                '{"type":"setfrequency","params":{"frequency":' + cf + ',"key":"memagic"}}'
-            )
-
-            pendingDSPParams = dspcontrolParams
-            pendingCenterFreq = cf
-            sendDSPTimer.restart()
-        } else {
-            console.error("mainWindows or sendmessage() is not available")
-        }
-    }
-    Timer {
-        id: sendDSPTimer
-        interval: 500  // 1 second
-        repeat: false
-        onTriggered: {
-            mainWindows.sendmessage(JSON.stringify(pendingDSPParams))
-            radioScanner.spectrumGLPlot.centerFreq = pendingCenterFreq
-            radioScanner.spectrumGLPlot.low_cut = pendingDSPParams.params.low_cut
-            radioScanner.spectrumGLPlot.high_cut = pendingDSPParams.params.high_cut
-            radioScanner.spectrumGLPlot.offsetFrequency = pendingDSPParams.params.offset_freq
-            scanSqlLevel = (pendingDSPParams.params.squelch_level * 2) + 255
-            stackView.pop(null)
-            listView.currentIndex = 0
-            console.log("HomeDisplay sendDSPTimer::",scanSqlLevel)
-            radioScanner.spectrumGLPlot.start_mod = pendingDSPParams.params.mod
-        }
+        console.log("[ASTRARX-CONFIG] restored local volume/display preferences only;"
+                    + " RF/DSP state remains server-authoritative")
     }
 
     Timer {

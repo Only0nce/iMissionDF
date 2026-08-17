@@ -15,6 +15,7 @@
 #include <QVector>
 #include <QDebug>
 #include <QDateTime>
+#include <atomic>
 
 class AlsaAudioPlayer : public QObject {
     Q_OBJECT
@@ -57,7 +58,7 @@ private:
     QMutex m_mutex;
     QWaitCondition m_dataAvailable;
     QQueue<QByteArray> m_queue;
-    bool m_running = false;
+    std::atomic_bool m_running{false};
     QByteArray audioBuffer;
 
     QByteArray writeBuffer;

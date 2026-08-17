@@ -6,8 +6,43 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <limits>
-WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent) {}
+WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
+{
+    // Connect Qt signals exactly once. connectToServer() may be called again for
+    // reconnect/target changes without multiplying message handlers.
+    connect(&webSocket, &QWebSocket::connected,
+            this, &WebSocketClient::onConnected, Qt::UniqueConnection);
+    connect(&webSocket, &QWebSocket::textMessageReceived,
+            this, &WebSocketClient::onTextMessageReceived, Qt::UniqueConnection);
+    connect(&webSocket, &QWebSocket::binaryMessageReceived,
+            this, &WebSocketClient::onBinaryMessageReceived, Qt::UniqueConnection);
+    connect(&resetSQL, &QTimer::timeout,
+            this, &WebSocketClient::resetSQLCount, Qt::UniqueConnection);
+    resetSQL.setInterval(100);
+}
+
+WebSocketClient::~WebSocketClient()
+{
+    resetSQL.stop();
+    if (webSocket.state() != QAbstractSocket::UnconnectedState)
+        webSocket.close();
+
+    // These players are created by WebSocketClient in this source tree.
+    // Stop their QThreads before process teardown so Qt never destroys a
+    // running playback thread.
+    if (hdAudioPlayer) {
+        hdAudioPlayer->stop();
+        delete hdAudioPlayer;
+        hdAudioPlayer = nullptr;
+    }
+    if (sdAudioPlayer) {
+        sdAudioPlayer->stop();
+        delete sdAudioPlayer;
+        sdAudioPlayer = nullptr;
+    }
+}
 
 void WebSocketClient::setFftUiActive(bool active)
 {
@@ -129,17 +164,30 @@ void WebSocketClient::updateMaxHold(const QVector<float> &fftFrame)
     publishMaxHoldIfDue();
 }
 
-void WebSocketClient::connectToServer(const QUrl &url) {
-    connect(&webSocket, &QWebSocket::connected, this, &WebSocketClient::onConnected);
-    connect(&webSocket, &QWebSocket::textMessageReceived, this, &WebSocketClient::onTextMessageReceived);
-    connect(&webSocket, &QWebSocket::binaryMessageReceived, this, &WebSocketClient::onBinaryMessageReceived);
-    connect(&resetSQL, &QTimer::timeout, this, &WebSocketClient::resetSQLCount);
-    resetSQL.start(100);
+void WebSocketClient::connectToServer(const QUrl &url)
+{
+    if (!url.isValid()) {
+        qWarning() << "[ASTRARX-BACKEND] invalid WebSocket URL:" << url;
+        return;
+    }
+
+    // There is one receiver backend socket. Close an old target before opening
+    // another; signal connections live in the constructor and are not duplicated.
+    if (webSocket.state() != QAbstractSocket::UnconnectedState)
+        webSocket.close();
+
+    m_explicitSquelchSeen = false;
+    sqlCount = 3;
+    if (!resetSQL.isActive())
+        resetSQL.start();
+
+    qInfo() << "[ASTRARX-BACKEND] opening" << url;
     webSocket.open(url);
 }
 
 void WebSocketClient::onConnected() {
-    qDebug() << "Connected to OpenWebRX.";
+    m_explicitSquelchSeen = false;
+    qDebug() << "Connected to receiver backend.";
     webSocket.sendTextMessage("SERVER DE CLIENT client=openwebrx.js type=receiver");
     sendConnectionProperties(12000, 16000);
     // sendDspControl(-75000, 75000, 0, "wfm", 3, -1250000, -150, false);
@@ -152,6 +200,9 @@ void WebSocketClient::onConnected() {
 }
 void WebSocketClient::resetSQLCount()
 {
+    if (m_explicitSquelchSeen)
+        return;
+
     sqlCount++;
     if(sqlCount == 3)
     {
@@ -282,13 +333,15 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
                 qWarning() << "Invalid PCM size:" << data.size();
             }
 
-            sqlCount = 0;
-            if (!sqlOn) {
+            if (!m_explicitSquelchSeen) {
+                sqlCount = 0;
+                if (!sqlOn) {
                 sqlOn = true;
                 emit onSQLChanged(sqlOn);
-                qDebug() << "sd audio data"
-                         << "data" << data.size()
-                         << "rxconfig.audio_compression" << rxconfig.audio_compression;
+                    qDebug() << "sd audio data"
+                             << "data" << data.size()
+                             << "rxconfig.audio_compression" << rxconfig.audio_compression;
+                }
             }
         }
         break;
@@ -319,13 +372,15 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
                 hdAudioPlayer->pushAudio(pcm);
         }
 
-        sqlCount = 0;
-        if (!sqlOn) {
-            sqlOn = true;
-            qDebug() << "hd audio data"
-                     << "data" << data.size()
-                     << "rxconfig.audio_compression" << rxconfig.audio_compression;
-            emit onSQLChanged(sqlOn);
+        if (!m_explicitSquelchSeen) {
+            sqlCount = 0;
+            if (!sqlOn) {
+                sqlOn = true;
+                qDebug() << "hd audio data"
+                         << "data" << data.size()
+                         << "rxconfig.audio_compression" << rxconfig.audio_compression;
+                emit onSQLChanged(sqlOn);
+            }
         }
         break;
     }
@@ -338,11 +393,94 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 
 void WebSocketClient::handleConfigMessage(const QJsonObject &config)
 {
+    const quint64 oldCenter = rxconfig.center_freq;
+    const quint64 oldStart = rxconfig.start_freq;
+    const int oldOffset = rxconfig.start_offset_freq;
+    const int oldSampleRate = rxconfig.samp_rate;
+    const QString oldMode = rxconfig.start_mod;
+
+    const bool hasCenter = config.contains("center_freq");
+    const bool hasStart = config.contains("start_freq");
+    const bool hasOffset = config.contains("start_offset_freq");
+
     rxconfig.fromJson(config);
 
-    if (rxconfig.allow_chat )
-    {
+    // AstraRX normally sends center + start_freq + offset together, while older
+    // OpenWebRX-compatible messages may omit one member. Normalize the snapshot
+    // so all downstream code sees one internally consistent receiver state.
+    if (hasStart && !hasOffset && rxconfig.center_freq > 0) {
+        // A receiver-only update is valid too; derive the DSP offset from the
+        // latest known RF center even when this partial config omits center_freq.
+        const qint64 derived = static_cast<qint64>(rxconfig.start_freq)
+                             - static_cast<qint64>(rxconfig.center_freq);
+        rxconfig.start_offset_freq = static_cast<int>(
+            qBound<qint64>(std::numeric_limits<int>::min(),
+                           derived,
+                           std::numeric_limits<int>::max()));
+    } else if (!hasStart && (hasCenter || hasOffset)) {
+        const qint64 receiver = static_cast<qint64>(rxconfig.center_freq)
+                              + static_cast<qint64>(rxconfig.start_offset_freq);
+        rxconfig.start_freq = receiver > 0 ? static_cast<quint64>(receiver) : 0;
+    }
 
+    if (hasCenter && hasStart && hasOffset) {
+        const qint64 expected = static_cast<qint64>(rxconfig.center_freq)
+                              + static_cast<qint64>(rxconfig.start_offset_freq);
+        const qint64 error = static_cast<qint64>(rxconfig.start_freq) - expected;
+        if (std::llabs(error) > 1) {
+            qWarning() << "[QT5-FREQ-RX] inconsistent server state"
+                       << "center=" << rxconfig.center_freq
+                       << "offset=" << rxconfig.start_offset_freq
+                       << "start_freq=" << rxconfig.start_freq
+                       << "error=" << error;
+            // Absolute receiver frequency is authoritative for the UI. Rebuild
+            // offset from it so overlay/readout never disagree.
+            const qint64 normalized = static_cast<qint64>(rxconfig.start_freq)
+                                    - static_cast<qint64>(rxconfig.center_freq);
+            rxconfig.start_offset_freq = static_cast<int>(
+                qBound<qint64>(std::numeric_limits<int>::min(),
+                               normalized,
+                               std::numeric_limits<int>::max()));
+        }
+    }
+
+    const bool centerMetaChanged =
+        rxconfig.center_freq != oldCenter
+        || rxconfig.samp_rate != oldSampleRate
+        || rxconfig.start_mod != oldMode;
+
+    const bool receiverChanged =
+        rxconfig.center_freq != oldCenter
+        || rxconfig.start_freq != oldStart
+        || rxconfig.start_offset_freq != oldOffset;
+
+    if (centerMetaChanged) {
+        qInfo() << "[QT5-CENTER-RX]"
+                << "center=" << rxconfig.center_freq
+                << "samp_rate=" << rxconfig.samp_rate
+                << "mode=" << rxconfig.start_mod;
+        emit updateCenterFreq();
+    }
+
+    if (receiverChanged) {
+        const quint64 receiverHz = rxconfig.start_freq > 0
+                                 ? rxconfig.start_freq
+                                 : static_cast<quint64>(
+                                       qMax<qint64>(0,
+                                           static_cast<qint64>(rxconfig.center_freq)
+                                         + static_cast<qint64>(rxconfig.start_offset_freq)));
+
+        qInfo() << "[QT5-RECEIVER-RX]"
+                << "center=" << rxconfig.center_freq
+                << "offset=" << rxconfig.start_offset_freq
+                << "receiver=" << receiverHz;
+        emit receiverStateChanged(rxconfig.center_freq,
+                                  rxconfig.start_offset_freq,
+                                  receiverHz);
+    }
+
+    if (rxconfig.allow_chat)
+    {
     }
 }
 
@@ -390,15 +528,14 @@ void WebSocketClient::onTextMessageReceived(const QString &message)
                 emit waterfallColorMap(rxconfig.getWaterfallColorMap());
             else if(message.contains("waterfall_levels"))
                 emit waterfallLevelsChanged(rxconfig.waterfall_levels.min,rxconfig.waterfall_levels.max);
-            else if(message.contains("start_offset_freq"))
-                emit updateCenterFreq();
         }
         else if (type == "secondary_config") {
             qDebug() << "handleSecondaryConfig" << (value.toObject());
         } else if (type == "receiver_details") {
             qDebug() << "setReceiverDetails" << (value);
         } else if (type == "smeter") {
-            emit smeterValueUpdated(10*(std::log10(value.toDouble())));
+            const double linearPower = qMax(value.toDouble(), 1e-15);
+            emit smeterValueUpdated(10.0 * std::log10(linearPower));
         } else if (type == "cpuusage") {
             // qDebug() << "updateCpuUsage" << (value);
         } else if (type == "temperature") {
@@ -421,11 +558,13 @@ void WebSocketClient::onTextMessageReceived(const QString &message)
         } else if (type == "bookmarks") {
             qDebug() << "bookmarks.replaceBookmarks" << (value.toArray()  <<  "server");
         } else if (type == "sdr_error") {
-            qDebug() << "divlog(value.toString()" <<  true;
-            qDebug() << "showErrorOverlay" << (value.toString());
-            qDebug() << "stopDemodulator()";
+            const QString error = value.toString();
+            qWarning() << "[ASTRARX-ERROR]" << error;
+            emit backendError(error);
         } else if (type == "demodulator_error") {
-            qDebug() << "divlog" << value.toString() << true;
+            const QString error = value.toString();
+            qWarning() << "[ASTRARX-DEMOD-ERROR]" << error;
+            emit backendError(error);
         } else if (type == "secondary_demod") {
             // if (!dispatchSecondaryDemodMessage(value)) {
             qDebug() << " secondary_demod_push_data" <<  (value);
@@ -439,6 +578,15 @@ void WebSocketClient::onTextMessageReceived(const QString &message)
             qDebug() << "divlog" <<  "Server is currently busy: " + obj["reason"].toString() << true;
             qDebug() << "showErrorOverlay" << (obj["reason"].toString());
             qDebug() << "reconnect_timeout = 16000";
+        } else if (type == "squelch") {
+            m_explicitSquelchSeen = true;
+            const bool nextSql = value.toBool(false);
+            sqlCount = nextSql ? 0 : 3;
+            if (sqlOn != nextSql) {
+                sqlOn = nextSql;
+                qInfo() << "[QT5-SQUELCH-RX]" << sqlOn;
+                emit onSQLChanged(sqlOn);
+            }
         } else if (type == "modes") {
             qDebug() << "Modes::setModes" << (value.toArray());
         } else {
@@ -490,10 +638,10 @@ void WebSocketClient::sendConnectionProperties(int outputRate, int hdOutputRate)
     webSocket.sendTextMessage(QJsonDocument(json).toJson(QJsonDocument::Compact));
 }
 
-void WebSocketClient::sendFrequency(int freq) {
+void WebSocketClient::sendFrequency(quint64 freq) {
     QJsonObject json;
     json["command"] = "set_freq";
-    json["freq"] = freq;
+    json["freq"] = static_cast<double>(freq);
     webSocket.sendTextMessage(QJsonDocument(json).toJson(QJsonDocument::Compact));
 }
 

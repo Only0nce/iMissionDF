@@ -8,7 +8,10 @@ Item {
     // height: 400
     property real freqMin: 10e6
     property real freqMax: 3.8e9
-    property real freqScan: freqScan
+    // Absolute receiver frequency shown in the large readout.
+    // SpectrumGLPlot owns live updates through center + DSP offset.
+    property real freqScan: Number(mainWindows.receiver_freq())
+    property bool frequencyUiSyncing: false
     property bool keyfreqEdit: false
     property string buttonColor: "#aa009688"
     property string buttonColorRotary: "#ee009688"
@@ -43,57 +46,21 @@ Item {
     }
 
     onFreqScanUnitChanged: {
-        if (componentNotCompleted == false) return
-        if (freqEdit.text != "")
-        {
-            switch (freqUnit)
-            {
-            case "Hz":
-                freqScan = parseInt(freqEdit.text)
-                break
-            case "kHz":
-                freqScan = parseFloat(freqEdit.text) * 1e3
-                break
-            case "MHz":
-                freqScan = parseFloat(freqEdit.text) * 1e6
-                break
-            case "GHz":
-                freqScan = parseFloat(freqEdit.text) * 1e9
-                break
-            }
-            console.log("onFreqScanUnitChanged frequency",freqScan)
-            if ((freqScan >= freqMin) & (freqScan <= freqMax))
-            {
-                freqEditColor = "#aaaaaa"
-            }
-            else
-            {
-                freqEditColor = "#ff5555"
-                console.log("frequency out of range")
-            }
-        }
+        // Unit changes are display-only. Never reinterpret the existing text
+        // using the new unit because that changes the actual tuned frequency.
+        if (componentNotCompleted)
+            updateFrequency()
+    }
+
+    onFreqScanChanged: {
+        if (componentNotCompleted && !keyfreqEdit)
+            updateFrequency()
     }
 
     Component.onCompleted:
     {
-        var str = freqScan.toString()
-        switch(freqUnit)
-        {
-        case "Hz":
-            freqScanString = freqScan.toString()
-            break;
-        case "kHz":
-            freqScanString = (freqScan/1e3).toFixed(3)
-            break;
-        case "MHz":
-            freqScanString = (freqScan/1e6).toFixed(4)
-            break;
-        case "GHz":
-            freqScanString = (freqScan/1e9).toFixed(4)
-            break;
-        default:
-            freqScanString = freqScan.toString()
-        }
+        freqScan = Number(mainWindows.receiver_freq())
+        updateFrequency()
         componentNotCompleted = true
 
         mainWindows.onTemperatureChanged.connect(function(value){
@@ -142,25 +109,25 @@ Item {
 
     function updateFrequency()
     {
-        var str = freqScan.toString()
-        // console.log("freqScan",freqScan," freqUnit",freqUnit)
+        frequencyUiSyncing = true
         switch(freqUnit)
         {
         case "Hz":
-            freqScanString = freqScan.toString()
-            break;
+            freqScanString = Math.round(freqScan).toString()
+            break
         case "kHz":
             freqScanString = (freqScan/1e3).toFixed(3)
-            break;
+            break
         case "MHz":
             freqScanString = (freqScan/1e6).toFixed(6)
-            break;
+            break
         case "GHz":
             freqScanString = (freqScan/1e9).toFixed(9)
-            break;
+            break
         default:
             freqScanString = freqScan.toString()
         }
+        frequencyUiSyncing = false
     }
     RowLayout {
         y: 4
@@ -237,20 +204,20 @@ Item {
                     notation: DoubleValidator.StandardNotation
                 }
                 inputMethodHints: Qt.ImhDigitsOnly
-                onFocusChanged: {
-
-                }
-                onCursorVisibleChanged: {
-                    keyfreqEdit = cursorVisible
-                    if (cursorVisible)
-                    {
-                        if(focus) selectAll()
-                        console.log("onFocusChanged",focus,text)
+                onActiveFocusChanged: {
+                    keyfreqEdit = activeFocus
+                    if (activeFocus) {
+                        selectAll()
+                        console.log("[FREQ-EDIT] begin", text)
+                    } else if (componentNotCompleted) {
+                        // Once editing ends, return ownership to the canonical
+                        // numeric receiver state.
+                        updateFrequency()
                     }
-                    focus = cursorVisible
                 }
 
                 onAccepted: {
+                    keyfreqEdit = false
                     focus = false
                     if ((freqScan >= freqMin) & (freqScan <= freqMax))
                     {
@@ -262,7 +229,7 @@ Item {
                     }
                 }
                 onTextChanged: {
-                    if (componentNotCompleted == false) return
+                    if (componentNotCompleted == false || frequencyUiSyncing) return
                     if (freqEdit.text != "")
                     {
                         switch (freqUnit)

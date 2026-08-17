@@ -11,8 +11,9 @@ Item {
     Material.accent: Material.Teal
 
     // These will be bound to your waterfall logic
-    property real waterfallMinDb: -100
-    property real waterfallMaxDb: 0
+    property real waterfallMinDb: -130
+    property real waterfallMaxDb: -80
+    signal manualScaleEdited()
 
     Timer {
         id: waterfallScaleControlTimer
@@ -83,12 +84,14 @@ Item {
 
                 first.onValueChanged: {
                     waterfallMinDb = first.value
+                    if (first.pressed) manualScaleEdited()
                     waterfallScaleControlTimer.restart()
                     waterfallScaleControl.opacity = 1
                 }
 
                 second.onValueChanged: {
                     waterfallMaxDb = second.value
+                    if (second.pressed) manualScaleEdited()
                     waterfallScaleControlTimer.restart()
                     waterfallScaleControl.opacity = 1
                 }

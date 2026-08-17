@@ -3,8 +3,13 @@
 #include <QDebug>
 
 AlsaAudioPlayer::AlsaAudioPlayer(int sampleRate, int audioFormat, QObject *parent) : QObject(parent) {
-    moveToThread(&m_thread);
-    connect(&m_thread, &QThread::started, this, &AlsaAudioPlayer::audioLoop);
+    // Keep the QObject in its owner thread. Only audioLoop itself executes on
+    // m_thread via a direct started-signal connection. A QObject that owns the
+    // QThread it is moved to is fragile during destruction because the member
+    // QThread is destroyed before the QObject base class.
+    connect(&m_thread, &QThread::started,
+            this, &AlsaAudioPlayer::audioLoop,
+            Qt::DirectConnection);
     m_sampleRate = sampleRate;
     m_audioFormat = audioFormat;
 }
@@ -36,12 +41,16 @@ bool AlsaAudioPlayer::initAlsa() {
     unsigned int rate = m_sampleRate;
     snd_pcm_hw_params_set_rate_near(m_pcmHandle, params, &rate, nullptr);
 
-    // Set buffer for 100ms of audio (1600 frames)
-    snd_pcm_uframes_t buffer_size = 1600;
+    // Keep ALSA buffering proportional to the configured stream rate.
+    // This player is used for both AstraRX SD audio (12 kHz) and HD/digital
+    // audio (16 kHz), so fixed 16 kHz frame counts distort latency at 12 kHz.
+    snd_pcm_uframes_t buffer_size = static_cast<snd_pcm_uframes_t>(
+        qMax(1, m_sampleRate / 10)); // ~100 ms
     snd_pcm_hw_params_set_buffer_size_near(m_pcmHandle, params, &buffer_size);
 
-    // Set period to 20ms (320 frames)
-    snd_pcm_uframes_t period_size = 320;
+    // ~20 ms period at the actual configured stream rate.
+    snd_pcm_uframes_t period_size = static_cast<snd_pcm_uframes_t>(
+        qMax(1, m_sampleRate / 50));
     snd_pcm_hw_params_set_period_size_near(m_pcmHandle, params, &period_size, nullptr);
 
     if ((err = snd_pcm_hw_params(m_pcmHandle, params)) < 0) {
@@ -97,23 +106,30 @@ void AlsaAudioPlayer::closeAlsa() {
     }
 }
 void AlsaAudioPlayer::start() {
-    if (!m_running) {
-        m_running = true;
+    if (!m_running.load(std::memory_order_acquire)) {
+        m_running.store(true, std::memory_order_release);
         m_thread.setObjectName("AudioPlaybackThread");
         m_thread.start(QThread::TimeCriticalPriority);
     }
 }
 
 void AlsaAudioPlayer::stop() {
-    if (m_running) {
-        m_running = false;
+    if (m_running.load(std::memory_order_acquire) || m_thread.isRunning()) {
+        m_running.store(false, std::memory_order_release);
         {
             QMutexLocker locker(&m_mutex);
             m_dataAvailable.wakeAll();
         }
+        // Interrupt a potentially blocking ALSA write before waiting for the
+        // playback loop. audioLoop() also closes the handle on normal exit.
+        if (m_pcmHandle)
+            snd_pcm_drop(m_pcmHandle);
+
         m_thread.quit();
-        if (!m_thread.wait(1000)) {
+        if (!m_thread.wait(2000)) {
             qWarning() << "Failed to stop audio thread gracefully";
+            // Last-resort process-shutdown protection. Normal operation should
+            // always exit through m_running + wakeAll + snd_pcm_drop above.
             m_thread.terminate();
             m_thread.wait();
         }
@@ -250,12 +266,17 @@ void AlsaAudioPlayer::audioLoop() {
     }
 
     QByteArray writeBuffer;
-    const int targetBufferSize = 1600; // 100ms buffer
+    const int bytesPerFrame = (m_audioFormat == SND_PCM_FORMAT_S8) ? 1 : 2;
+    const int targetFrames = qMax(1, m_sampleRate / 10);   // ~100 ms
+    const int periodFrames = qMax(1, m_sampleRate / 50);   // ~20 ms
+    const int targetBufferSize = targetFrames * bytesPerFrame;
     auto lastWriteTime = std::chrono::steady_clock::now();
 
-    while (m_running) {
-        // Fill buffer to target size
-        while (writeBuffer.size() < targetBufferSize && m_running) {
+    while (m_running.load(std::memory_order_acquire)) {
+        // Fill buffer to target size. The target follows m_sampleRate so 12 kHz
+        // and 16 kHz playback have the same time-domain buffering behavior.
+        while (writeBuffer.size() < targetBufferSize
+               && m_running.load(std::memory_order_acquire)) {
             QMutexLocker locker(&m_mutex);
             if (m_queue.isEmpty()) {
                 m_dataAvailable.wait(&m_mutex, 100);
@@ -275,7 +296,8 @@ void AlsaAudioPlayer::audioLoop() {
 
         // Write to ALSA with precise timing
         if (!writeBuffer.isEmpty()) {
-            int framesToWrite = qMin(writeBuffer.size() / 2, 320); // Write 20ms chunks
+            const int availableFrames = writeBuffer.size() / bytesPerFrame;
+            const int framesToWrite = qMin(availableFrames, periodFrames);
             int err = snd_pcm_writei(m_pcmHandle, writeBuffer.constData(), framesToWrite);
 
             if (err == -EPIPE) {
@@ -288,12 +310,13 @@ void AlsaAudioPlayer::audioLoop() {
             }
 
             // Remove written data
-            writeBuffer.remove(0, err * 2);
+            writeBuffer.remove(0, err * bytesPerFrame);
 
             // Calculate exact sleep time
             auto now = std::chrono::steady_clock::now();
             auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastWriteTime);
-            int expectedInterval = (framesToWrite * 1000) / 16000;
+            const int expectedInterval = qMax(1,
+                (framesToWrite * 1000) / qMax(1, m_sampleRate));
             int remaining = expectedInterval - elapsed.count();
 
             if (remaining > 0) {

@@ -32,6 +32,7 @@ class WebSocketClient : public QObject {
     Q_PROPERTY(bool maxHoldEnabled READ maxHoldEnabled WRITE setMaxHoldEnabled NOTIFY maxHoldEnabledChanged)
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
+    ~WebSocketClient() override;
 
     int  m_volumePercent = 25;   // 0–100
     int m_lastVolumeBeforeMute = 100;
@@ -84,6 +85,7 @@ public:
         int max_clients = 0;
         int samp_rate = 0;
         quint64 center_freq = 0;
+        quint64 start_freq = 0;
         int start_offset_freq = 0;
         QString start_mod;
         QString sdr_id;
@@ -137,6 +139,7 @@ public:
             tryGet("max_clients", max_clients);
             tryGet("samp_rate", samp_rate);
             tryGet("center_freq", center_freq);
+            tryGet("start_freq", start_freq);
             tryGet("start_offset_freq", start_offset_freq);
             tryGet("start_mod", start_mod);
             tryGet("sdr_id", sdr_id);
@@ -205,7 +208,12 @@ signals:
     void smeterValueUpdated(double smeterValue);
     void waterfallColorMap(QVariantList waterfall_colors);
     void waterfallLevelsChanged(int min, int max);
+    // Center/source metadata changed (center/sample-rate/mode). Kept separate
+    // from receiver offset updates so DSP tuning never masquerades as an RF retune.
     void updateCenterFreq();
+    // Atomic receiver snapshot from the server.
+    void receiverStateChanged(quint64 centerHz, int offsetHz, quint64 receiverHz);
+    void backendError(QString message);
     void updateProfiles(QJsonArray value);
 
     void openwebrxConnected();
@@ -245,12 +253,13 @@ private:
     AlsaAudioPlayer *sdAudioPlayer = new AlsaAudioPlayer(12000, SND_PCM_FORMAT_S16_LE); // no 'this' parent
     int sqlCount = 0;
     bool sqlOn = false;
+    bool m_explicitSquelchSeen = false;
     void resetSQLCount();
     void applyVolumeToPcm16(QVector<qint16> &samples, int volumePercent);
     void applySoftwareVolume(QByteArray &pcm16);
 
 public slots:
-    void sendFrequency(int freq);
+    void sendFrequency(quint64 freq);
     void sendConnectionProperties(int outputRate, int hdOutputRate);
     void sendDspControl(int lowCut, int highCut, int offsetFreq, const QString &mod, int dmrFilter, int audioServiceId, int squelchLevel, bool secondaryMod);
 

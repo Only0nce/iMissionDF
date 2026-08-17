@@ -22,6 +22,7 @@ bool Mainwindows::getSqlActive() const
 
 Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
 {
+    qInfo().noquote() << "[ASTRARX-COMPAT-BUILD] revision=20260817-bidirectional-span-stability-r10";
     #ifdef PLATFORM_JETSON
 //        system("systemctl stop alsarecd.service");
     #endif
@@ -35,36 +36,17 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
             this, [this](const QString &jsonMessage) {
         emit cppCommand(jsonMessage);
     });
-    // wsClient.connectToServer(QUrl("ws://192.168.10.58:8073/ws/"));
-    wsClient.connectToServer(QUrl("ws://127.0.0.1:8073/ws/"));
-    // wsClient.connectToServer(QUrl("ws://192.168.10.26:8073/ws/"));
-    // สร้าง worker + ย้ายไป thread
-    m_setFreqWorker = new SetFreqWorker();
-    m_setFreqWorker->moveToThread(&m_setFreqThread);
-
-    // จบ thread แล้วลบ worker
-    connect(&m_setFreqThread, &QThread::finished, m_setFreqWorker, &QObject::deleteLater);
-
-    // รับผลกลับ
-    connect(m_setFreqWorker, &SetFreqWorker::setFreqDone,
-            this, &Mainwindows::onSetFreqDone, Qt::QueuedConnection);
-
-    m_setFreqThread.start();
-
-    // ส่งค่า host/port เริ่มต้นไปให้ worker
-    QMetaObject::invokeMethod(m_setFreqWorker, "setHostPort",
-                              Qt::QueuedConnection,
-                              Q_ARG(QString, nc_host),
-                              Q_ARG(quint16, nc_port));
-
-    // rfdc->setHost("192.168.10.5");
-    // rfdc->setPort(6000);
-    // rfdc->setAutoReconnect(true);
-    // rfdc->setReconnectIntervalMs(10000);
-    // rfdc->connectToServer();
-    // wsClient.connectToServer(QUrl("ws://192.168.10.26:8073/ws/"));
-    InputEventReader *rotary = new InputEventReader("/dev/input/by-path/platform-rotary@1-event");
-    InputEventReader *buttons = new InputEventReader("/dev/input/by-path/platform-gpio-keys-event");
+    // AstraRX Qt5 compatibility endpoint. One WebSocket connection is the
+    // only receiver/source control path. Override ASTRARX_WS_URL per target.
+    const QString astraRxWsUrl = qEnvironmentVariable(
+        "ASTRARX_WS_URL", QStringLiteral("ws://127.0.0.1:8074/ws/qt5"));
+    qInfo().noquote() << "[ASTRARX-BACKEND] WebSocket =" << astraRxWsUrl;
+    wsClient.connectToServer(QUrl(astraRxWsUrl));
+    qInfo().noquote() << "[ASTRARX-BACKEND] direct RFSoC SetFreqWorker disabled";
+    InputEventReader *rotary = new InputEventReader(
+        "/dev/input/by-path/platform-rotary@1-event", this);
+    InputEventReader *buttons = new InputEventReader(
+        "/dev/input/by-path/platform-gpio-keys-event", this);
     // connect(iPatchServerSocket,&SocketClient::newCommandProcess,this,&Mainwindows::newCommandProcess);
     connect(socketClientReconnectTimer,&QTimer::timeout,this,&Mainwindows::socketClientReconnect);
     // One Qt signal crossing per FFT frame. QML reuses the same frame for
@@ -75,10 +57,24 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     connect(&wsClient,&WebSocketClient::waterfallColorMap,this,&Mainwindows::waterfallColorUpdate);
     connect(&wsClient,&WebSocketClient::waterfallLevelsChanged,this,&Mainwindows::waterfallLevelsChanged);
     connect(&wsClient,&WebSocketClient::updateCenterFreq,this,&Mainwindows::onCenterFreqChanged);
+    connect(&wsClient, &WebSocketClient::receiverStateChanged,
+            this, [this](quint64 centerHz, int offsetHz, quint64 receiverHz) {
+        currentCenterFreq = static_cast<double>(centerHz);
+        currentOffsetFreq = offsetHz;
+        qInfo() << "[ASTRARX-RECEIVER]"
+                << "center=" << centerHz
+                << "offset=" << offsetHz
+                << "receiver=" << receiverHz;
+        emit updateReceiverFreq(static_cast<double>(centerHz),
+                                offsetHz,
+                                static_cast<double>(receiverHz));
+    });
     connect(&wsClient,&WebSocketClient::openwebrxConnected,this,&Mainwindows::openwebrxConnected);
     connect(&wsClient,&WebSocketClient::updateProfiles,this,&Mainwindows::updateProfiles);
     connect(&wsClient,&WebSocketClient::onSQLChanged,this,&Mainwindows::onSQLChanged);
     connect(&wsClient,&WebSocketClient::onTemperatureChanged,this,&Mainwindows::onTemperatureChanged);
+    connect(&wsClient, &WebSocketClient::backendError,
+            this, &Mainwindows::frequencyTuneError);
     connect(fileUpdateWatcher,&FileUpdateWatcher::fileAppearedOrChanged,this,&Mainwindows::fileUpdated);
 
     connect(wsServer,&ChatServer::onNewClientConneced,this,&Mainwindows::onNewClientConneced);
@@ -98,7 +94,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     connect(myDatabase,&Database::initValueJson,this,&Mainwindows::initValueJson);
     // connect(this,&Mainwindows::findBandsWithProfile,this,&Mainwindows::slotFindBandsWithProfile);
     //=============================================================================================
-    AlsaRecConfigManager *manager = new AlsaRecConfigManager;
+    AlsaRecConfigManager *manager = new AlsaRecConfigManager(this);
 
     connect(this,&Mainwindows::onSendSquelchStatus,manager,&AlsaRecConfigManager::sendSquelchStatus);
     connect(wsServer,&ChatServer::onSendSquelchStatus,manager,&AlsaRecConfigManager::sendSquelchStatus);
@@ -140,13 +136,23 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
         }
     });
 
-    int ret = pthread_create(&idThreadSqlWatcher, nullptr, ThreadFuncSqlWatcher, this);
-    if(ret==0){
-        qDebug() <<("Thread created successfully.\n");
-    }
-    // main thread (Mainwindows ctor/init)
+    // This watcher only marshalled work straight back to the Qt main thread.
+    // A raw pthread here created an unnecessary lifetime/data-race hazard and
+    // could outlive Mainwindows during remote stop/restart. Keep the exact
+    // 300 ms behavior with a QObject-owned QTimer instead.
     m_lastRecIsRecord = false;
     m_lastRecState = "UNKNOWN";
+    m_sqlWatcherTimer = new QTimer(this);
+    m_sqlWatcherTimer->setObjectName(QStringLiteral("SqlWatcherTimer"));
+    m_sqlWatcherTimer->setInterval(300);
+    connect(m_sqlWatcherTimer, &QTimer::timeout, this, [this]() {
+        const bool v = m_lastRecIsRecord;
+        emit onRecStatusChanged(v);
+        if (m_lastRecState == "RECORD" && currentSQLValue == false) {
+            onSQLChanged(currentSQLValue);
+        }
+    });
+    m_sqlWatcherTimer->start();
 
        // LogWatcher *watcher = new LogWatcher(this);
        // connect(watcher, &LogWatcher::stateChanged, this, [this](const QString &id, const QString &conn, const QString &state){
@@ -261,6 +267,17 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     #endif
 
 }
+
+
+Mainwindows::~Mainwindows()
+{
+    qInfo().noquote() << "[Mainwindows] shutdown begin";
+    if (m_sqlWatcherTimer)
+        m_sqlWatcherTimer->stop();
+    socketClientReconnectTimer->stop();
+    qInfo().noquote() << "[Mainwindows] shutdown complete: no raw SQL watcher/SetFreqWorker threads";
+}
+
 
 static bool splitIpCidrV4(const QString &cidr, QString &ip, QString &netmask, int &prefix)
 {
@@ -378,34 +395,12 @@ void Mainwindows::setHostPortNc()
 
 void Mainwindows::setHostPortNc(const QString& host, quint16 port)
 {
+    // Retain the network bookkeeping API because the settings page still calls
+    // it, but RF tuning is owned by AstraRX and no direct :6000 worker exists.
     nc_host = host;
     nc_port = port;
-
-    if (m_setFreqWorker) {
-        QMetaObject::invokeMethod(m_setFreqWorker, "setHostPort",
-                                  Qt::QueuedConnection,
-                                  Q_ARG(QString, nc_host),
-                                  Q_ARG(quint16, nc_port));
-    }
-}
-
-void Mainwindows::requestSetFreqAsync(quint64 freqHz, int timeoutMs)
-{
-    if (!m_setFreqWorker) return;
-
-    qWarning() << "[UI] requestSetFreqAsync freqHz=" << freqHz;
-
-    QMetaObject::invokeMethod(m_setFreqWorker, "requestSetFreq",
-                              Qt::QueuedConnection,
-                              Q_ARG(quint64, freqHz),
-                              Q_ARG(int, timeoutMs));
-}
-
-void Mainwindows::onSetFreqDone(quint64 freqHz, bool ok)
-{
-    qWarning() << "[UI] setFreq done freqHz=" << freqHz << "ok=" << ok;
-
-    // ถ้าจะ update UI ทำที่นี่ได้เลย ปลอดภัย (กลับมา UI thread แล้ว)
+    qInfo() << "[ASTRARX-BACKEND] RFSoC control endpoint recorded only"
+            << nc_host << nc_port;
 }
 
 void Mainwindows::onRecorderConfigSaved()
@@ -1912,6 +1907,17 @@ void Mainwindows::sendmessageToWeb(const QString &jsonMessage)
 
 void Mainwindows::sendmessage(const QString &jsonMessage)
 {
+    QJsonParseError parseError;
+    const QJsonDocument parsed = QJsonDocument::fromJson(jsonMessage.toUtf8(), &parseError);
+    if (parseError.error == QJsonParseError::NoError && parsed.isObject()) {
+        const QJsonObject obj = parsed.object();
+        const QString type = obj.value("type").toString();
+        const QJsonObject params = obj.value("params").toObject();
+        if (type == "setfrequency" || params.contains("offset_freq")) {
+            qInfo().noquote() << "[QT5-FREQ-TX]" << jsonMessage;
+        }
+    }
+
     qDebug() << "Send JSON to backend:" << jsonMessage;
     wsClient.webSocket.sendTextMessage(jsonMessage);
 }
@@ -2747,26 +2753,6 @@ void Mainwindows::setLocation(QString location){
     }
 }
 
-void* Mainwindows::ThreadFuncSqlWatcher(void* pTr)
-{
-    Mainwindows* pThis = static_cast<Mainwindows*>(pTr);
-
-    while (pThis->m_threadRunning) {
-
-        const bool v = pThis->m_lastRecIsRecord;
-
-        QMetaObject::invokeMethod(pThis, [pThis, v]() {
-            qDebug() << "[ThreadFuncSqlWatcher] emit invokeMethod =" << v;
-            emit pThis->onRecStatusChanged(v);
-            if (pThis->m_lastRecState == "RECORD" && pThis->currentSQLValue == false) {
-                pThis->onSQLChanged(pThis->currentSQLValue);
-            }
-        }, Qt::QueuedConnection);
-
-        QThread::msleep(300);
-    }
-    return nullptr;
-}
 bool Mainwindows::setHwclockFromSystem()
 {
     int result = QProcess::execute("sudo",

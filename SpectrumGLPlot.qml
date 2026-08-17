@@ -41,7 +41,11 @@ Item {
     // Keep only the newest waterfall FFT row. The painted Canvas already owns
     // the visual history, so retaining one JS array per historical row wastes RAM.
     property var  latestWaterfallLine: []
-    property var  waterfallColorMap: []
+    property var  waterfallColorMap: [
+        0x000008, 0x000040, 0x0000A0, 0x0030FF,
+        0x00A0FF, 0x00E0FF, 0x00FF80, 0x80FF00,
+        0xFFFF00, 0xFF8000, 0xFF2000, 0xFF0000, 0xFFFFFF
+    ]
     // Prebuilt CSS colors avoid allocating "rgb(r,g,b)" strings per FFT bin/frame.
     property var  waterfallCssPalette: []
 
@@ -76,19 +80,29 @@ Item {
     property real centerFreq: mainWindows.center_freq()    // Hz
     property int  sampRate:   mainWindows.samp_rate()      // Hz
 
-    property real waterfallMinDb: -100
-    property real waterfallMaxDb: 0
-    property real waterfallMax: 0
-    property real waterfallMin: -100
+    property real waterfallMinDb: -130
+    property real waterfallMaxDb: -80
+    property real waterfallMax: -80
+    property real waterfallMin: -130
     property alias autoScaleTimer: autoScaleTimer
 
-    property real offsetFrequency: 0      // Hz
+    // DSP receiver offset. Seed from the latest server snapshot instead
+    // of assuming zero, otherwise QML initially displays RF center only.
+    property real offsetFrequency: Number(mainWindows.start_offset_freq())      // Hz
+    property bool backendFrequencySync: false
+    // Out-of-span tuning is a request/confirmation transaction. QML never
+    // declares a new RF center before AstraRX confirms the hardware tune.
+    property bool centerTunePending: false
+    property real pendingCenterHz: 0
+    property string pendingCenterReason: ""
     property int  bandwidth: high_cut - low_cut
     property int  low_cut:  bwModel.get(scanBwSelected).low_cut
     property int  high_cut: bwModel.get(scanBwSelected).high_cut
     property int  offsetSnapStep: 100     // Hz
 
-    property bool autoScaleEnabled: false
+    property bool autoScaleEnabled: true
+    property bool autoScaleInitialized: false
+    property real autoScaleAlpha: 0.18
 
     property int  sampRateMin: 50000
     property int  sampRateMax: 24.576e6
@@ -96,7 +110,6 @@ Item {
     property string start_mod: ""
     property real xPos: 0
     property real setCenterFreq: centerFreq
-    property bool initFreq: false
 
     property int offsetStart: -1600000
     property int offsetStop:   1600000
@@ -251,7 +264,6 @@ Item {
         spectrumPaintTimer.stop()
         waterfallPaintTimer.stop()
         scanTimer.stop()
-        resetCenterFreqTimer.stop()
         zoomNavTimer.stop()
         zoomTimer.stop()
         spectrumCanvas.clearPeakTimer.stop()
@@ -299,9 +311,29 @@ Item {
         onTriggered: root.flushOffsetCommand()
     }
 
+    Timer {
+        id: centerTuneTimeout
+        interval: 3000
+        repeat: false
+        onTriggered: {
+            if (!root.centerTunePending)
+                return
+            console.warn("[QML-FREQ-RECENTER-TIMEOUT]",
+                         "requested=", root.pendingCenterHz,
+                         "confirmedCenter=", mainWindows.center_freq(),
+                         "confirmedReceiver=", mainWindows.receiver_freq())
+            root.centerTunePending = false
+            root.pendingCenterHz = 0
+            root.pendingCenterReason = ""
+            root.applyBackendReceiverState(Number(mainWindows.center_freq()),
+                                           Number(mainWindows.start_offset_freq()),
+                                           Number(mainWindows.receiver_freq()))
+        }
+    }
+
     function sendOffsetCommandNow(value) {
-        mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + value + '}}')
-        mainWindows.updateCurrentOffsetFreq(value, centerFreq)
+        mainWindows.sendmessage('{"type":"dspcontrol","client_source":"SpectrumGLPlot.offset","params":{"offset_freq":' + Math.round(value) + '}}')
+        mainWindows.updateCurrentOffsetFreq(Math.round(value), centerFreq)
     }
 
     function queueOffsetCommand(value) {
@@ -347,6 +379,65 @@ Item {
         currentModIndex = scanReceiverModeSelected
     }
 
+    function usableOffsetLimitHz() {
+        const halfSpan = Math.max(0.0, Number(sampRate) / 2.0)
+        // Match AstraRX frequency_in_active_span(): reserve half of the active
+        // demod bandwidth at each IQ edge. For a 7.680 MHz source this is
+        // nominally +/-3.840 MHz minus the demod guard.
+        const demodBandwidth = Math.abs((Number(high_cut) || 0) - (Number(low_cut) || 0))
+        const guard = Math.max(0.0, demodBandwidth / 2.0)
+        return Math.max(0.0, halfSpan - guard)
+    }
+
+    function requestSourceCenter(targetHz, reason) {
+        const target = Math.round(Number(targetHz))
+        if (!isFinite(target) || target <= 0)
+            return
+
+        // Coalesce the exact same outstanding request. A different target may
+        // replace it; AstraRX remains authoritative and confirms via config.
+        if (centerTunePending && Math.abs(pendingCenterHz - target) <= 0.5)
+            return
+
+        offsetCommandTimer.stop()
+        offsetCommandPending = false
+        centerTunePending = true
+        pendingCenterHz = target
+        pendingCenterReason = reason || "out_of_span"
+
+        // Show the operator's requested receiver immediately, but do NOT mutate
+        // centerFreq/offsetFrequency. Those remain the last confirmed AstraRX state.
+        freqScan = target
+        updateFrequency()
+
+        const msg = '{"type":"setfrequency","client_source":"SpectrumGLPlot.'
+                  + pendingCenterReason
+                  + '","params":{"frequency":' + target + ',"key":"memagic"}}'
+        console.log("[QML-FREQ-RECENTER-REQUEST]",
+                    "confirmedCenter=", centerFreq,
+                    "requestedCenter=", target,
+                    "span=", sampRate,
+                    "reason=", pendingCenterReason)
+        mainWindows.sendmessage(msg)
+        centerTuneTimeout.restart()
+    }
+
+    function handleFrequencyTuneError(message) {
+        if (!centerTunePending)
+            return
+
+        console.warn("[QML-FREQ-RECENTER-ERROR]",
+                     "requested=", pendingCenterHz,
+                     "error=", message)
+        centerTuneTimeout.stop()
+        centerTunePending = false
+        pendingCenterHz = 0
+        pendingCenterReason = ""
+        applyBackendReceiverState(Number(mainWindows.center_freq()),
+                                  Number(mainWindows.start_offset_freq()),
+                                  Number(mainWindows.receiver_freq()))
+    }
+
     onOffsetFrequencyChanged: {
         if (runtimeActive)
             overlayCanvas.requestPaint()
@@ -354,26 +445,53 @@ Item {
         if (offsetRecenterInProgress)
             return
 
-        if (((centerFreq + offsetFrequency) > (centerFreq + (sampRate / 2))) ||
-            ((centerFreq + offsetFrequency) < (centerFreq - (sampRate / 2)))) {
-            // Re-centering changes the RF center and must remain immediate. Drop
-            // any queued stale offset command before applying the new center.
-            offsetCommandTimer.stop()
-            offsetCommandPending = false
-            offsetRecenterInProgress = true
-
-            centerFreq = centerFreq + offsetFrequency
-            offsetFrequency = 0
-            mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFreq + ',"key":"memagic"}}')
-            sendOffsetCommandNow(0)
-            updateFrequency()
-
-            offsetRecenterInProgress = false
-        } else {
+        // Server confirmation/state replay: update visuals only. Never echo a
+        // DSP command back to AstraRX from a backend-owned assignment.
+        if (backendFrequencySync) {
             freqScan = centerFreq + offsetFrequency
             updateFrequency()
-            queueOffsetCommand(offsetFrequency)
+            mainWindows.updateCurrentOffsetFreq(Math.round(offsetFrequency), centerFreq)
+            if (runtimeActive)
+                root.scheduleSpectrumPaint()
+            console.log("[QML-FREQ-BACKEND]",
+                        "center=", centerFreq,
+                        "offset=", offsetFrequency,
+                        "receiver=", freqScan)
+            return
         }
+
+        const receiverHz = centerFreq + offsetFrequency
+        const limitHz = usableOffsetLimitHz()
+
+        if (Math.abs(offsetFrequency) > limitHz + 0.5) {
+            // Do not optimistically change centerFreq. Restore the confirmed DSP
+            // offset locally and ask AstraRX to move the Active RF Source center.
+            const targetHz = receiverHz
+            offsetRecenterInProgress = true
+            backendFrequencySync = true
+            offsetFrequency = Number(mainWindows.start_offset_freq()) || 0
+            backendFrequencySync = false
+            offsetRecenterInProgress = false
+            requestSourceCenter(targetHz, "out_of_span")
+            return
+        }
+
+        // Normal in-span tuning: RF center stays fixed; only the per-client DSP
+        // offset moves. Update the readout immediately before network feedback.
+        centerTuneTimeout.stop()
+        centerTunePending = false
+        pendingCenterHz = 0
+        pendingCenterReason = ""
+        freqScan = receiverHz
+        updateFrequency()
+        mainWindows.updateCurrentOffsetFreq(Math.round(offsetFrequency), centerFreq)
+        queueOffsetCommand(offsetFrequency)
+
+        console.log("[QML-FREQ-LOCAL]",
+                    "center=", centerFreq,
+                    "offset=", offsetFrequency,
+                    "limit=", limitHz,
+                    "receiver=", freqScan)
     }
 
     onCenterFreqChanged: {
@@ -421,8 +539,11 @@ Item {
 
     Component.onCompleted: {
         runtimeInitialized = true
+        console.log("[ASTRARX-COMPAT-QML] revision=20260817-bidirectional-span-stability-r10")
 
         mainWindows.updateCenterFreq.connect(updateCenterFreq)
+        mainWindows.updateReceiverFreq.connect(applyBackendReceiverState)
+        mainWindows.frequencyTuneError.connect(handleFrequencyTuneError)
 
         mainWindows.fftFrameUpdated.connect(fftFrameUpdated)
         mainWindows.waterfallColorUpdate.connect(waterfallColorUpdate)
@@ -435,12 +556,23 @@ Item {
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
 
+        // Pull the current receiver snapshot after every signal is connected.
+        // This closes the startup race where AstraRX config can arrive before
+        // SpectrumGLPlot exists.
+        applyBackendReceiverState(Number(mainWindows.center_freq()),
+                                  Number(mainWindows.start_offset_freq()),
+                                  Number(mainWindows.receiver_freq()))
+
+        // Prime the fallback palette before the first server color message.
+        rebuildWaterfallCssPalette(waterfallColorMap)
+
         // Enable the C++ FFT path only after all QML signal handlers are connected.
         syncFftRuntime()
     }
 
     Component.onDestruction: {
         offsetCommandTimer.stop()
+        centerTuneTimeout.stop()
         offsetCommandPending = false
         if (nativeMaxHoldAvailable())
             wsClient.setMaxHoldEnabled(false)
@@ -453,8 +585,17 @@ Item {
     }
 
     function setManualOffset(freq) {
-        let freqOffset = freq - centerFreq
-        offsetFrequency = freqOffset;
+        const targetHz = Number(freq)
+        if (!isFinite(targetHz) || targetHz <= 0)
+            return
+
+        const freqOffset = targetHz - centerFreq
+        if (Math.abs(freqOffset) > usableOffsetLimitHz() + 0.5) {
+            requestSourceCenter(targetHz, "manual_out_of_span")
+            return
+        }
+
+        offsetFrequency = freqOffset
         overlayCanvas.requestPaint()
         scheduleSpectrumPaint()
     }
@@ -520,63 +661,180 @@ Item {
     function smeterValueUpdated(smeter) { smeterLevel = smeter }
 
     function updateWaterfallLevels(minDb, maxDb) {
-        waterfallMinDb = minDb;
-        waterfallMaxDb = maxDb;
+        // Server ranges are useful as a manual fallback, but automatic contrast
+        // deliberately owns the range while enabled.
+        if (autoScaleEnabled)
+            return
+
+        waterfallMinDb = Number(minDb)
+        waterfallMaxDb = Number(maxDb)
         waterfallScaleControl.waterfallMinDb = waterfallMinDb
         waterfallScaleControl.waterfallMaxDb = waterfallMaxDb
+        if (spectrumGridCanvas)
+            spectrumGridCanvas.invalidate()
     }
 
     function updateCenterFreq() {
-        sampRate = mainWindows.samp_rate()
-        centerFreq = mainWindows.center_freq()
-        sampRateMax = mainWindows.samp_rate()
+        // Center/source metadata only. Receiver readout ownership lives in
+        // applyBackendReceiverState(), so an RF-center refresh can never force
+        // freqScan back to center.
+        sampRate = Number(mainWindows.samp_rate())
+        centerFreq = Number(mainWindows.center_freq())
+        sampRateMax = sampRate
         start_mod = mainWindows.start_mod()
-        freqScan = centerFreq
+
+        if (runtimeActive) {
+            overlayCanvas.requestPaint()
+            scheduleSpectrumPaint()
+        }
+
+        if (spectrumGridCanvas)
+            spectrumGridCanvas.invalidate()
+
+        console.log("[QML-CENTER-SYNC]",
+                    "center=", centerFreq,
+                    "offset=", offsetFrequency,
+                    "display=", freqScan)
+    }
+
+    function applyBackendReceiverState(centerHz, offsetHz, receiverHz) {
+        var c = Number(centerHz)
+        var o = Number(offsetHz)
+        var r = Number(receiverHz)
+
+        if (!isFinite(c))
+            c = Number(mainWindows.center_freq()) || 0
+        if (!isFinite(o))
+            o = Number(mainWindows.start_offset_freq()) || 0
+        if (!isFinite(r) || r <= 0)
+            r = c + o
+
+        const previousCenter = Number(centerFreq)
+        const wasPending = centerTunePending
+
+        backendFrequencySync = true
+        centerFreq = c
+        sampRate = Number(mainWindows.samp_rate())
+        sampRateMax = sampRate
+        start_mod = mainWindows.start_mod()
+
+        // Defensive mirror of the AstraRX policy. R10 server normally sends an
+        // already-valid receiver snapshot. If an older/partial backend snapshot
+        // arrives with a receiver outside the new source span, QML follows the
+        // confirmed AstraRX RF center instead of drawing an impossible cursor.
+        const backendLimitHz = usableOffsetLimitHz()
+        if (Math.abs(r - c) > backendLimitHz + 0.5) {
+            console.warn("[QML-FREQ-ASTRARX-PUSH-CLAMP]",
+                         "center=", c,
+                         "receiver=", r,
+                         "limit=", backendLimitHz)
+            o = 0
+            r = c
+        } else {
+            o = r - c
+        }
+        offsetFrequency = o
+        backendFrequencySync = false
+
+        if (!wasPending && isFinite(previousCenter) && Math.abs(c - previousCenter) > 0.5) {
+            console.log("[QML-FREQ-ASTRARX-PUSH]",
+                        "centerBefore=", previousCenter,
+                        "centerAfter=", c,
+                        "offset=", o,
+                        "receiver=", r,
+                        "limit=", backendLimitHz)
+        }
+
+        // A center retune is complete only when AstraRX publishes its new
+        // authoritative center. Any backend receiver snapshot still wins the UI.
+        if (centerTunePending && Math.abs(c - pendingCenterHz) <= 0.5) {
+            console.log("[QML-FREQ-RECENTER-CONFIRMED]",
+                        "center=", c,
+                        "receiver=", r,
+                        "reason=", pendingCenterReason)
+            centerTuneTimeout.stop()
+            centerTunePending = false
+            pendingCenterHz = 0
+            pendingCenterReason = ""
+        }
+
+        // Absolute receiver frequency from AstraRX wins when available.
+        freqScan = r
         updateFrequency()
-        if (runtimeActive)
-            resetCenterFreqTimer.start()
-        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+        mainWindows.updateCurrentOffsetFreq(Math.round(o), c)
+
+        if (runtimeActive) {
+            overlayCanvas.requestPaint()
+            scheduleSpectrumPaint()
+        }
+        if (spectrumGridCanvas)
+            spectrumGridCanvas.invalidate()
+
+        console.log("[QML-FREQ-SYNC]",
+                    "center=", c,
+                    "offset=", o,
+                    "receiver=", r)
+    }
+
+    function percentile(sortedValues, fraction) {
+        if (!sortedValues || sortedValues.length === 0)
+            return NaN
+        const idx = Math.max(0, Math.min(sortedValues.length - 1,
+                                        Math.floor(fraction * (sortedValues.length - 1))))
+        return Number(sortedValues[idx])
     }
 
     function autoScaleWaterfallColor() {
-        var latestLine = latestWaterfallLine;
-        if (!latestLine || latestLine.length < 2) return;
+        var latestLine = latestWaterfallLine
+        if (!latestLine || latestLine.length < 8)
+            return
 
-        var minVal = latestLine[0];
-        var maxVal = latestLine[0];
-        for (var i = 1; i < latestLine.length; ++i) {
-            var v = latestLine[i];
-            if (v < minVal) minVal = v;
-            if (v > maxVal) maxVal = v;
+        // Sample a bounded number of bins to keep the sort cheap on Jetson.
+        const stride = Math.max(1, Math.floor(latestLine.length / 512))
+        var values = []
+        for (var i = 0; i < latestLine.length; i += stride) {
+            const v = Number(latestLine[i])
+            if (isFinite(v))
+                values.push(v)
+        }
+        if (values.length < 8)
+            return
+
+        values.sort(function(a, b) { return a - b })
+
+        const noiseDb = percentile(values, 0.50)
+        const strongDb = percentile(values, 0.995)
+        if (!isFinite(noiseDb) || !isFinite(strongDb))
+            return
+
+        var targetMin = noiseDb - 5.0
+        var targetMax = Math.max(noiseDb + 32.0, strongDb + 3.0)
+
+        var span = targetMax - targetMin
+        if (span < 35.0)
+            targetMax = targetMin + 35.0
+        else if (span > 65.0)
+            targetMax = targetMin + 65.0
+
+        targetMin = Math.max(-160.0, Math.min(0.0, targetMin))
+        targetMax = Math.max(targetMin + 1.0, Math.min(10.0, targetMax))
+
+        if (!autoScaleInitialized) {
+            waterfallMinDb = targetMin
+            waterfallMaxDb = targetMax
+            autoScaleInitialized = true
+        } else {
+            waterfallMinDb += (targetMin - waterfallMinDb) * autoScaleAlpha
+            waterfallMaxDb += (targetMax - waterfallMaxDb) * autoScaleAlpha
         }
 
-        waterfallMin = Math.max(minVal - 5, -120);
-        waterfallMax = Math.min(maxVal + 5, 0);
+        waterfallMin = waterfallMinDb
+        waterfallMax = waterfallMaxDb
+        waterfallScaleControl.waterfallMinDb = waterfallMinDb
+        waterfallScaleControl.waterfallMaxDb = waterfallMaxDb
 
-        waterfallMinDb = waterfallMin < waterfallMinDb ? waterfallMin : waterfallMinDb
-        waterfallMaxDb = waterfallMax > waterfallMaxDb ? waterfallMax : waterfallMaxDb
-
-        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
-    }
-
-    function resetCenterFreq() {
-        if (initFreq === false) {
-            if (centerFreq !== 0) {
-                let centerFrequency = centerFreq;
-                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + 30000000 + ',"key":"memagic"}}')
-                mainWindows.sendmessage('{"type":"setfrequency","params":{"frequency":' + centerFrequency + ',"key":"memagic"}}')
-                mainWindows.sendmessage('{"type": "dspcontrol","params": {"offset_freq": ' + offsetFrequency + '}}')
-                initFreq = true
-            }
-        }
-    }
-
-    Timer {
-        id: resetCenterFreqTimer
-        interval: 1000
-        repeat: false
-        running: false
-        onTriggered: resetCenterFreq()
+        if (spectrumGridCanvas)
+            spectrumGridCanvas.invalidate()
     }
 
     Timer {
@@ -1002,13 +1260,10 @@ Item {
                     let newOffset = clickedFreq - centerFreq;
 
                     newOffset = Math.round(newOffset / offsetSnapStep) * offsetSnapStep;
-                    offsetFrequency = Math.max(-sampRate / 2, Math.min(sampRate / 2, newOffset));
+                    offsetFrequency = Math.max(-root.usableOffsetLimitHz(), Math.min(root.usableOffsetLimitHz(), newOffset));
 
                     overlayCanvas.requestPaint();
                     root.scheduleSpectrumPaint()
-
-                    if (mainWindows.setOffsetFrequency)
-                        mainWindows.setOffsetFrequency(Math.round(offsetFrequency));
                 }
             }
 
@@ -1025,13 +1280,10 @@ Item {
                 let newOffset = offsetFrequency + deltaFreq;
 
                 newOffset = Math.round(newOffset / offsetSnapStep) * offsetSnapStep;
-                offsetFrequency = Math.max(-sampRate / 2, Math.min(sampRate / 2, newOffset));
+                offsetFrequency = Math.max(-root.usableOffsetLimitHz(), Math.min(root.usableOffsetLimitHz(), newOffset));
 
                 overlayCanvas.requestPaint();
                 root.scheduleSpectrumPaint()
-
-                if (mainWindows.setOffsetFrequency)
-                    mainWindows.setOffsetFrequency(Math.round(offsetFrequency));
             }
         }
 
@@ -1208,6 +1460,10 @@ Item {
             }
             onWaterfallMaxDbChanged: {
                 root.waterfallMaxDb = waterfallMaxDb
+            }
+            onManualScaleEdited: {
+                root.autoScaleEnabled = false
+                root.autoScaleInitialized = false
             }
             Layout.preferredWidth: 300
             Layout.preferredHeight: 75
