@@ -3,7 +3,6 @@ TARGET = iScanMR10
 
 QT += quick websockets sql widgets multimedia opengl concurrent
 CONFIG += c++17
-CONFIG += c++11
 contains(CONFIG, static) {
     QT += svg
     QTPLUGIN += qtvirtualkeyboardplugin
@@ -102,6 +101,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 
 # --- X86 (linux-g++) ---
 X86_SOURCES += \
+    CrashDiagnostics.cpp \
+    FftDisplayItem.cpp \
     Databases.cpp \
     FileUpdateWatcher.cpp \
     I2CReadWrite.cpp \
@@ -152,6 +153,8 @@ X86_SOURCES += \
 
 X86_HEADERS += \
     ChatServer.h \
+    CrashDiagnostics.h \
+    FftDisplayItem.h \
     Databases.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1_PARAM.h \
@@ -198,6 +201,8 @@ X86_HEADERS += \
 
 # --- Jetson (linux-jetson-orin-g++) ---
 JETSON_SOURCES += \
+    CrashDiagnostics.cpp \
+    FftDisplayItem.cpp \
     Databases.cpp \
     FileUpdateWatcher.cpp \
     I2CReadWrite.cpp \
@@ -262,6 +267,8 @@ JETSON_SOURCES += \
 
 JETSON_HEADERS += \
     ChatServer.h \
+    CrashDiagnostics.h \
+    FftDisplayItem.h \
     Databases.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1_PARAM.h \

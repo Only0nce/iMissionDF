@@ -21,7 +21,7 @@ Item {
         id: pageLoader
         anchors.fill: parent
         source: "qrc:/Wifi5GPage.qml"
-        asynchronous: false
+        asynchronous: true
 
         onLoaded: {
             if (!item)
@@ -30,8 +30,13 @@ Item {
             item.initialNetworkPage = root.initialNetworkPage
             item.forceSingleNetworkPage = root.forceSingleNetworkPage
             item.hideInternalNetworkTabs = root.hideInternalNetworkTabs
-            item.requestToast.connect(root.requestToast)
         }
+    }
+
+    Connections {
+        target: pageLoader.item
+        ignoreUnknownSignals: true
+        function onRequestToast(text) { root.requestToast(text) }
     }
 
     onPageScopeChanged: if (pageLoader.item) pageLoader.item.pageScope = pageScope

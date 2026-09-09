@@ -25,6 +25,13 @@ public:
     Q_INVOKABLE QVariantMap loadAllLanConfig();
     Q_INVOKABLE QVariantMap queryDhcpInfo(const QString &iface);
 
+    // R20.2: asynchronous read-only LAN queries for QML. The legacy synchronous
+    // getters remain available for compatibility, but the Network page uses
+    // these requests so nmcli/device probing never blocks the Qt GUI/audio event loop.
+    Q_INVOKABLE void requestLoadAllLanConfig();
+    Q_INVOKABLE void requestLoadConfig(const QString &iface);
+    Q_INVOKABLE void requestDhcpInfo(const QString &iface);
+
     // ===== WiFi =====
     Q_INVOKABLE QVariantMap loadWifiConfig();
     Q_INVOKABLE QVariantMap wifiState(const QString &iface = QString());
@@ -77,6 +84,14 @@ public:
     Q_INVOKABLE void startCellularRealtime(int intervalMs = 1500);
     Q_INVOKABLE void stopCellularRealtime();
     Q_INVOKABLE QVariantMap cellularRealtimeSnapshot();
+
+    // R20.1: reset coordination. These are intentionally C++ helpers only;
+    // no QML/UI contract is changed. Mainwindows uses them to suspend the
+    // synchronous cellular status poll while PCIe/QMI recovery is in progress.
+    bool isCellularRealtimeActive() const;
+    int cellularRealtimeIntervalMs() const;
+    void suspendCellularRealtime();
+    void resumeCellularRealtime(bool immediatePoll = false);
     Q_INVOKABLE void connectCellular(const QString &apn,
                                      const QString &iface = QStringLiteral("*"),
                                      bool autoConnect = true);
@@ -108,12 +123,19 @@ signals:
     void cellularOperationFinished(const QString &action, bool ok, const QString &message);
     void cellularRealtimeStatusChanged(const QVariantMap &status);
 
+    void lanConfigReady(const QVariantMap &result);
+    void lanInterfaceConfigReady(const QString &iface, const QVariantMap &result);
+    void dhcpInfoReady(const QString &iface, const QVariantMap &result);
+
 private slots:
     void pollCellularRealtime();
 
 private:
     QTimer *m_cellularRealtimeTimer = nullptr;
     QString m_lastCellularRealtimeJson;
+    bool m_cellularRealtimeDesiredActive = false;
+    bool m_cellularRealtimeSuspended = false;
+    bool m_cellularRealtimeQueryInFlight = false;
 
     void runCommand(const QString &cmd) const;
     void saveConfigToJson(const QJsonObject &obj);

@@ -37,6 +37,10 @@ void PCMImaAdpcmCodec::reset() {
 }
 
 qint16 PCMImaAdpcmCodec::decodeNibble(quint8 nibble) {
+    // Defensive bounds: sync headers originate from the backend stream and
+    // must never be allowed to index the fixed IMA ADPCM tables out of range.
+    nibble &= 0x0F;
+    stepIndex = std::clamp(stepIndex, 0, 88);
     step = stepTable[stepIndex];
     int diff = step >> 3;
 
@@ -74,7 +78,10 @@ QVector<qint16> PCMImaAdpcmCodec::decodeWithSync(const QByteArray &data) {
         case 1: // receive sync header (4 bytes)
             syncBuffer[syncBufferIndex++] = byte;
             if (syncBufferIndex == 4) {
-                stepIndex = static_cast<qint16>(syncBuffer[0] | (syncBuffer[1] << 8));
+                const int headerStepIndex =
+                    static_cast<int>(syncBuffer[0]) |
+                    (static_cast<int>(syncBuffer[1]) << 8);
+                stepIndex = std::clamp(headerStepIndex, 0, 88);
                 predictor = static_cast<qint16>(syncBuffer[2] | (syncBuffer[3] << 8));
                 syncCounter = 1000;
                 phase = 2;

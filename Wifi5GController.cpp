@@ -108,6 +108,7 @@ Wifi5GController::Wifi5GController(NetworkController *networkController,
 bool Wifi5GController::canHandle(const QString &menuId) const
 {
     return menuId == QStringLiteral("getWifi5GPage")
+           || menuId == QStringLiteral("wifi_config")
            || menuId == QStringLiteral("wifi_state")
            || menuId == QStringLiteral("scan")
            || menuId == QStringLiteral("join")
@@ -144,6 +145,8 @@ bool Wifi5GController::handleCommand(const QJsonObject &command)
     if (menuId == QStringLiteral("getWifi5GPage")) {
         m_networkController->startCellularRealtime(8000);
         sendSnapshot();
+    } else if (menuId == QStringLiteral("wifi_config")) {
+        sendWifiConfig(menuId);
     } else if (menuId == QStringLiteral("wifi_state")) {
         sendWifiState(stringValue(command, QStringLiteral("iface")), menuId);
     } else if (menuId == QStringLiteral("scan")) {
@@ -257,6 +260,19 @@ void Wifi5GController::sendSnapshot()
         obj[QStringLiteral("cellularStatus")] = toObject(network.cellularStatus());
         obj[QStringLiteral("modems")] = toArray(network.listModems());
         obj[QStringLiteral("moduleLogs")] = QJsonArray::fromStringList(network.cellularModuleLogs(120));
+        return obj;
+    });
+}
+
+void Wifi5GController::sendWifiConfig(const QString &menuId)
+{
+    runNetworkQuery(this, [menuId](NetworkController &network) {
+        const QVariantMap data = network.loadWifiConfig();
+        QJsonObject obj;
+        obj[QStringLiteral("menuID")] = menuId;
+        obj[QStringLiteral("ok")] = true;
+        obj[QStringLiteral("data")] = toObject(data);
+        obj[QStringLiteral("config")] = toObject(data);
         return obj;
     });
 }

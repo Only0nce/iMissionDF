@@ -63,16 +63,23 @@ Item {
         updateFrequency()
         componentNotCompleted = true
 
-        mainWindows.onTemperatureChanged.connect(function(value){
-            cpuDatatemperature = value
-        })
-
-        mainWindows.addNewProfile.connect(function(value){
-            addNewProfile(value)
-        })
-
         scanpage.width = screenrotation==270 ? 1195 : 1920
         scanpage.height  = screenrotation==270 ? 400 : 1080
+    }
+
+
+    // R20.2 / R16.1 restore: let QML own/disconnect these handlers with this item.
+    Connections {
+        target: mainWindows
+        ignoreUnknownSignals: true
+
+        function onOnTemperatureChanged(value) {
+            cpuDatatemperature = value
+        }
+
+        function onAddNewProfile(value) {
+            addNewProfile(value)
+        }
     }
 
     function addNewProfile(value){

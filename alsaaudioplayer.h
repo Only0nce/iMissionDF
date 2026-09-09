@@ -26,6 +26,8 @@ public:
     void pushAudio(const QByteArray &data);
     void start();
     void stop();
+    bool isRunning() const noexcept { return m_running.load(std::memory_order_acquire); }
+    int sampleRate() const noexcept { return m_sampleRate; }
 
     QVector<qint16> resampleTo8000(const QVector<qint16> &input, int inRate = 16000, int outRate = 8000) {
         QVector<qint16> output;
@@ -59,6 +61,16 @@ private:
     QWaitCondition m_dataAvailable;
     QQueue<QByteArray> m_queue;
     std::atomic_bool m_running{false};
+
+    // Bounded real-time buffering. Environment overrides allow hardware A/B
+    // tuning without touching QML/UI or rebuilding the application.
+    // Preserve the historical playback timing by default in this no-UX-change
+    // revision. Low-latency values remain available as explicit env overrides.
+    int m_bufferMs = 100;
+    int m_periodMs = 20;
+    int m_stageMs = 100;
+    int m_maxQueuedChunks = 30;
+
     QByteArray audioBuffer;
 
     QByteArray writeBuffer;

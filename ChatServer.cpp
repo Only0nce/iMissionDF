@@ -82,15 +82,11 @@ void ChatServer::onNewConnection()
     m_clients << pSocket;
     qDebug() << "On New Connection from address : " << pSocket->peerName();
     emit onNewClientConneced(pSocket);
-    if (clientNum <= 0)
-    {
-        clientNum = m_clients.length();
-        emit onNumClientChanged(clientNum);
-    }
-    else {
-        clientNum = m_clients.length();
-    }
 
+    const int previousClientNum = clientNum;
+    clientNum = m_clients.length();
+    if (clientNum != previousClientNum)
+        emit onNumClientChanged(clientNum);
 }
 
 void ChatServer::broadcastMessage(QString message){
@@ -102,18 +98,27 @@ void ChatServer::broadcastMessage(QString message){
 
 void ChatServer::commandProcess(QString message, QWebSocket *pSender){
 //    message = message.replace(" ","");
-    QJsonDocument d = QJsonDocument::fromJson(message.toUtf8());
+    QJsonParseError parseError;
+    const QJsonDocument d = QJsonDocument::fromJson(message.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !d.isObject()) {
+        qWarning() << "[WS] rejected invalid JSON:" << parseError.errorString();
+        return;
+    }
+
     QJsonObject command = d.object();
     QString getCommand =  QJsonValue(command["menuID"]).toString();
     QString objectName =  QJsonValue(command["objectName"]).toString();
 
    // qDebug() << "commandProcess:getCommand:" << objectName << getCommand;
     if ((objectName != "") || (getCommand != "")){
+        // One inbound JSON command must reach the generic dispatcher exactly
+        // once. Specialized recorder/VU handling below remains additive.
         emit newCommandProcess(command, pSender, message);
 
         if (getCommand == "getSystemPage"){
             qDebug() << "getSystemPage:" << objectName << getCommand;
-            m_WebSocketClients << pSender;
+            if (pSender && !m_WebSocketClients.contains(pSender))
+                m_WebSocketClients << pSender;
             emit newSettingPageConnectd(pSender);
         }
     }
@@ -143,12 +148,9 @@ void ChatServer::commandProcess(QString message, QWebSocket *pSender){
 
     }else if (getCommand == ("getVuMeter"))
     {
-        m_WebSocketVUClients << pSender;
+        if (pSender && !m_WebSocketVUClients.contains(pSender))
+            m_WebSocketVUClients << pSender;
         emit getVuMeter(pSender);
-    }
-    else {
-        emit newCommandProcess(command, pSender, message);
-        // qDebug() << "getCommand" << getCommand << message;
     }
 }
 
@@ -222,11 +224,20 @@ void ChatServer::socketDisconnected()
         }
     }
 
-    // ✅ 3) IMPORTANT: DO NOT delete socket here (avoid double-delete / timing issues)
-    // pClient->deleteLater();   ❌ remove this line
+    // QWebSocketServer transfers the pending connection object to the
+    // application. Once it is disconnected and removed from every list there
+    // is no remaining owner that needs the socket, so release it in the Qt
+    // event loop. Keeping it alive here leaks one QObject per reconnect.
+    pClient->deleteLater();
+
+    const int previousClientNum = clientNum;
+    clientNum = m_clients.length();
+    if (clientNum != previousClientNum)
+        emit onNumClientChanged(clientNum);
 
     qDebug().noquote()
         << "[WS DISCONNECT DONE]"
+        << "clients=" << clientNum
         << "recSocketClient(after)=" << recSocketClient.size()
         << "m_WebSocketRecClients(after)=" << m_WebSocketRecClients.size();
 }

@@ -107,6 +107,7 @@ class Mainwindows : public QObject
 public:
 
     explicit Mainwindows(QObject *parent = nullptr);
+    Mainwindows(NetworkController *networkController, QObject *parent);
     ~Mainwindows() override;
     WebSocketClient wsClient;
 
@@ -153,9 +154,14 @@ public:
 
     unsigned char scanSqlLevel = 100;
 
-    Q_INVOKABLE unsigned char getSpeakerVolume1() const { return VolumeOutCH1; }
+    // R15 ownership restored in R20.1: UI state tracks the requested value,
+    // while the effective hardware channel is free to retain its legacy mapping.
+    unsigned char requestedSpeakerVolume = 100;
+    unsigned char requestedHeadphoneVolume = 150;
+
+    Q_INVOKABLE unsigned char getSpeakerVolume1() const { return requestedSpeakerVolume; }
     Q_INVOKABLE unsigned char getSpeakerVolume2() const { return VolumeOutCH2; }
-    Q_INVOKABLE unsigned char getHeadphoneVolume() const { return VolumeOutCH3; }
+    Q_INVOKABLE unsigned char getHeadphoneVolume() const { return requestedHeadphoneVolume; }
 
     Q_INVOKABLE unsigned char getSqlLevel() const { return scanSqlLevel; }
 
@@ -394,6 +400,16 @@ private:
     double currentFreq = 100e6;
     SocketClient *iPatchServerSocket = nullptr;
     QTimer *socketClientReconnectTimer = nullptr;
+    QTimer *m_scanFreqTimer = nullptr;
+    int m_scanFreqOffsetHz = -1600000;
+
+    // Invisible backend frequency transaction guard. Existing QML keeps using
+    // sendmessage(); only DSP messages that race an outstanding source-center
+    // retune are deferred until AstraRX confirms the new center.
+    QTimer *m_centerTuneGuardTimer = nullptr;
+    bool m_centerTuneGuardPending = false;
+    quint64 m_centerTuneGuardTargetHz = 0;
+    QString m_centerTuneDeferredDsp;
     ADAU1467* SigmaFirmWareDownLoad = nullptr;
 #ifdef PLATFORM_JETSON
     newGPIOClass *codecReset = new newGPIOClass(GPIO_CODEC_RESET);
@@ -421,7 +437,7 @@ private:
     ChatServer  *webServer = new ChatServer(3310);
     RfdcNcoClient *rfdc = new RfdcNcoClient();
     ReceiverRecorderConfigManager *recConfig = new ReceiverRecorderConfigManager();
-    NetworkController *netWorkController = new NetworkController;
+    NetworkController *netWorkController = nullptr;
     Wifi5GController *wifi5gController = nullptr;
 #ifdef PLATFORM_JETSON
     void setRfSwitchBand(RFPort port)
@@ -633,6 +649,9 @@ private slots:
     void newCommandProcessWeb(const QJsonObject command,QWebSocket *pSender, const QString& message);
     // void newCommandProcess(QJsonObject command, QWebSocket *pSender, QString message);
     void socketClientReconnect();
+    void sendNextScanFrequencyStep();
+    void handleCenterTuneConfirmation(quint64 confirmedCenterHz);
+    void cancelCenterTuneTransaction(const QString &reason, bool flushDeferred);
     void openwebrxConnected();
     void onSQLChanged(bool sqlVal);
     void fileUpdated(const QString &path);
@@ -651,8 +670,10 @@ private:
 #ifdef PLATFORM_JETSON
 private:
     bool m_reset5GDelayedPending = false;
+    bool m_resumeCellularRealtimeAfter5GReset = false;
+    int m_cellularRealtimeIntervalBefore5GResetMs = 8000;
 #endif
-    bool reset5GModemNoRebootWorker();
+    static bool reset5GModemNoRebootWorker();
 };
 
 #endif // MAINWINDOWS_H

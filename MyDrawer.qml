@@ -52,6 +52,33 @@ Item {
     }
 
 
+    // R15 single mute owner restored. Child drawers only request a toggle;
+    // this function preserves the existing mute + squelch behavior exactly once.
+    function toggleVolumeMute() {
+        var nextMute = !scanMuteOn
+        if (!nextMute) {
+            wsClient.setSpeakerVolumeMute(0)
+            mainWindows.setSqlLevel(0)
+            mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((0-255)/2).toFixed(1)+'}}')
+            currentSqlLevel = (0-255)/2
+            mainWindows.setSqlOffManual()
+        } else {
+            wsClient.setSpeakerVolumeMute(1)
+            mainWindows.setSqlLevel(scanSqlLevel)
+            mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
+            currentSqlLevel = (scanSqlLevel-255)/2
+            mainWindows.setSqlOffManual()
+        }
+    }
+
+    Connections {
+        target: wsClient
+        function onMutedChanged(m) {
+            scanMuteOn = m
+        }
+    }
+
+
     Rectangle {
         anchors.fill: parent
         visible: root_drawerItem.opened
@@ -125,24 +152,24 @@ Item {
             stringAudio: scanMuteOn ? "Mute" : scanAudioLevel +" %"
             stringHead: ((scanVolLevelHeadphone-255)/2).toFixed(1) +" dB"
             mute: scanMuteOn
-            volumeHeadphoneCtrlLevel.slider.onValueChanged: {
+            onMuteToggleRequested: root_drawerItem.toggleVolumeMute()
+            volumeHeadphoneCtrlLevel.slider.onMoved: {
+                if (root_drawerItem.itemShow !== 5) return
                 console.log("audioCtrl>>",scanVolLevelHeadphone)
                 scanVolLevelHeadphone = volumeHeadphoneCtrlLevel.slider.value
                 closeDrawerTimer.restart()
             }
-            audioCtrlLevel.slider2.onValueChanged: {
+            audioCtrlLevel.slider2.onMoved: {
+                if (root_drawerItem.itemShow !== 5) return
                 console.log("audioCtrl>>",scanAudioLevel)
                 scanAudioLevel = audioCtrlLevel.slider2.value
                 closeDrawerTimer.restart()
             }
-            volumeCtrlLevel.slider.onValueChanged: {
+            volumeCtrlLevel.slider.onMoved: {
+                if (root_drawerItem.itemShow !== 5) return
                 console.log("audioCtrl>>",scanVolLevel)
                 scanVolLevel = volumeCtrlLevel.slider.value
                 closeDrawerTimer.restart()
-            }
-            onMuteChanged:
-            {
-                scanMuteOn = mute
             }
         }
 
@@ -162,24 +189,24 @@ Item {
             stringAudio: scanMuteOn ? "Mute" : scanAudioLevel +" %"
             stringHead: ((scanVolLevelHeadphone-255)/2).toFixed(1) +" dB"
             mute: scanMuteOn
-            volumeHeadphoneCtrlLevel.slider.onValueChanged: {
+            onMuteToggleRequested: root_drawerItem.toggleVolumeMute()
+            volumeHeadphoneCtrlLevel.slider.onMoved: {
+                if (root_drawerItem.itemShow !== 1) return
                 console.log("audioCtrl>>",scanVolLevelHeadphone)
                 scanVolLevelHeadphone = volumeHeadphoneCtrlLevel.slider.value
                 closeDrawerTimer.restart()
             }
-            audioCtrlLevel.slider2.onValueChanged: {
+            audioCtrlLevel.slider2.onMoved: {
+                if (root_drawerItem.itemShow !== 1) return
                 console.log("audioCtrl>>",scanAudioLevel)
                 scanAudioLevel = audioCtrlLevel.slider2.value
                 closeDrawerTimer.restart()
             }
-            volumeCtrlLevel.slider.onValueChanged: {
+            volumeCtrlLevel.slider.onMoved: {
+                if (root_drawerItem.itemShow !== 1) return
                 console.log("audioCtrl>>",scanVolLevel)
                 scanVolLevel = volumeCtrlLevel.slider.value
                 closeDrawerTimer.restart()
-            }
-            onMuteChanged:
-            {
-                scanMuteOn = mute
             }
         }
         SQLDrawer

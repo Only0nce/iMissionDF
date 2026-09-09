@@ -1,0 +1,617 @@
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/Mainwindows.cpp iScanMR10-R19.7-astrarx-low-latency-audio-src/Mainwindows.cpp
+--- qt_src_r19/Mainwindows.cpp	2026-08-20 08:50:41.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/Mainwindows.cpp	2026-08-28 08:03:50.693819729 +0000
+@@ -27,6 +27,7 @@
+     CrashDiagnostics::event(CrashDiagnostics::CpMainCtor, "MAIN", "ctor begin", this);
+     qInfo().noquote() << "[ASTRARX-COMPAT-BUILD] revision=20260817-volume-qml-state-hardening-r15";
+     qInfo().noquote() << "[R19 DIGITAL] revision=20260818-r19.0-qt-digital-mode-contract";
++    qInfo().noquote() << "[R19.7 ASTRARX AUDIO] revision=20260828-r19.7-low-latency-alsa-output";
+     #ifdef PLATFORM_JETSON
+ //        system("systemctl stop alsarecd.service");
+     #endif
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md iScanMR10-R19.7-astrarx-low-latency-audio-src/R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md
+--- qt_src_r19/R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md	1970-01-01 00:00:00.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md	2026-08-28 08:05:02.570631028 +0000
+@@ -0,0 +1,199 @@
++# R19.7 Qt5 AstraRX Low-Latency Audio Output
++
++## Purpose
++
++Connect the existing iScanMR10 Qt5 receiver client to the current AstraRX Qt5
++compatibility WebSocket and drive decoded analog/digital speech to the local
++ALSA output with bounded low latency.
++
++This revision changes the Qt5 playback side only. It does **not** change
++AstraRX RF/DSP/D-Star/CodecServer behavior, Qt frequency ownership, FFT
++rendering, QML behavior, database behavior, or recorder behavior.
++
++## Transport contract kept unchanged
++
++Qt keeps using one AstraRX compatibility connection:
++
++```text
++ws://127.0.0.1:8074/ws/qt5
++```
++
++Override only when required:
++
++```bash
++export ASTRARX_WS_URL=ws://<astrarx-host>:8074/ws/qt5
++```
++
++The existing wire contract is preserved:
++
++- binary type 2: analog/SD PCM16, 12 kHz
++- binary type 4: HD/digital PCM16, 16 kHz
++- Qt resamples either route statefully to one 48 kHz mono S16_LE ALSA owner
++
++No second `/ws/audio` socket is added, so the established Qt5 receiver control,
++frequency, FFT, squelch, and audio ownership stay on the same compatibility
++session.
++
++## Why the playback side was changed
++
++Before R19.7 the local player accumulated approximately:
++
++```text
++software staging target : ~100 ms
++ALSA requested buffer    : ~100 ms
++ALSA period              : ~20 ms
++```
++
++and then added a wall-clock sleep after `snd_pcm_wait()`/`snd_pcm_writei()`.
++ALSA is already the playback clock, so the extra sleep could allow decoded
++speech to accumulate behind the live RF stream.
++
++R19.7 defaults:
++
++```text
++ALSA buffer              : 40 ms
++ALSA period              : 10 ms
++software staging         : 20 ms
++producer queue bound     : 8 chunks
++ALSA start threshold     : ~2 periods
++ALSA avail_min           : 1 period
++manual post-write sleep  : removed
++```
++
++The values are runtime-tunable without rebuilding:
++
++```bash
++ISCAN_AUDIO_BUFFER_MS=40
++ISCAN_AUDIO_PERIOD_MS=10
++ISCAN_AUDIO_STAGE_MS=20
++ISCAN_AUDIO_MAX_QUEUE_CHUNKS=8
++```
++
++Keep the defaults for the first hardware test. Lower values should only be
++tried after proving zero/near-zero underruns on the actual codec/I2S output.
++
++## Runtime architecture
++
++```text
++AstraRX
++  |
++  | /ws/qt5
++  | type 4 @ 16 kHz for D-Star/DMR/YSF/NXDN
++  v
++WebSocketClient
++  |
++  | PCM16 + software volume
++  v
++stateful Speex SRC
++  |
++  | 48 kHz mono S16_LE
++  v
++AlsaAudioPlayer
++  |
++  | 20 ms staging / 10 ms period / 40 ms device buffer
++  v
++ALSA default PCM
++  |
++  v
++codec / I2S / speaker
++```
++
++## Build
++
++Use qmake as required by this project.
++
++Jetson Orin:
++
++```bash
++cd ~/iScanMR10-R19.7-astrarx-low-latency-audio-src
++make clean 2>/dev/null || true
++qmake iScanMR10.pro -spec linux-jetson-orin-g++
++make -j"$(nproc)"
++```
++
++Desktop development build:
++
++```bash
++qmake iScanMR10.pro -spec linux-g++
++make -j"$(nproc)"
++```
++
++## AstraRX prerequisite
++
++Before starting Qt:
++
++```bash
++systemctl is-active astrarx.service
++ss -ltnp | grep ':8074'
++curl -fsS http://127.0.0.1:8074/api/status >/dev/null
++```
++
++All three should pass.
++
++## Run
++
++For AstraRX on the same Orin:
++
++```bash
++export ASTRARX_WS_URL=ws://127.0.0.1:8074/ws/qt5
++./iScanMR10
++```
++
++For the first test do not override the R19.7 audio defaults.
++
++## Expected logs
++
++Connection/audio ownership:
++
++```text
++[ASTRARX-BACKEND] WebSocket = ws://127.0.0.1:8074/ws/qt5
++[R19.7 ASTRARX AUDIO] revision=20260828-r19.7-low-latency-alsa-output
++[R19.7 AUDIO LOWLAT CONFIG] ... buffer_ms=40 period_ms=10 stage_ms=20 ...
++[R19.5 AUDIO OWNER] single ALSA output ... output_rate=48000
++[R19.4 ALSA RATE] requested=48000 actual=48000 ...
++[R19.7 AUDIO LOWLAT] avail_min_frames=... start_threshold_frames=...
++```
++
++During D-Star speech:
++
++```text
++[R19.5 QT AUDIO] route=HD/type4 post_volume_peak=... hd_rx_frames=...
++[R19.7 QT AUDIO LATENCY] alsa_delay_ms=... staged_ms=... queue_chunks=...
++```
++
++A healthy D-Star output path should show:
++
++- `hd_rx_frames` increasing
++- `push_frames` increasing
++- `alsa_written_frames` increasing
++- non-zero `post_volume_peak` while speech is present
++- `queue_chunks` normally small
++- no continuous queue drops
++- no continuously increasing underrun/recover count
++
++## A/B tuning only after default validation
++
++If the default 40/10/20 ms profile is stable, a lower-latency experiment can
++be done without rebuilding:
++
++```bash
++export ISCAN_AUDIO_BUFFER_MS=30
++export ISCAN_AUDIO_PERIOD_MS=10
++export ISCAN_AUDIO_STAGE_MS=10
++export ISCAN_AUDIO_MAX_QUEUE_CHUNKS=6
++./iScanMR10
++```
++
++Return to the defaults immediately if speech becomes intermittent or underruns
++increase.
++
++## Rollback
++
++The only functional source changes are in:
++
++- `alsaaudioplayer.cpp`
++- `alsaaudioplayer.h`
++- one R19.7 startup marker in `Mainwindows.cpp`
++
++Restoring those files from the previous source returns the R19.5 playback
++buffering behavior. The AstraRX protocol is unchanged.
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/R19.7-STATIC-VALIDATION.txt iScanMR10-R19.7-astrarx-low-latency-audio-src/R19.7-STATIC-VALIDATION.txt
+--- qt_src_r19/R19.7-STATIC-VALIDATION.txt	1970-01-01 00:00:00.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/R19.7-STATIC-VALIDATION.txt	2026-08-28 08:05:43.845985378 +0000
+@@ -0,0 +1,33 @@
++R19.7 Qt5 AstraRX Low-Latency Audio - Static Validation
++Date: 2026-08-28
++
++Scope changed:
++- Mainwindows.cpp: revision marker only
++- alsaaudioplayer.cpp: bounded low-latency ALSA buffering/pacing/telemetry
++- alsaaudioplayer.h: low-latency configuration/state
++- README.md: build/run/verify entry
++- R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md: implementation/runtime guide
++- VERIFY-ASTRARX-AUDIO-R19.7.sh: source/runtime preflight
++
++Preserved:
++- /ws/qt5 AstraRX compatibility WebSocket
++- binary type 2 analog PCM route
++- binary type 4 digital PCM route
++- 12 kHz -> 48 kHz and 16 kHz -> 48 kHz stateful Speex SRC
++- one ALSA owner
++- volume/mute behavior
++- mode-route flush behavior
++- FFT/QML/frequency/database/recorder behavior
++
++Validation completed in packaging environment:
++- bash -n VERIFY-ASTRARX-AUDIO-R19.7.sh: PASS
++- VERIFY-ASTRARX-AUDIO-R19.7.sh: 10 PASS / 0 FAIL static checks
++- no stale kMaxQueuedChunks references
++- no active legacy QThread::msleep(remaining) post-write pacing
++- changed-file audit completed
++
++Build was not executed in the packaging environment because the target Qt5
++qmake/mkspec/ALSA/Speex development environment is not installed here.
++Target build command:
++  qmake iScanMR10.pro -spec linux-jetson-orin-g++
++  make -j$(nproc)
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/README.md iScanMR10-R19.7-astrarx-low-latency-audio-src/README.md
+--- qt_src_r19/README.md	2026-08-19 10:39:46.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/README.md	2026-08-28 08:05:02.574017826 +0000
+@@ -6,3 +6,35 @@
+ See `README_QT5_EVENT_AUDIT.md` for the WebSocket JSON contract.
+ 
+ No web page implementation is included in this package.
++
++---
++
++## R19.7 — AstraRX Qt5 Low-Latency Audio Output
++
++The current Qt5 integration uses AstraRX's `/ws/qt5` compatibility session and
++one 48 kHz ALSA playback owner. R19.7 reduces local playback buffering while
++preserving the existing wire protocol, control/FFT path, QML behavior and
++frequency ownership.
++
++Build on Jetson Orin:
++
++```bash
++qmake iScanMR10.pro -spec linux-jetson-orin-g++
++make -j"$(nproc)"
++```
++
++Run against local AstraRX:
++
++```bash
++export ASTRARX_WS_URL=ws://127.0.0.1:8074/ws/qt5
++./iScanMR10
++```
++
++Validate source/runtime prerequisites:
++
++```bash
++./VERIFY-ASTRARX-AUDIO-R19.7.sh
++```
++
++See `R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.md` for the architecture, logs,
++A/B tuning values and rollback procedure.
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/VERIFY-ASTRARX-AUDIO-R19.7.sh iScanMR10-R19.7-astrarx-low-latency-audio-src/VERIFY-ASTRARX-AUDIO-R19.7.sh
+--- qt_src_r19/VERIFY-ASTRARX-AUDIO-R19.7.sh	1970-01-01 00:00:00.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/VERIFY-ASTRARX-AUDIO-R19.7.sh	2026-08-28 08:05:02.572932460 +0000
+@@ -0,0 +1,61 @@
++#!/usr/bin/env bash
++set -euo pipefail
++
++ROOT="${1:-$(cd "$(dirname "$0")" && pwd)}"
++cd "$ROOT"
++
++pass=0
++fail=0
++check() {
++    local label="$1"; shift
++    if "$@"; then
++        printf 'PASS  %s\n' "$label"
++        pass=$((pass+1))
++    else
++        printf 'FAIL  %s\n' "$label"
++        fail=$((fail+1))
++    fi
++}
++
++check "R19.7 startup marker" grep -q 'R19.7 ASTRARX AUDIO' Mainwindows.cpp
++check "Qt5 AstraRX endpoint" grep -q '127.0.0.1:8074/ws/qt5' Mainwindows.cpp
++check "single 48k ALSA owner" grep -q 'new AlsaAudioPlayer(48000' websocketclient.cpp
++check "digital type4 16k input" grep -q 'pushAudioAtRate(data, 16000)' websocketclient.cpp
++check "40 ms low-latency default" grep -q 'ISCAN_AUDIO_BUFFER_MS.*, 40' alsaaudioplayer.cpp
++check "10 ms period default" grep -q 'ISCAN_AUDIO_PERIOD_MS.*, 10' alsaaudioplayer.cpp
++check "20 ms staging default" grep -q 'ISCAN_AUDIO_STAGE_MS.*, 20' alsaaudioplayer.cpp
++check "ALSA start threshold" grep -q 'snd_pcm_sw_params_set_start_threshold' alsaaudioplayer.cpp
++check "ALSA delay telemetry" grep -q 'R19.7 QT AUDIO LATENCY' alsaaudioplayer.cpp
++
++if grep -q 'QThread::msleep(remaining)' alsaaudioplayer.cpp; then
++    printf 'FAIL  legacy post-write manual pacing still active\n'
++    fail=$((fail+1))
++else
++    printf 'PASS  no legacy post-write manual pacing\n'
++    pass=$((pass+1))
++fi
++
++printf '\nStatic result: %d PASS / %d FAIL\n' "$pass" "$fail"
++
++if command -v systemctl >/dev/null 2>&1; then
++    printf '\n===== Optional runtime preflight =====\n'
++    if systemctl is-active --quiet astrarx.service 2>/dev/null; then
++        echo 'PASS  astrarx.service active'
++    else
++        echo 'INFO  astrarx.service not active/not available in this environment'
++    fi
++fi
++
++if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ':8074'; then
++    echo 'PASS  TCP/8074 listening'
++else
++    echo 'INFO  TCP/8074 not observed in this environment'
++fi
++
++if command -v aplay >/dev/null 2>&1; then
++    echo
++    echo '===== ALSA playback devices ====='
++    aplay -l 2>/dev/null || true
++fi
++
++(( fail == 0 ))
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/alsaaudioplayer.cpp iScanMR10-R19.7-astrarx-low-latency-audio-src/alsaaudioplayer.cpp
+--- qt_src_r19/alsaaudioplayer.cpp	2026-08-20 06:53:46.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/alsaaudioplayer.cpp	2026-08-28 08:03:49.810952624 +0000
+@@ -2,6 +2,7 @@
+ #include "alsaaudioplayer.h"
+ #include "CrashDiagnostics.h"
+ #include <QDebug>
++#include <algorithm>
+ #include <cerrno>
+ #include <chrono>
+ #include <cmath>
+@@ -23,6 +24,33 @@
+             Qt::DirectConnection);
+     m_sampleRate = sampleRate;
+     m_audioFormat = audioFormat;
++
++    auto envInt = [](const char *name, int fallback, int minimum, int maximum) {
++        bool ok = false;
++        const int value = qgetenv(name).trimmed().toInt(&ok);
++        return ok ? std::max(minimum, std::min(maximum, value)) : fallback;
++    };
++
++    // R19.7: match AstraRX's live-edge design on the appliance. The previous
++    // player intentionally accumulated ~100 ms in software and requested
++    // another ~100 ms ALSA buffer. That was safe but unnecessarily delayed
++    // already-decoded D-Star speech. Keep the defaults conservative enough
++    // for Jetson scheduling jitter while making the entire local output path
++    // bounded and runtime-tunable without a rebuild.
++    m_bufferMs = envInt("ISCAN_AUDIO_BUFFER_MS", 40, 20, 250);
++    m_periodMs = envInt("ISCAN_AUDIO_PERIOD_MS", 10, 5, 50);
++    if (m_periodMs >= m_bufferMs)
++        m_periodMs = std::max(5, m_bufferMs / 4);
++    m_stageMs = envInt("ISCAN_AUDIO_STAGE_MS", 20, 5, 100);
++    m_stageMs = std::min(m_stageMs, m_bufferMs);
++    m_maxQueuedChunks = envInt("ISCAN_AUDIO_MAX_QUEUE_CHUNKS", 8, 3, 30);
++
++    qInfo().noquote() << "[R19.7 AUDIO LOWLAT CONFIG]"
++                      << "rate=" << m_sampleRate
++                      << "buffer_ms=" << m_bufferMs
++                      << "period_ms=" << m_periodMs
++                      << "stage_ms=" << m_stageMs
++                      << "max_queue_chunks=" << m_maxQueuedChunks;
+ }
+ 
+ AlsaAudioPlayer::~AlsaAudioPlayer() {
+@@ -84,11 +112,11 @@
+         return fail("Unable to set PCM sample rate: ", err);
+ 
+     snd_pcm_uframes_t buffer_size = static_cast<snd_pcm_uframes_t>(
+-        qMax(1, m_sampleRate / 10)); // ~100 ms
++        qMax(1, (m_sampleRate * m_bufferMs) / 1000));
+     snd_pcm_hw_params_set_buffer_size_near(m_pcmHandle, params, &buffer_size);
+ 
+     snd_pcm_uframes_t period_size = static_cast<snd_pcm_uframes_t>(
+-        qMax(1, m_sampleRate / 50)); // ~20 ms
++        qMax(1, (m_sampleRate * m_periodMs) / 1000));
+     snd_pcm_hw_params_set_period_size_near(m_pcmHandle, params, &period_size, nullptr);
+ 
+     if ((err = snd_pcm_hw_params(m_pcmHandle, params)) < 0)
+@@ -111,6 +139,36 @@
+         snd_pcm_hw_params_get_period_size(params, &period_size, nullptr);
+     }
+     m_actualSampleRate.store(static_cast<int>(actualRate), std::memory_order_release);
++    m_actualBufferFrames.store(static_cast<quint64>(buffer_size), std::memory_order_release);
++    m_actualPeriodFrames.store(static_cast<quint64>(period_size), std::memory_order_release);
++
++    // Ask ALSA to wake the writer once one period is available and to begin
++    // playback after roughly two periods. This avoids a hidden full-buffer
++    // startup threshold while still giving the device a small safety margin.
++    snd_pcm_sw_params_t *swParams = nullptr;
++    snd_pcm_sw_params_alloca(&swParams);
++    if ((err = snd_pcm_sw_params_current(m_pcmHandle, swParams)) >= 0) {
++        const snd_pcm_uframes_t availMin = std::max<snd_pcm_uframes_t>(1, period_size);
++        const snd_pcm_uframes_t startThreshold =
++            std::min<snd_pcm_uframes_t>(buffer_size,
++                                       std::max<snd_pcm_uframes_t>(1, period_size * 2));
++        const int availErr = snd_pcm_sw_params_set_avail_min(m_pcmHandle, swParams, availMin);
++        const int startErr = snd_pcm_sw_params_set_start_threshold(m_pcmHandle, swParams, startThreshold);
++        const int stopErr = snd_pcm_sw_params_set_stop_threshold(m_pcmHandle, swParams, buffer_size);
++        const int applyErr = (availErr < 0 || startErr < 0 || stopErr < 0)
++            ? -1 : snd_pcm_sw_params(m_pcmHandle, swParams);
++        if (applyErr < 0) {
++            qWarning() << "[R19.7 AUDIO LOWLAT] ALSA sw params not fully applied; continuing with plugin defaults";
++        } else {
++            qInfo().noquote() << "[R19.7 AUDIO LOWLAT]"
++                              << "avail_min_frames=" << static_cast<qulonglong>(availMin)
++                              << "start_threshold_frames=" << static_cast<qulonglong>(startThreshold)
++                              << "stop_threshold_frames=" << static_cast<qulonglong>(buffer_size);
++        }
++    } else {
++        qWarning() << "[R19.7 AUDIO LOWLAT] cannot read ALSA sw params:" << snd_strerror(err);
++    }
++
+     const double rateErrorPpm = m_sampleRate > 0
+         ? (static_cast<double>(actualRate) - static_cast<double>(m_sampleRate)) * 1.0e6 /
+               static_cast<double>(m_sampleRate)
+@@ -269,7 +327,7 @@
+     }
+ 
+     const quint64 droppedBefore = m_droppedQueuedChunks;
+-    while (m_queue.size() >= kMaxQueuedChunks) {
++    while (m_queue.size() >= m_maxQueuedChunks) {
+         m_queue.dequeue();
+         ++m_droppedQueuedChunks;
+     }
+@@ -381,7 +439,7 @@
+     // Bound the queue at the producer. If ALSA stalls, allowing WebSocket PCM
+     // to accumulate without limit turns a short playback problem into process
+     // memory growth/OOM. Real-time audio should keep the newest data.
+-    while (m_queue.size() >= kMaxQueuedChunks) {
++    while (m_queue.size() >= m_maxQueuedChunks) {
+         CrashDiagnostics::checkpoint(CrashDiagnostics::CpAudioPushTrim);
+         m_queue.dequeue();
+         ++m_droppedQueuedChunks;
+@@ -521,10 +579,12 @@
+     quint64 diagWriteCount = 0;
+     const int bytesPerFrame = (m_audioFormat == SND_PCM_FORMAT_S8) ? 1 : 2;
+     const int playbackRate = qMax(1, actualSampleRate() > 0 ? actualSampleRate() : m_sampleRate);
+-    const int targetFrames = qMax(1, playbackRate / 10);   // ~100 ms
+-    const int periodFrames = qMax(1, playbackRate / 50);   // ~20 ms
++    const int configuredStageFrames = qMax(1, (playbackRate * m_stageMs) / 1000);
++    const int actualPeriodFrames = static_cast<int>(
++        std::max<quint64>(1, m_actualPeriodFrames.load(std::memory_order_acquire)));
++    const int periodFrames = actualPeriodFrames;
++    const int targetFrames = std::max(periodFrames, configuredStageFrames);
+     const int targetBufferSize = targetFrames * bytesPerFrame;
+-    auto lastWriteTime = std::chrono::steady_clock::now();
+     quint64 appliedFlushGeneration = m_flushGeneration.load(std::memory_order_acquire);
+ 
+     while (m_running.load(std::memory_order_acquire)) {
+@@ -542,28 +602,29 @@
+                                << snd_strerror(prepareResult);
+             }
+             appliedFlushGeneration = requestedFlushGeneration;
+-            lastWriteTime = std::chrono::steady_clock::now();
++            m_lastAlsaDelayFrames.store(0, std::memory_order_release);
+             qInfo() << "[R19 AUDIO] flush applied" << this
+                     << "generation=" << appliedFlushGeneration;
+         }
+ 
+-        // Fill buffer to target size. The target follows m_sampleRate so 12 kHz
+-        // and 16 kHz playback have the same time-domain buffering behavior.
++        // Stage only a small live window before writing. AstraRX Qt5 audio
++        // packets are already time-bounded; accumulating 100 ms here only adds
++        // latency and provides no decoding benefit.
+         while (writeBuffer.size() < targetBufferSize
+                && m_running.load(std::memory_order_acquire)) {
+             QMutexLocker locker(&m_mutex);
+             if (m_queue.isEmpty()) {
+                 CrashDiagnostics::checkpoint(CrashDiagnostics::CpAudioWait);
+-                m_dataAvailable.wait(&m_mutex, 100);
++                m_dataAvailable.wait(&m_mutex, qMax(10, m_periodMs * 2));
+                 if (m_queue.isEmpty()) break;
+             }
+ 
+             // Don't let the queue grow too large
+-            if (m_queue.size() > kMaxQueuedChunks) {
+-                const int drop = m_queue.size() - kMaxQueuedChunks;
++            if (m_queue.size() > m_maxQueuedChunks) {
++                const int drop = m_queue.size() - m_maxQueuedChunks;
+                 qWarning() << QTime::currentTime().toString("hh:mm:ss")
+                            << "Queue overflow - dropping" << drop << "chunks";
+-                while (m_queue.size() > kMaxQueuedChunks) {
++                while (m_queue.size() > m_maxQueuedChunks) {
+                     m_queue.dequeue();
+                     ++m_droppedQueuedChunks;
+                 }
+@@ -587,7 +648,7 @@
+                                << snd_strerror(prepareResult);
+             }
+             appliedFlushGeneration = preWriteFlushGeneration;
+-            lastWriteTime = std::chrono::steady_clock::now();
++            m_lastAlsaDelayFrames.store(0, std::memory_order_release);
+             continue;
+         }
+ 
+@@ -652,18 +713,40 @@
+                                             .arg(m_droppedQueuedChunks));
+             }
+ 
+-            // Calculate exact sleep time
+-            auto now = std::chrono::steady_clock::now();
+-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastWriteTime);
+-            const int expectedInterval = qMax(1,
+-                (framesToWrite * 1000) / playbackRate);
+-            int remaining = expectedInterval - elapsed.count();
+-
+-            if (remaining > 0) {
+-                // qDebug() << "remaining" << remaining;
+-                QThread::msleep(remaining);
++            // ALSA is the clock owner. snd_pcm_wait() plus avail_min already
++            // provides pacing; an additional wall-clock sleep here double-paces
++            // the stream and lets decoded speech accumulate behind live RF.
++            snd_pcm_sframes_t delayFrames = 0;
++            if (snd_pcm_delay(m_pcmHandle, &delayFrames) == 0) {
++                if (delayFrames < 0)
++                    delayFrames = 0;
++                m_lastAlsaDelayFrames.store(static_cast<qint64>(delayFrames),
++                                            std::memory_order_release);
++            }
++
++            if ((diagWriteCount % 100ULL) == 0ULL) {
++                int queueChunks = 0;
++                {
++                    QMutexLocker diagLocker(&m_mutex);
++                    queueChunks = m_queue.size();
++                }
++                const qint64 delay = m_lastAlsaDelayFrames.load(std::memory_order_acquire);
++                const double delayMs = playbackRate > 0
++                    ? (static_cast<double>(delay) * 1000.0 / static_cast<double>(playbackRate))
++                    : 0.0;
++                qInfo().noquote() << "[R19.7 QT AUDIO LATENCY]"
++                                  << "alsa_delay_ms=" << QString::number(delayMs, 'f', 2)
++                                  << "alsa_delay_frames=" << delay
++                                  << "staged_ms="
++                                  << QString::number(
++                                         static_cast<double>(writeBuffer.size() / bytesPerFrame) * 1000.0 /
++                                             static_cast<double>(playbackRate),
++                                         'f', 2)
++                                  << "queue_chunks=" << queueChunks
++                                  << "written_frames=" << m_writtenFrames.load(std::memory_order_relaxed)
++                                  << "underruns=" << m_underruns.load(std::memory_order_relaxed)
++                                  << "recovers=" << m_recoveries.load(std::memory_order_relaxed);
+             }
+-            lastWriteTime = now;
+         }
+     }
+ 
+diff -ruN '--exclude=*.o' '--exclude=moc_*' '--exclude=Makefile' '--exclude=R19.7-QT-ASTRARX-LOW-LATENCY-AUDIO.patch' qt_src_r19/alsaaudioplayer.h iScanMR10-R19.7-astrarx-low-latency-audio-src/alsaaudioplayer.h
+--- qt_src_r19/alsaaudioplayer.h	2026-08-20 04:50:42.000000000 +0000
++++ iScanMR10-R19.7-astrarx-low-latency-audio-src/alsaaudioplayer.h	2026-08-28 08:03:48.669118845 +0000
+@@ -39,6 +39,10 @@
+     quint64 writtenFrames() const noexcept { return m_writtenFrames.load(std::memory_order_acquire); }
+     quint64 underrunCount() const noexcept { return m_underruns.load(std::memory_order_acquire); }
+     quint64 recoverCount() const noexcept { return m_recoveries.load(std::memory_order_acquire); }
++    qint64 lastAlsaDelayFrames() const noexcept { return m_lastAlsaDelayFrames.load(std::memory_order_acquire); }
++    int configuredBufferMs() const noexcept { return m_bufferMs; }
++    int configuredPeriodMs() const noexcept { return m_periodMs; }
++    int configuredStageMs() const noexcept { return m_stageMs; }
+ 
+     QVector<qint16> resampleTo8000(const QVector<qint16> &input, int inRate = 16000, int outRate = 8000) {
+         if (input.isEmpty() || inRate <= 0 || outRate <= 0) {
+@@ -81,7 +85,18 @@
+     QMutex m_mutex;
+     QWaitCondition m_dataAvailable;
+     QQueue<QByteArray> m_queue;
+-    static constexpr int kMaxQueuedChunks = 30;
++    // R19.7 real-time queue bound. The default assumes the AstraRX Qt5
++    // compatibility endpoint delivers ~20 ms audio chunks; keeping only a
++    // small live window prevents a transient ALSA stall from turning into
++    // hundreds of milliseconds of delayed speech. Runtime-tunable via
++    // ISCAN_AUDIO_MAX_QUEUE_CHUNKS.
++    int m_maxQueuedChunks = 8;
++    int m_bufferMs = 40;
++    int m_periodMs = 10;
++    int m_stageMs = 20;
++    std::atomic<quint64> m_actualBufferFrames{0};
++    std::atomic<quint64> m_actualPeriodFrames{0};
++    std::atomic<qint64> m_lastAlsaDelayFrames{0};
+     quint64 m_droppedQueuedChunks = 0;
+     std::atomic_bool m_running{false};
+     std::atomic<quint64> m_flushGeneration{0};

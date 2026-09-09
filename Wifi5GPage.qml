@@ -432,6 +432,7 @@ Item {
     function isWifiBackendMenuId(menuId) {
         return menuId === "wifiScan"
                 || menuId === "scan"
+                || menuId === "wifi_config"
                 || menuId === "wifiStatus"
                 || menuId === "wifi_state"
                 || menuId === "wifi_toggle"
@@ -584,6 +585,11 @@ Item {
         if (!root.wifiPageActive)
             return
 
+        // R20.2: resolve WiFi interface/config in a backend worker.
+        // loadWifiConfig() may invoke nmcli, so never call it from the GUI thread.
+        if (sendBackendCommand({"menuID": "wifi_config"}))
+            return
+
         if (!networkBackend) {
             wifiIface = safeText(wifiIface, "wlP9p1s0")
             wifiSsid = safeText(wifiSsid, "")
@@ -591,6 +597,7 @@ Item {
             return
         }
 
+        // Compatibility fallback for environments without Mainwindows JSON routing.
         var cfg = networkBackend.loadWifiConfig()
         wifiIface = safeText(cfg.interface, "wlP9p1s0")
         wifiSsid = safeText(cfg.ssid, "")
@@ -1339,6 +1346,14 @@ Item {
             return
         }
 
+        if (obj.menuID === "wifi_config") {
+            var wifiCfg = obj.data || obj.config || {}
+            wifiIface = safeText(wifiCfg.interface, "wlP9p1s0")
+            wifiSsid = safeText(wifiCfg.ssid, "")
+            wifiAutoConnect = wifiCfg.autoConnect === undefined ? true : wifiCfg.autoConnect
+            return
+        }
+
         if (obj.menuID === "wifiStatus" || obj.menuID === "wifi_state") {
             applyWifiStateUpdate(obj)
             wifiEnabled = wifiState.enabled === undefined ? wifiEnabled : wifiState.enabled
@@ -1565,12 +1580,12 @@ Item {
         function onReset5GModemStarted() {
             root.cellularResetBusy = true
             root.cellularMessage = "Restarting 5G modem..."
-            root.cellularResetTimeoutTimer.restart()
+            cellularResetTimeoutTimer.restart()
             root.requestToast(root.cellularMessage)
         }
 
         function onReset5GModemFinished(ready) {
-            root.cellularResetTimeoutTimer.stop()
+            cellularResetTimeoutTimer.stop()
             root.cellularResetBusy = false
             root.cellularMessage = ready
                     ? "5G modem restarted successfully"

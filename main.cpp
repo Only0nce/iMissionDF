@@ -8,6 +8,7 @@
 // ✅ NEW: expose HardwareHas5G / HardwareVersionName to QML
 
 #include <QGuiApplication>
+#include <QEvent>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickWindow>
@@ -55,11 +56,13 @@
 
 // -------- App Controllers --------
 #include "Mainwindows.h"
+#include "CrashDiagnostics.h"
 #include "NetworkController.h"
 #include "NetworkSecurityController.h"
 #include "ReceiverConfigManager.h"
 #include "ReceiverRecorderConfigManager.h"
 #include "websocketclient.h"
+#include "FftDisplayItem.h"
 #include "screencapture.h"
 
 // -------- iRecordManage (JETSON ONLY) --------
@@ -95,9 +98,13 @@ static void saveStateAndQuit() {
 // which is undefined behavior and can fail during Qt Creator remote cancel.
 // Write the signal number to a non-blocking pipe and let the Qt event loop do
 // the real shutdown work.
-static void handleSignal(int signalNumber)
+static void handleSignal(int signalNumber, siginfo_t *info, void *)
 {
     const int savedErrno = errno;
+    CrashDiagnostics::signalSafeTermination(signalNumber,
+                                            info ? info->si_pid : 0,
+                                            info ? static_cast<unsigned>(info->si_uid) : 0U,
+                                            info ? info->si_code : 0);
     if (gSignalPipe[1] >= 0) {
         const int value = signalNumber;
         (void)::write(gSignalPipe[1], &value, sizeof(value));
@@ -132,9 +139,9 @@ static bool installSignalBridge(QCoreApplication *app)
     });
 
     struct sigaction action {};
-    action.sa_handler = handleSignal;
+    action.sa_sigaction = handleSignal;
     sigemptyset(&action.sa_mask);
-    action.sa_flags = 0;
+    action.sa_flags = SA_SIGINFO;
     if (::sigaction(SIGTERM, &action, nullptr) != 0 ||
         ::sigaction(SIGINT, &action, nullptr) != 0) {
         qCritical() << "[SIGNAL] sigaction install failed errno=" << errno;
@@ -153,6 +160,34 @@ static void setupRuntimeEnv()
     }
 
 #ifdef PLATFORM_JETSON
+    // R20.3 / KP-09SEP2026 : ARM64 QV4 JIT safety guard
+    //
+    // Native core dumps consistently show SIGSEGV in
+    // QV4::MemoryManager::collectFromJSStack() while the QML engine is
+    // performing garbage collection.  This target runs Qt 5.15.2 on AArch64,
+    // a combination with a known V4 JIT failure mode where generated code can
+    // corrupt JavaScript stack slots and the damage is discovered later by GC.
+    //
+    // Disable the QML/JavaScript JIT before QGuiApplication creates the QV4
+    // engine.  This does not alter QML layout, bindings, signals, application
+    // data, or user interaction; only the JavaScript execution backend changes
+    // from JIT to interpreter.
+    //
+    // Engineering A/B escape hatch only:
+    //   ISCAN_QML_JIT=1  -> allow the legacy JIT path again.
+    const QByteArray qmlJitOverride = qgetenv("ISCAN_QML_JIT").trimmed().toLower();
+    const bool allowLegacyQmlJit =
+            qmlJitOverride == "1"
+            || qmlJitOverride == "true"
+            || qmlJitOverride == "yes"
+            || qmlJitOverride == "on";
+
+    if (allowLegacyQmlJit) {
+        qunsetenv("QV4_FORCE_INTERPRETER");
+    } else {
+        qputenv("QV4_FORCE_INTERPRETER", QByteArray("1"));
+    }
+
     if (qEnvironmentVariableIsEmpty("DISPLAY"))
         qputenv("DISPLAY", QByteArray(":0"));
 
@@ -227,6 +262,28 @@ static void setupRuntimeEnv()
 // ======================================================
 // MAIN
 // ======================================================
+
+class DiagnosticGuiApplication final : public QGuiApplication
+{
+public:
+    DiagnosticGuiApplication(int &argc, char **argv)
+        : QGuiApplication(argc, argv)
+    {
+    }
+
+    bool notify(QObject *receiver, QEvent *event) override
+    {
+        const char *className = receiver ? receiver->metaObject()->className() : "<null>";
+        CrashDiagnostics::qtEventEnter(receiver,
+                                       event ? static_cast<int>(event->type()) : -1,
+                                       className);
+        struct LeaveGuard {
+            ~LeaveGuard() { CrashDiagnostics::qtEventLeave(); }
+        } guard;
+        return QGuiApplication::notify(receiver, event);
+    }
+};
+
 int main(int argc, char *argv[])
 {
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
@@ -237,7 +294,7 @@ int main(int argc, char *argv[])
 
     QFont fon("Kinnari");
 
-    QGuiApplication app(argc, argv);
+    DiagnosticGuiApplication app(argc, argv);
     app.setFont(fon);
 
     // Qt.labs.settings requires stable application identifiers before any
@@ -254,16 +311,20 @@ int main(int argc, char *argv[])
 #endif
 
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [](){
+        CrashDiagnostics::event(CrashDiagnostics::CpAppQuit, "APP", "aboutToQuit");
         while (QGuiApplication::overrideCursor())
             QGuiApplication::restoreOverrideCursor();
+        CrashDiagnostics::shutdown();
     });
 
     app.setApplicationDisplayName(APP_TITLE);
 
+    CrashDiagnostics::init();
+    CrashDiagnostics::installFatalSignalHandlers();
+    CrashDiagnostics::event(CrashDiagnostics::CpBoot, "BOOT", "R20.1 diagnostics initialized");
     installSignalBridge(&app);
     std::set_terminate([]() {
-        static const char message[] = "[FATAL] std::terminate invoked\n";
-        (void)::write(STDERR_FILENO, message, sizeof(message) - 1);
+        CrashDiagnostics::fatalLiteral("std::terminate invoked");
         std::abort();
     });
 
@@ -274,6 +335,11 @@ int main(int argc, char *argv[])
     qInfo().noquote() << "[ENV] QT_X11_NO_MITSHM=" << qgetenv("QT_X11_NO_MITSHM");
 
 #ifdef PLATFORM_JETSON
+    qInfo().noquote() << "[R20.3 QML-JIT-SAFETY] revision=20260909-arm64-qv4-interpreter-no-ui";
+    qInfo().noquote() << "[R20.4 NATIVE FFT] revision=20260909-native-fft-qv4-pressure-no-ui";
+    qInfo().noquote() << "[QML ENGINE] QV4_FORCE_INTERPRETER="
+                      << qgetenv("QV4_FORCE_INTERPRETER")
+                      << "ISCAN_QML_JIT=" << qgetenv("ISCAN_QML_JIT");
     qInfo().noquote() << "[CURSOR] PLATFORM_JETSON => BlankCursor";
 #else
     qInfo().noquote() << "[CURSOR] x86/desktop => normal mouse cursor";
@@ -295,8 +361,9 @@ int main(int argc, char *argv[])
     // ==================================================
     qmlRegisterType<ReceiverConfigManager>("Receiver", 1, 0, "ReceiverConfigManager");
     qmlRegisterType<WebSocketClient>("WebSocketClient", 1, 0, "WebSocketClient");
+    qmlRegisterType<FftDisplayItem>("iScan.Display", 1, 0, "FftDisplayItem");
 
-    NetworkController* netCtrl = new NetworkController();
+    NetworkController* netCtrl = new NetworkController(&app);
     qmlRegisterSingletonInstance("App", 1, 0, "NetworkController", netCtrl);
 
     // KP-6JUL2026 : Centralized password verification for protected network changes.
@@ -334,7 +401,7 @@ int main(int argc, char *argv[])
     iScreenDF *kraken = new iScreenDF(imageProviderDF);
     engine->rootContext()->setContextProperty("Krakenmapval", kraken);
 
-    Mainwindows mainWindows;
+    Mainwindows mainWindows(netCtrl, nullptr);
     engine->rootContext()->setContextProperty("mainWindows", &mainWindows);
     engine->rootContext()->setContextProperty("wsClient",  &mainWindows.wsClient);
 

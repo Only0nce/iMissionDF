@@ -10,13 +10,14 @@ class I2CReadWrite
 {
 public:
     I2CReadWrite(const char* i2c_dev, int i2c_address);
+    ~I2CReadWrite();
     bool readi2cData();
     bool writeBytes();
-    int file_i2c;
+    int file_i2c = -1;
     unsigned char buffer[60];
     unsigned char r_buffer[100];
     int length=2;
-    char i2cdevice[16];
+    char i2cdevice[64] = {0};
     int i2cAddress;
     bool active = false;
 //    void setup(const char* i2c_dev, int i2c_address);

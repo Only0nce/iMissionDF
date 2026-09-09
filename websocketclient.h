@@ -22,6 +22,7 @@
 #include <QtMath>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <QVector>
 
 typedef QVector<float> Float32BitArray;
 
@@ -30,6 +31,11 @@ class WebSocketClient : public QObject {
     Q_PROPERTY(bool muted READ isMute NOTIFY mutedChanged)
     Q_PROPERTY(bool fftUiActive READ fftUiActive WRITE setFftUiActive NOTIFY fftUiActiveChanged)
     Q_PROPERTY(bool maxHoldEnabled READ maxHoldEnabled WRITE setMaxHoldEnabled NOTIFY maxHoldEnabledChanged)
+    // R20.4: native FFT auto-scale statistics. QML reads only two scalars;
+    // no full FFT JavaScript array is required in the production renderer.
+    Q_PROPERTY(double fftNoiseDb READ fftNoiseDb NOTIFY fftAutoScaleStatsChanged)
+    Q_PROPERTY(double fftStrongDb READ fftStrongDb NOTIFY fftAutoScaleStatsChanged)
+    Q_PROPERTY(bool fftAutoScaleValid READ fftAutoScaleValid NOTIFY fftAutoScaleStatsChanged)
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
     ~WebSocketClient() override;
@@ -52,6 +58,9 @@ public:
     Q_INVOKABLE void setMaxHoldEnabled(bool enabled);
     Q_INVOKABLE void resetMaxHold();
     Q_INVOKABLE QVariantList maxHoldSnapshot() const;
+    double fftNoiseDb() const noexcept { return m_fftNoiseDb; }
+    double fftStrongDb() const noexcept { return m_fftStrongDb; }
+    bool fftAutoScaleValid() const noexcept { return m_fftAutoScaleValid; }
 
     Q_INVOKABLE int  volumePercent() const;           // 0–100
     Q_INVOKABLE void setVolumePercent(int percent);   // 0–100
@@ -198,6 +207,13 @@ signals:
     void maxHoldEnabledChanged(bool enabled);
     void maxHoldUpdated(QVariantList maxHoldData);
 
+    // R20.4 production renderer signals. These stay entirely in C++ and use
+    // implicitly-shared QVector<float>; no QVariantList/QV4 boxing is required.
+    void spectrumDisplayFrame(QVector<float> fftData);
+    void waterfallDisplayFrame(QVector<float> fftData);
+    void maxHoldDisplayFrame(QVector<float> fftData);
+    void fftAutoScaleStatsChanged();
+
     // Primary full-span FFT frame. Spectrum and Waterfall consume this single
     // delivery in QML to avoid crossing the C++/QML boundary twice per frame.
     void fftFrameUpdated(QVariantList fftData);
@@ -224,21 +240,54 @@ signals:
 private:
     bool m_fftUiActive = false;
 
-    // UI delivery budget. Incoming FFT can be much faster than the display.
-    // Drop excess frames before QVariant boxing and the Qt->QML signal bridge.
+    // AstraRX connection recovery state. The UI-facing WebSocket contract stays
+    // unchanged; reconnect is entirely backend-owned.
+    QTimer m_reconnectTimer;
+    QUrl m_targetUrl;
+    int m_reconnectDelayMs = 1000;
+    bool m_shuttingDown = false;
+    void scheduleReconnect(const QString &reason);
+    void openBackendSocket();
+
+    // R20.4 native FFT transport. Incoming frames are validated once in C++.
+    // Spectrum/Waterfall receive QVector<float> directly, while the legacy
+    // QVariantList bridge is opt-in only for diagnostics.
+    bool m_fftQmlPublish = false;
+    bool m_fftStrictSize = true;
+    int m_fftMaxBins = 65536;
+    int m_spectrumDisplayBins = 8192;
+    int m_waterfallDisplayBins = 1280;
+
     QElapsedTimer m_fftUiPublishTimer;
-    int m_fftUiPublishIntervalMs = 40; // 25 Hz maximum QML FFT delivery
+    int m_fftUiPublishIntervalMs = 40;       // legacy QML bridge: 25 Hz
+    QElapsedTimer m_spectrumDisplayTimer;
+    int m_spectrumDisplayIntervalMs = 40;    // native spectrum: 25 Hz
+    QElapsedTimer m_waterfallDisplayTimer;
+    int m_waterfallDisplayIntervalMs = 50;   // native waterfall: 20 Hz
+    QElapsedTimer m_fftAutoScaleTimer;
+    int m_fftAutoScaleIntervalMs = 500;
+    double m_fftNoiseDb = -120.0;
+    double m_fftStrongDb = -80.0;
+    bool m_fftAutoScaleValid = false;
+    QVector<float> m_fftAutoScaleScratch;
 
     bool m_maxHoldEnabled = false;
     QVector<float> m_maxHold;
     QElapsedTimer m_maxHoldPublishTimer;
     int m_maxHoldPublishIntervalMs = 200; // 5 Hz display snapshots
 
-    // Reused ADPCM scratch buffer. Avoid allocating a full frame for every
-    // dropped UI frame while keeping exact native max-hold accumulation.
+    // Reused full-resolution decode buffer.
     QVector<float> m_fftDecodeScratch;
 
     bool shouldPublishFftUiFrame();
+    bool shouldPublishSpectrumFrame();
+    bool shouldPublishWaterfallFrame();
+    bool validateFftFrame(const QVector<float> &fftFrame, int payloadBytes = -1);
+    QVector<float> peakPoolForDisplay(const QVector<float> &source, int limit) const;
+    void publishNativeFftFrames(const QVector<float> &fftFrame);
+    void updateFftAutoScaleStats(const QVector<float> &fftFrame);
+    QVariantList fftToVariantList(const QVector<float> &fftFrame) const;
+
     void prepareMaxHold(int count);
     void updateMaxHoldValue(int index, float value);
     void updateMaxHold(const QVector<float> &fftFrame);
@@ -265,6 +314,9 @@ public slots:
 
 private slots:
     void onConnected();
+    void onDisconnected();
+    void onSocketError(QAbstractSocket::SocketError error);
+    void attemptReconnect();
     void onBinaryMessageReceived(const QByteArray &message);
     void onTextMessageReceived(const QString &message);
     void sendDspAction(const QString &action);

@@ -9,6 +9,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Window 2.15
 import QtQuick.Controls.Material 2.4
 import QtQuick.Layouts 1.0
+import iScan.Display 1.0
 import "ui"
 
 Item {
@@ -37,36 +38,20 @@ Item {
 
     property real dataCount : 0
     property real smeterLevel: -100
-    property var  spectrumData: []
-    // Keep only the newest waterfall FFT row. The painted Canvas already owns
-    // the visual history, so retaining one JS array per historical row wastes RAM.
-    property var  latestWaterfallLine: []
     property var  waterfallColorMap: [
         0x000008, 0x000040, 0x0000A0, 0x0030FF,
         0x00A0FF, 0x00E0FF, 0x00FF80, 0x80FF00,
         0xFFFF00, 0xFF8000, 0xFF2000, 0xFF0000, 0xFFFFFF
     ]
-    // Prebuilt CSS colors avoid allocating "rgb(r,g,b)" strings per FFT bin/frame.
-    property var  waterfallCssPalette: []
 
     // Phase 4 runtime budgets. Full-span FFT is preserved; only UI delivery and
     // rendering cadence are bounded to avoid saturating one CPU core.
-    property int waterfallTargetFps: 20
-    property int waterfallMaxColumns: 1280
     property int offsetCommandIntervalMs: 20
     property real pendingOffsetCommand: 0
     property bool offsetCommandPending: false
     property bool offsetRecenterInProgress: false
 
-    // Max Hold is accumulated in C++ on every FFT frame and published to QML
-    // at a lower display rate. Peak Scan requests an exact native snapshot.
-    property var maxHoldDisplayData: []
-
     property real smeterBuffered: smeterLevel
-
-    // Single FFT delivery from C++. The same full-span frame feeds Spectrum and
-    // Waterfall, cutting duplicate Qt->QML signal traffic per FFT frame.
-    signal fftFrameUpdated(var frame)
 
     // Legacy local signals retained for source compatibility with older helpers.
     signal spectrumUpdated(var spectrum)
@@ -143,42 +128,9 @@ Item {
             spectrumPaintTimer.start()
     }
 
-    // Latest-frame-wins Waterfall cadence. 25 FPS is visually continuous while
-    // cutting full-surface scroll/composite frequency versus the previous 30 FPS.
-    Timer {
-        id: waterfallPaintTimer
-        interval: Math.max(16, Math.round(1000 / Math.max(1, root.waterfallTargetFps)))
-        repeat: false
-        onTriggered: {
-            if (root.runtimeActive && latestWaterfallLine && latestWaterfallLine.length)
-                waterfallCanvas.requestPaint()
-        }
-    }
-
-    function scheduleWaterfallPaint() {
-        if (!root.runtimeActive)
-            return
-        if (!waterfallPaintTimer.running)
-            waterfallPaintTimer.start()
-    }
-
-    function rebuildWaterfallCssPalette(colors) {
+    function rebuildWaterfallPalette(colors) {
+        // Packed RGB values are consumed directly by the native renderer.
         waterfallColorMap = colors || []
-
-        var css = []
-        const count = waterfallColorMap.length
-        for (var i = 0; i < count; ++i) {
-            const rgb = Number(waterfallColorMap[i]) || 0
-            const r = (rgb >> 16) & 0xFF
-            const g = (rgb >> 8) & 0xFF
-            const b = rgb & 0xFF
-            css.push("rgb(" + r + "," + g + "," + b + ")")
-        }
-
-        if (css.length === 0)
-            css.push("rgb(0,0,0)")
-
-        waterfallCssPalette = css
     }
 
     function nativeMaxHoldAvailable() {
@@ -199,7 +151,6 @@ Item {
     }
 
     function resetNativeMaxHold() {
-        maxHoldDisplayData = []
         maxHoldKept = []
         if (nativeMaxHoldAvailable())
             wsClient.resetMaxHold()
@@ -210,38 +161,12 @@ Item {
             const snapshot = wsClient.maxHoldSnapshot()
             return snapshot && snapshot.length ? snapshot : []
         }
-        return maxHoldDisplayData && maxHoldDisplayData.length
-                ? maxHoldDisplayData.slice() : []
+        return []
     }
 
-    Connections {
-        target: (typeof wsClient !== "undefined") ? wsClient : null
-        ignoreUnknownSignals: true
-
-        function onMaxHoldUpdated(data) {
-            if (!root.runtimeActive)
-                return
-            root.maxHoldDisplayData = data || []
-            if (spectrumCanvas.showMaxHold)
-                root.scheduleSpectrumPaint()
-        }
-    }
-
-    Connections {
-        target: root
-
-        function onFftFrameUpdated(frame) {
-            if (!root.runtimeActive || !frame || frame.length < 2)
-                return
-
-            // One frame object is reused by both render paths. Spectrum and
-            // Waterfall remain full-span; no bandwidth crop is introduced.
-            spectrumData = frame
-            latestWaterfallLine = frame
-            root.scheduleSpectrumPaint()
-            root.scheduleWaterfallPaint()
-        }
-    }
+    // R20.4: Max Hold display is delivered directly from WebSocketClient to
+    // FftDisplayItem as QVector<float>. Peak Scan still requests an exact
+    // full-resolution snapshot only when the operator starts a scan.
 
     function syncFftRuntime() {
         if (!runtimeInitialized)
@@ -262,7 +187,6 @@ Item {
 
         // Stop UI-owned realtime work when this page is not active.
         spectrumPaintTimer.stop()
-        waterfallPaintTimer.stop()
         scanTimer.stop()
         zoomNavTimer.stop()
         zoomTimer.stop()
@@ -275,10 +199,7 @@ Item {
         if (peakScan.running)
             peakScan.stopRange()
 
-        // Release large QML/JS-side FFT buffers. The next active frame repopulates them.
-        spectrumData = []
-        latestWaterfallLine = []
-        maxHoldDisplayData = []
+        // No FFT-sized JavaScript buffers exist in the production path.
         maxHoldKept = []
         spectrumCanvas.clearPeaks()
     }
@@ -537,22 +458,25 @@ Item {
             invalidateViewport(true)
     }
 
+
+    // R20.2 / R16 restore: no executable JavaScript .connect() lifetime bridges.
+    Connections {
+        target: mainWindows
+        ignoreUnknownSignals: true
+
+        function onUpdateCenterFreq() { updateCenterFreq() }
+        function onUpdateReceiverFreq(centerHz, offsetHz, receiverHz) {
+            applyBackendReceiverState(centerHz, offsetHz, receiverHz)
+        }
+        function onFrequencyTuneError(message) { handleFrequencyTuneError(message) }
+        function onWaterfallColorUpdate(waterfallColors) { waterfallColorUpdate(waterfallColors) }
+        function onFindBandsWithProfile(mode) { findBandsWithProfile(mode) }
+        function onSmeterValueUpdated(smeter) { smeterValueUpdated(smeter) }
+    }
+
     Component.onCompleted: {
         runtimeInitialized = true
         console.log("[ASTRARX-COMPAT-QML] revision=20260817-bidirectional-span-stability-r10")
-
-        mainWindows.updateCenterFreq.connect(updateCenterFreq)
-        mainWindows.updateReceiverFreq.connect(applyBackendReceiverState)
-        mainWindows.frequencyTuneError.connect(handleFrequencyTuneError)
-
-        mainWindows.fftFrameUpdated.connect(fftFrameUpdated)
-        mainWindows.waterfallColorUpdate.connect(waterfallColorUpdate)
-
-        mainWindows.findBandsWithProfile.connect(findBandsWithProfile)
-
-        mainWindows.smeterValueUpdated.connect(function(smeter) {
-            smeterValueUpdated(smeter)
-        })
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
 
@@ -564,7 +488,7 @@ Item {
                                   Number(mainWindows.receiver_freq()))
 
         // Prime the fallback palette before the first server color message.
-        rebuildWaterfallCssPalette(waterfallColorMap)
+        rebuildWaterfallPalette(waterfallColorMap)
 
         // Enable the C++ FFT path only after all QML signal handlers are connected.
         syncFftRuntime()
@@ -776,34 +700,14 @@ Item {
                     "receiver=", r)
     }
 
-    function percentile(sortedValues, fraction) {
-        if (!sortedValues || sortedValues.length === 0)
-            return NaN
-        const idx = Math.max(0, Math.min(sortedValues.length - 1,
-                                        Math.floor(fraction * (sortedValues.length - 1))))
-        return Number(sortedValues[idx])
-    }
-
     function autoScaleWaterfallColor() {
-        var latestLine = latestWaterfallLine
-        if (!latestLine || latestLine.length < 8)
+        if (typeof wsClient === "undefined" || !wsClient || !wsClient.fftAutoScaleValid)
             return
 
-        // Sample a bounded number of bins to keep the sort cheap on Jetson.
-        const stride = Math.max(1, Math.floor(latestLine.length / 512))
-        var values = []
-        for (var i = 0; i < latestLine.length; i += stride) {
-            const v = Number(latestLine[i])
-            if (isFinite(v))
-                values.push(v)
-        }
-        if (values.length < 8)
-            return
-
-        values.sort(function(a, b) { return a - b })
-
-        const noiseDb = percentile(values, 0.50)
-        const strongDb = percentile(values, 0.995)
+        // R20.4: median and 99.5-percentile are computed natively from a
+        // bounded sample. QML receives only two scalar values, not an FFT array.
+        const noiseDb = Number(wsClient.fftNoiseDb)
+        const strongDb = Number(wsClient.fftStrongDb)
         if (!isFinite(noiseDb) || !isFinite(strongDb))
             return
 
@@ -979,20 +883,29 @@ Item {
         }
     }
 
-    Canvas {
+    FftDisplayItem {
         id: spectrumCanvas
         z: 1
-        // Fixed-size render surface: logical zoom changes bin mapping only.
+        // Geometry, mapping, colors and Max Hold behavior intentionally match
+        // the previous Canvas renderer. Only the execution path moves to C++.
         width: root.width
         height: parent.height / 4
-        renderTarget: Canvas.FramebufferObject
-        renderStrategy: Canvas.Cooperative
-        antialiasing: false
-        smooth: false
         x: 0
 
+        backend: (typeof wsClient !== "undefined") ? wsClient : null
+        mode: FftDisplayItem.Spectrum
+        renderEnabled: root.runtimeActive
+        minDb: root.waterfallMinDb
+        maxDb: root.waterfallMaxDb
+        fullStartFreq: root.fullStartFreq
+        viewStartFreq: root.viewStartFreq
+        viewStopFreq: root.viewStopFreq
+        sampleRate: Math.max(1, root.sampRate)
+        spectrumColor: "#00FF00"
+        maxHoldColor: theme.maxHoldLine
+
         property alias clearPeakTimer: clearPeakTimer
-        property bool showMaxHold: true
+        showMaxHold: true
 
         onShowMaxHoldChanged: root.syncNativeMaxHoldState()
 
@@ -1009,185 +922,31 @@ Item {
 
         onWidthChanged:  { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
         onHeightChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
-
-        onPaint: {
-            var ctx = getContext("2d");
-            var w = width;
-            var h = height;
-
-            ctx.clearRect(0, 0, w, h);
-
-            if (!spectrumData || spectrumData.length < 2)
-                return;
-
-            const minDb = root.waterfallMinDb;
-            const maxDb = root.waterfallMaxDb;
-            const rangeDb = Math.max(1e-6, (maxDb - minDb));
-
-            const xAxisH = 18
-            const plotH = h - xAxisH
-
-            function yOf(v) { return plotH - ((v - minDb) / rangeDb) * plotH; }
-
-            // Map the full-span FFT into the current logical viewport.
-            const fullBins = spectrumData.length
-            const startRatio = Math.max(0.0, Math.min(1.0,
-                (root.viewStartFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
-            const stopRatio = Math.max(startRatio, Math.min(1.0,
-                (root.viewStopFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
-            const startBin = Math.max(0, Math.min(fullBins - 1,
-                Math.floor(startRatio * (fullBins - 1))))
-            const endBin = Math.max(startBin + 1, Math.min(fullBins - 1,
-                Math.ceil(stopRatio * (fullBins - 1))))
-            const visibleBins = Math.max(2, endBin - startBin + 1)
-
-            // Spectrum line
-            ctx.beginPath();
-            ctx.strokeStyle = "#00FF00";
-            ctx.lineWidth = 1;
-            ctx.moveTo(0, yOf(spectrumData[startBin]));
-
-            // Draw no more samples than the fixed display width needs.
-            let step = Math.max(1, Math.floor(visibleBins / Math.max(1, w)))
-            for (var i = startBin + step; i <= endBin; i += step) {
-                let x = (i - startBin) / Math.max(1, endBin - startBin) * w;
-                let y = yOf(spectrumData[i]);
-                ctx.lineTo(x, y);
-            }
-            if ((endBin - startBin) % step !== 0)
-                ctx.lineTo(w, yOf(spectrumData[endBin]))
-            ctx.stroke();
-
-            // Max Hold accumulation runs natively in WebSocketClient on every
-            // FFT frame. QML only paints the throttled display snapshot, removing
-            // the full FFT-sized JavaScript comparison loop from Canvas::onPaint.
-            const maxHold = root.maxHoldDisplayData
-            if (showMaxHold && maxHold && maxHold.length === spectrumData.length) {
-                ctx.beginPath();
-                ctx.strokeStyle = theme.maxHoldLine;
-                ctx.lineWidth = 1;
-                ctx.moveTo(0, yOf(maxHold[startBin]));
-
-                let step2 = Math.max(1, Math.floor(visibleBins / Math.max(1, w)))
-                for (var k = startBin + step2; k <= endBin; k += step2) {
-                    let x2 = (k - startBin) / Math.max(1, endBin - startBin) * w;
-                    let y2 = yOf(maxHold[k]);
-                    ctx.lineTo(x2, y2);
-                }
-                if ((endBin - startBin) % step2 !== 0)
-                    ctx.lineTo(w, yOf(maxHold[endBin]))
-                ctx.stroke();
-            }
-        }
-
     }
 
-    Canvas {
+    FftDisplayItem {
         id: waterfallCanvas
         z: 1
         y: spectrumCanvas.height
         x: 0
         width: root.width
         height: parent.height / 4
-        property bool clearBeforeNextPaint: false
 
-        onPaint: {
-            const minDb = waterfallMinDb;
-            const maxDb = waterfallMaxDb;
-            const rangeDb = maxDb - minDb;
-            var ctx = getContext("2d");
-
-            if (clearBeforeNextPaint) {
-                ctx.clearRect(0, 0, width, height)
-                clearBeforeNextPaint = false
-            } else {
-                // Scroll down by 1px only for a new FFT paint.
-                ctx.drawImage(waterfallCanvas, 0, 0, width, height - 1,
-                              0, 1, width, height - 1);
-            }
-
-            var line = latestWaterfallLine;
-            if (!line || typeof line.length === "undefined") return;
-
-            const canvasWidth = Math.max(1, Math.floor(width));
-            const bins = line.length;
-            if (bins < 1)
-                return;
-
-            // Select only bins inside the logical viewport. The underlying FFT
-            // remains full-span; this is display mapping only, not partial decode.
-            const startRatio = Math.max(0.0, Math.min(1.0,
-                (root.viewStartFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
-            const stopRatio = Math.max(startRatio, Math.min(1.0,
-                (root.viewStopFreq - root.fullStartFreq) / Math.max(1.0, root.sampRate)))
-            const startBin = Math.max(0, Math.min(bins - 1,
-                Math.floor(startRatio * (bins - 1))))
-            const endBin = Math.max(startBin, Math.min(bins - 1,
-                Math.ceil(stopRatio * (bins - 1))))
-            const visibleBins = Math.max(1, endBin - startBin + 1)
-
-            // Fixed-size renderer: no matter whether zoom is 1x or 20x, at most
-            // one aggregation pass per screen column is performed.
-            const columns = Math.max(1, Math.min(
-                canvasWidth, visibleBins, root.waterfallMaxColumns));
-            const palette = waterfallCssPalette.length > 0
-                          ? waterfallCssPalette
-                          : ["rgb(0,0,0)"];
-            const paletteLast = palette.length - 1;
-            const safeRangeDb = Math.max(1e-9, rangeDb);
-
-            var runColor = -1;
-            var runStartX = 0;
-
-            function flushRun(endX) {
-                if (runColor < 0 || endX <= runStartX)
-                    return;
-                ctx.fillStyle = palette[runColor];
-                ctx.fillRect(runStartX, 0, endX - runStartX, 1);
-            }
-
-            for (var column = 0; column < columns; ++column) {
-                const srcStart = startBin + Math.floor(column * visibleBins / columns);
-                const srcEnd = Math.min(endBin + 1, Math.max(srcStart + 1,
-                    startBin + Math.floor((column + 1) * visibleBins / columns)));
-
-                var peakDb = Number(line[srcStart]);
-                if (!isFinite(peakDb))
-                    peakDb = minDb;
-
-                for (var src = srcStart + 1; src < srcEnd; ++src) {
-                    const sampleDb = Number(line[src]);
-                    if (isFinite(sampleDb) && sampleDb > peakDb)
-                        peakDb = sampleDb;
-                }
-
-                const clampedDb = Math.max(minDb, Math.min(maxDb, peakDb));
-                const norm = (clampedDb - minDb) / safeRangeDb;
-                const colorIndex = Math.max(0, Math.min(
-                    paletteLast, Math.floor(norm * paletteLast)));
-
-                const x0 = Math.floor(column * canvasWidth / columns);
-                const x1 = Math.max(x0 + 1,
-                                    Math.floor((column + 1) * canvasWidth / columns));
-
-                if (runColor < 0) {
-                    runColor = colorIndex;
-                    runStartX = x0;
-                } else if (colorIndex !== runColor) {
-                    flushRun(x0);
-                    runColor = colorIndex;
-                    runStartX = x0;
-                }
-
-                if (column === columns - 1)
-                    flushRun(Math.min(canvasWidth, x1));
-            }
-        }
+        backend: (typeof wsClient !== "undefined") ? wsClient : null
+        mode: FftDisplayItem.Waterfall
+        renderEnabled: root.runtimeActive
+        minDb: root.waterfallMinDb
+        maxDb: root.waterfallMaxDb
+        fullStartFreq: root.fullStartFreq
+        viewStartFreq: root.viewStartFreq
+        viewStopFreq: root.viewStopFreq
+        sampleRate: Math.max(1, root.sampRate)
+        palette: root.waterfallColorMap
 
         Connections {
             target: root
             function onWaterfallColorUpdate(colors) {
-                root.rebuildWaterfallCssPalette(colors)
+                root.rebuildWaterfallPalette(colors)
             }
         }
     }

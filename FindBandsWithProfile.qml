@@ -16,10 +16,20 @@ Item {
 
     Component.onCompleted: {
         console.log("Component.onCompleted:profilesFromDb")
-        mainWindows.updateCardProfile.connect(profileCardsfns)
-        mainWindows.profilesFromDb.connect(function(list) {
+    }
+
+    // R20.2 / R16.1 restore: lifecycle-scoped signal subscriptions.
+    Connections {
+        target: mainWindows
+        ignoreUnknownSignals: true
+
+        function onUpdateCardProfile() {
+            profileCardsfns()
+        }
+
+        function onProfilesFromDb(list) {
             profilesFromDb(list)
-        })
+        }
     }
 
     function profilesFromDb(list){

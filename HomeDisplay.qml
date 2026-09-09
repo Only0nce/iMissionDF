@@ -287,8 +287,7 @@ Item {
                 // --- 2) อัปเดต source of truth (UI ทั้งระบบจะตาม) ---
                 scanVolLevel = v
 
-                // --- 3) อัปเดต property ใน drawer ให้ตรงทันที (กันกรณี binding ไม่แน่น) ---
-                ctrl.ctrlLevel = v
+                                // Drawer follows the authoritative state through its existing binding.
 
                 // --- 4) เปิด drawer ---
                 radioScanner.drawerVolume.open(1)
@@ -309,8 +308,7 @@ Item {
                 // --- 2) อัปเดต source of truth ---
                 scanVolLevelHeadphone = v
 
-                // --- 3) อัปเดต drawer property ให้ UI ตามทัน ---
-                ctrl.headphoneCtrlLevel = v
+                                // Drawer follows the authoritative state through its existing binding.
 
                 // --- 4) เปิด drawer ---
                 radioScanner.drawerVolume.open(1)
@@ -352,8 +350,7 @@ Item {
                 // --- 2) อัปเดต source of truth ---
                 scanAudioLevel = v
 
-                // --- 3) อัปเดต drawer property ---
-                ctrl.audioLevel = v
+                // Drawer follows scanAudioLevel through its existing binding.
 
                 // --- 4) เปิด drawer โหมด audio ---
                 radioScanner.drawerVolume.open(5)
@@ -378,8 +375,7 @@ Item {
                 // --- 2) อัปเดต source of truth (UI ทั้งระบบจะตาม) ---
                 scanVolLevel = v
 
-                // --- 3) อัปเดต property ใน drawer ให้ตรงทันที (กันกรณี binding ไม่แน่น) ---
-                ctrl.ctrlLevel = v
+                                // Drawer follows the authoritative state through its existing binding.
 
                 // --- 4) เปิด drawer ---
                 radioScanner.drawerVolume.open(1)
@@ -400,8 +396,7 @@ Item {
                 // --- 2) อัปเดต source of truth ---
                 scanVolLevelHeadphone = v
 
-                // --- 3) อัปเดต drawer property ให้ UI ตามทัน ---
-                ctrl.headphoneCtrlLevel = v
+                                // Drawer follows the authoritative state through its existing binding.
 
                 // --- 4) เปิด drawer ---
                 radioScanner.drawerVolume.open(1)
@@ -445,8 +440,7 @@ Item {
                 // --- 2) อัปเดต source of truth ---
                 scanAudioLevel = v
 
-                // --- 3) อัปเดต drawer property ---
-                ctrl.audioLevel = v
+                // Drawer follows scanAudioLevel through its existing binding.
 
                 // --- 4) เปิด drawer โหมด audio ---
                 radioScanner.drawerVolume.open(5)
@@ -570,6 +564,45 @@ Item {
         loadCurrentRxConfig.start()
     }
 
+    // R20.2 / R16.1 restore: lifecycle-scoped Mainwindows signal handlers.
+    Connections {
+        target: mainWindows
+        ignoreUnknownSignals: true
+
+        function onUpdateListProfiles() { updateListProfiles() }
+        function onSelectSpecificProfile(value) { maybeUpdate(value) }
+        function onDeleteScanProfile(value) { deleteScanProfile(value) }
+        function onDeleteAllPresets() { deleteAllPresets() }
+        function onDeleteSpecificProfile(value) { deleteSpecificProfile(value) }
+        function onEditSpecificProfile(value) { editSpecificProfile(value) }
+        function onUpdateProfiles(value) { updateProfiles(value) }
+
+        function onUpdateGPIOKeyProfiles(value) {
+            if (radioScanner.drawerSql.opened) {
+                radioScanner.drawerSql.close()
+            } else if (radioScanner.drawerVolume.opened) {
+                radioScanner.drawerVolume.close()
+            } else {
+                indexGpiokeyProfile++
+                if (indexGpiokeyProfile > 4) indexGpiokeyProfile = 0
+                if (indexGpiokeyProfile === 0) {
+                    gpiokeyProfile = 0
+                } else if (indexGpiokeyProfile === 1) {
+                    gpiokeyProfile = 1
+                } else if (indexGpiokeyProfile === 2) {
+                    gpiokeyProfile = 5
+                } else if (indexGpiokeyProfile === 3) {
+                    gpiokeyProfile = 3
+                } else if (indexGpiokeyProfile === 4) {
+                    gpiokeyProfile = 2
+                }
+            }
+        }
+
+        function onUpdateRotaryProfiles(value) { rotaryEvent(value) }
+        function onOnOpenwebrxConnected() { onOpenwebrxConnected() }
+    }
+
     Component.onCompleted: {
         // scanVolLevel =  mainWindows.getSpeakerVolume1()
         // scanVolLevelHeadphone =   mainWindows.getHeadphoneVolume()
@@ -580,68 +613,6 @@ Item {
         // mainWindows.setHeadphoneVolume(scanVolLevelHeadphone)
 
 
-        mainWindows.updateListProfiles.connect(updateListProfiles)
-
-        mainWindows.selectSpecificProfile.connect(function(value) {
-            maybeUpdate(value)
-        })
-
-        mainWindows.deleteScanProfile.connect(function(value) {
-            deleteScanProfile(value)
-        })
-
-        mainWindows.deleteAllPresets.connect(deleteAllPresets)
-
-        mainWindows.deleteSpecificProfile.connect(function(value) {
-            deleteSpecificProfile(value)
-        })
-
-        mainWindows.editSpecificProfile.connect(function(value) {
-            editSpecificProfile(value)
-        })
-
-        mainWindows.updateProfiles.connect(function(value) {
-            updateProfiles(value);
-        });
-        mainWindows.updateGPIOKeyProfiles.connect(function(value)
-        {
-            if (radioScanner.drawerSql.opened)
-            {
-                radioScanner.drawerSql.close()
-            }
-            else if (radioScanner.drawerVolume.opened)
-            {
-                radioScanner.drawerVolume.close()
-            }
-            else
-            {
-                indexGpiokeyProfile++
-                if(indexGpiokeyProfile > 4) indexGpiokeyProfile=0;
-                if(indexGpiokeyProfile === 0){
-                    gpiokeyProfile = 0;
-                }
-                else if(indexGpiokeyProfile === 1){
-                    gpiokeyProfile = 1;
-                }
-                else if(indexGpiokeyProfile === 2){
-                    gpiokeyProfile = 5;
-                }
-                else if(indexGpiokeyProfile === 3){
-                    gpiokeyProfile = 3;
-                }
-                else if(indexGpiokeyProfile === 4){
-                    gpiokeyProfile = 2;
-                }
-
-
-                // console.log("gpiokeyProfile:",gpiokeyProfile)
-                // console.log("indexGpiokeyProfile:",indexGpiokeyProfile)
-            }
-        });
-        mainWindows.updateRotaryProfiles.connect(function(value) {
-            rotaryEvent(value);
-        });
-
         configManager.loadPresetsFromFile("/var/lib/openwebrx/preset.json")
         let presets = configManager.getPresetsAsList()
 
@@ -650,7 +621,6 @@ Item {
         }
 
 
-        mainWindows.onOpenwebrxConnected.connect(onOpenwebrxConnected)
         // homeDisplay.width = screenrotation == 270 ? 1280 : 1920
         // homeDisplay.height = screenrotation == 270 ? 400 : 1080
         homeDisplay.width = 1920

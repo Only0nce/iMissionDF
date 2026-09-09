@@ -1,5 +1,6 @@
 // websocketclient.cpp
 #include "websocketclient.h"
+#include "CrashDiagnostics.h"
 #include "pcmImaadpcmcodec.h"
 #include <QDebug>
 #include <QMetaMethod>
@@ -8,8 +9,46 @@
 #include <cstring>
 #include <cstdlib>
 #include <limits>
+
+namespace {
+bool envEnabled(const char *name, bool defaultValue)
+{
+    const QByteArray value = qgetenv(name).trimmed().toLower();
+    if (value.isEmpty())
+        return defaultValue;
+    if (value == "1" || value == "true" || value == "yes" || value == "on")
+        return true;
+    if (value == "0" || value == "false" || value == "no" || value == "off")
+        return false;
+    return defaultValue;
+}
+
+int envPositiveInt(const char *name, int defaultValue, int maxValue)
+{
+    bool ok = false;
+    const int parsed = qgetenv(name).trimmed().toInt(&ok);
+    if (!ok || parsed <= 0)
+        return defaultValue;
+    return qBound(1, parsed, maxValue);
+}
+}
 WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
 {
+    // R20.4 / R18 restore: production FFT rendering is native C++.
+    // The legacy QVariantList/QML bridge is diagnostic opt-in only.
+    m_fftQmlPublish = envEnabled("ISCAN_FFT_QML_PUBLISH", false);
+    m_fftStrictSize = envEnabled("ISCAN_FFT_STRICT_SIZE", true);
+    m_fftMaxBins = envPositiveInt("ISCAN_FFT_MAX_BINS", 65536, 1048576);
+    m_spectrumDisplayBins = envPositiveInt("ISCAN_SPECTRUM_DISPLAY_BINS", 8192, m_fftMaxBins);
+    m_waterfallDisplayBins = envPositiveInt("ISCAN_WATERFALL_DISPLAY_BINS", 1280, m_fftMaxBins);
+
+    qInfo().noquote() << "[R20.4 FFT Runtime]"
+                      << "qmlPublish=" << m_fftQmlPublish
+                      << "strictSize=" << m_fftStrictSize
+                      << "maxBins=" << m_fftMaxBins
+                      << "spectrumDisplayBins=" << m_spectrumDisplayBins
+                      << "waterfallDisplayBins=" << m_waterfallDisplayBins
+                      << "renderer=native-qquickpainteditem";
     // Connect Qt signals exactly once. connectToServer() may be called again for
     // reconnect/target changes without multiplying message handlers.
     connect(&webSocket, &QWebSocket::connected,
@@ -21,10 +60,22 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
     connect(&resetSQL, &QTimer::timeout,
             this, &WebSocketClient::resetSQLCount, Qt::UniqueConnection);
     resetSQL.setInterval(100);
+
+    connect(&webSocket, &QWebSocket::disconnected,
+            this, &WebSocketClient::onDisconnected, Qt::UniqueConnection);
+    connect(&webSocket,
+            static_cast<void (QWebSocket::*)(QAbstractSocket::SocketError)>(&QWebSocket::error),
+            this, &WebSocketClient::onSocketError, Qt::UniqueConnection);
+
+    m_reconnectTimer.setSingleShot(true);
+    connect(&m_reconnectTimer, &QTimer::timeout,
+            this, &WebSocketClient::attemptReconnect, Qt::UniqueConnection);
 }
 
 WebSocketClient::~WebSocketClient()
 {
+    m_shuttingDown = true;
+    m_reconnectTimer.stop();
     resetSQL.stop();
     if (webSocket.state() != QAbstractSocket::UnconnectedState)
         webSocket.close();
@@ -51,9 +102,13 @@ void WebSocketClient::setFftUiActive(bool active)
 
     m_fftUiActive = active;
 
-    // Make the first frame after entering the Spectrum page immediate, while
-    // ensuring an old timer state cannot burst several QML deliveries.
+    // Make the first frame after entering the Spectrum page immediate.
     m_fftUiPublishTimer.invalidate();
+    m_spectrumDisplayTimer.invalidate();
+    m_waterfallDisplayTimer.invalidate();
+    m_fftAutoScaleTimer.invalidate();
+    m_fftAutoScaleValid = false;
+    emit fftAutoScaleStatsChanged();
 
     qInfo().noquote() << "[FFT Runtime]"
                       << (m_fftUiActive ? "ACTIVE" : "SUSPENDED")
@@ -78,7 +133,13 @@ void WebSocketClient::resetMaxHold()
     m_maxHold.clear();
     if (m_maxHoldPublishTimer.isValid())
         m_maxHoldPublishTimer.restart();
-    emit maxHoldUpdated(QVariantList());
+
+    emit maxHoldDisplayFrame(QVector<float>());
+
+    static const QMetaMethod legacySignal =
+            QMetaMethod::fromSignal(&WebSocketClient::maxHoldUpdated);
+    if (isSignalConnected(legacySignal))
+        emit maxHoldUpdated(QVariantList());
 }
 
 QVariantList WebSocketClient::maxHoldToVariantList() const
@@ -97,17 +158,186 @@ QVariantList WebSocketClient::maxHoldSnapshot() const
 
 bool WebSocketClient::shouldPublishFftUiFrame()
 {
+    if (!m_fftQmlPublish)
+        return false;
     if (!m_fftUiPublishTimer.isValid()) {
         m_fftUiPublishTimer.start();
         return true;
     }
-
     if (m_fftUiPublishTimer.elapsed() >= m_fftUiPublishIntervalMs) {
         m_fftUiPublishTimer.restart();
         return true;
     }
-
     return false;
+}
+
+bool WebSocketClient::shouldPublishSpectrumFrame()
+{
+    if (!m_spectrumDisplayTimer.isValid()) {
+        m_spectrumDisplayTimer.start();
+        return true;
+    }
+    if (m_spectrumDisplayTimer.elapsed() >= m_spectrumDisplayIntervalMs) {
+        m_spectrumDisplayTimer.restart();
+        return true;
+    }
+    return false;
+}
+
+bool WebSocketClient::shouldPublishWaterfallFrame()
+{
+    if (!m_waterfallDisplayTimer.isValid()) {
+        m_waterfallDisplayTimer.start();
+        return true;
+    }
+    if (m_waterfallDisplayTimer.elapsed() >= m_waterfallDisplayIntervalMs) {
+        m_waterfallDisplayTimer.restart();
+        return true;
+    }
+    return false;
+}
+
+bool WebSocketClient::validateFftFrame(const QVector<float> &fftFrame, int payloadBytes)
+{
+    static quint64 rejectCount = 0;
+    QString reason;
+
+    if (payloadBytes >= 0 && (payloadBytes % static_cast<int>(sizeof(float))) != 0) {
+        reason = QStringLiteral("unaligned-payload");
+    } else if (fftFrame.isEmpty()) {
+        reason = QStringLiteral("empty");
+    } else if (fftFrame.size() > m_fftMaxBins) {
+        reason = QStringLiteral("too-many-bins");
+    } else if (m_fftStrictSize && rxconfig.fft_size > 0
+               && fftFrame.size() != rxconfig.fft_size) {
+        reason = QStringLiteral("fft-size-mismatch");
+    } else {
+        for (float value : fftFrame) {
+            if (!std::isfinite(value)) {
+                reason = QStringLiteral("non-finite");
+                break;
+            }
+        }
+    }
+
+    if (reason.isEmpty())
+        return true;
+
+    ++rejectCount;
+    if (rejectCount <= 8 || (rejectCount % 100) == 0) {
+        qWarning().noquote() << "[R20.4 FFT REJECT]"
+                             << "reason=" << reason
+                             << "bins=" << fftFrame.size()
+                             << "expected=" << rxconfig.fft_size
+                             << "payloadBytes=" << payloadBytes
+                             << "count=" << rejectCount;
+    }
+    return false;
+}
+
+QVector<float> WebSocketClient::peakPoolForDisplay(const QVector<float> &source, int limit) const
+{
+    if (source.isEmpty() || limit <= 0)
+        return QVector<float>();
+    if (source.size() <= limit)
+        return source;
+
+    QVector<float> reduced;
+    reduced.resize(limit);
+    const int count = source.size();
+    for (int out = 0; out < limit; ++out) {
+        const int begin = static_cast<int>((static_cast<qint64>(out) * count) / limit);
+        int end = static_cast<int>((static_cast<qint64>(out + 1) * count) / limit);
+        end = qBound(begin + 1, end, count);
+
+        float peak = source.at(begin);
+        for (int i = begin + 1; i < end; ++i)
+            peak = std::max(peak, source.at(i));
+        reduced[out] = peak;
+    }
+    return reduced;
+}
+
+QVariantList WebSocketClient::fftToVariantList(const QVector<float> &fftFrame) const
+{
+    QVariantList list;
+    list.reserve(fftFrame.size());
+    for (float value : fftFrame)
+        list.append(value);
+    return list;
+}
+
+void WebSocketClient::updateFftAutoScaleStats(const QVector<float> &fftFrame)
+{
+    if (fftFrame.size() < 8)
+        return;
+
+    if (!m_fftAutoScaleTimer.isValid()) {
+        m_fftAutoScaleTimer.start();
+    } else if (m_fftAutoScaleTimer.elapsed() < m_fftAutoScaleIntervalMs) {
+        return;
+    } else {
+        m_fftAutoScaleTimer.restart();
+    }
+
+    const int maxSamples = 512;
+    const int stride = std::max(1, fftFrame.size() / maxSamples);
+    m_fftAutoScaleScratch.clear();
+    m_fftAutoScaleScratch.reserve(std::min(maxSamples + 1, fftFrame.size()));
+    for (int i = 0; i < fftFrame.size(); i += stride) {
+        const float value = fftFrame.at(i);
+        if (std::isfinite(value))
+            m_fftAutoScaleScratch.append(value);
+    }
+    if (m_fftAutoScaleScratch.size() < 8)
+        return;
+
+    std::sort(m_fftAutoScaleScratch.begin(), m_fftAutoScaleScratch.end());
+    const int last = m_fftAutoScaleScratch.size() - 1;
+    const int medianIndex = qBound(0, static_cast<int>(std::floor(0.50 * last)), last);
+    const int strongIndex = qBound(0, static_cast<int>(std::floor(0.995 * last)), last);
+    const double noise = m_fftAutoScaleScratch.at(medianIndex);
+    const double strong = m_fftAutoScaleScratch.at(strongIndex);
+
+    if (!std::isfinite(noise) || !std::isfinite(strong))
+        return;
+
+    const bool changed = !m_fftAutoScaleValid
+            || !qFuzzyCompare(m_fftNoiseDb + 1.0, noise + 1.0)
+            || !qFuzzyCompare(m_fftStrongDb + 1.0, strong + 1.0);
+    m_fftNoiseDb = noise;
+    m_fftStrongDb = strong;
+    m_fftAutoScaleValid = true;
+    if (changed)
+        emit fftAutoScaleStatsChanged();
+}
+
+void WebSocketClient::publishNativeFftFrames(const QVector<float> &fftFrame)
+{
+    if (!m_fftUiActive || fftFrame.isEmpty())
+        return;
+
+    updateFftAutoScaleStats(fftFrame);
+
+    if (shouldPublishSpectrumFrame())
+        emit spectrumDisplayFrame(peakPoolForDisplay(fftFrame, m_spectrumDisplayBins));
+
+    if (shouldPublishWaterfallFrame())
+        emit waterfallDisplayFrame(peakPoolForDisplay(fftFrame, m_waterfallDisplayBins));
+
+    if (shouldPublishFftUiFrame()) {
+        const QVariantList legacy = fftToVariantList(fftFrame);
+        emit fftFrameUpdated(legacy);
+
+        static const QMetaMethod spectrumSignal =
+                QMetaMethod::fromSignal(&WebSocketClient::spectrumUpdated);
+        static const QMetaMethod waterfallSignal =
+                QMetaMethod::fromSignal(&WebSocketClient::waterfallUpdated);
+        if (isSignalConnected(spectrumSignal))
+            emit spectrumUpdated(legacy);
+        if (isSignalConnected(waterfallSignal))
+            emit waterfallUpdated(legacy);
+    }
 }
 
 void WebSocketClient::prepareMaxHold(int count)
@@ -143,11 +373,14 @@ void WebSocketClient::publishMaxHoldIfDue()
     if (!m_maxHoldPublishTimer.isValid())
         m_maxHoldPublishTimer.start();
 
-    // Max Hold is accumulated on every native FFT frame, but the visual line
-    // needs only a low-rate snapshot. 5 Hz removes another full-span
-    // QVariantList transfer without changing the held peak data itself.
     if (m_maxHoldPublishTimer.elapsed() >= m_maxHoldPublishIntervalMs) {
-        emit maxHoldUpdated(maxHoldToVariantList());
+        emit maxHoldDisplayFrame(peakPoolForDisplay(m_maxHold, m_spectrumDisplayBins));
+
+        static const QMetaMethod legacySignal =
+                QMetaMethod::fromSignal(&WebSocketClient::maxHoldUpdated);
+        if (isSignalConnected(legacySignal))
+            emit maxHoldUpdated(maxHoldToVariantList());
+
         m_maxHoldPublishTimer.restart();
     }
 }
@@ -171,21 +404,90 @@ void WebSocketClient::connectToServer(const QUrl &url)
         return;
     }
 
-    // There is one receiver backend socket. Close an old target before opening
-    // another; signal connections live in the constructor and are not duplicated.
-    if (webSocket.state() != QAbstractSocket::UnconnectedState)
-        webSocket.close();
+    m_shuttingDown = false;
+    m_targetUrl = url;
+    m_reconnectDelayMs = 1000;
+    m_reconnectTimer.stop();
 
     m_explicitSquelchSeen = false;
     sqlCount = 3;
     if (!resetSQL.isActive())
         resetSQL.start();
 
-    qInfo() << "[ASTRARX-BACKEND] opening" << url;
-    webSocket.open(url);
+    if (webSocket.state() == QAbstractSocket::UnconnectedState) {
+        openBackendSocket();
+    } else {
+        qInfo() << "[ASTRARX-BACKEND] closing previous socket before target reopen";
+        webSocket.close();
+        scheduleReconnect(QStringLiteral("target-change"));
+    }
+}
+
+void WebSocketClient::openBackendSocket()
+{
+    if (m_shuttingDown || !m_targetUrl.isValid())
+        return;
+    if (webSocket.state() != QAbstractSocket::UnconnectedState)
+        return;
+
+    qInfo() << "[ASTRARX-BACKEND] opening" << m_targetUrl;
+    webSocket.open(m_targetUrl);
+}
+
+void WebSocketClient::scheduleReconnect(const QString &reason)
+{
+    if (m_shuttingDown || !m_targetUrl.isValid())
+        return;
+    if (webSocket.state() == QAbstractSocket::ConnectedState)
+        return;
+    if (m_reconnectTimer.isActive())
+        return;
+
+    const int delayMs = qBound(1000, m_reconnectDelayMs, 15000);
+    qWarning() << "[ASTRARX-BACKEND] reconnect scheduled"
+               << "reason=" << reason
+               << "delay_ms=" << delayMs;
+    m_reconnectTimer.start(delayMs);
+    m_reconnectDelayMs = qMin(15000, delayMs * 2);
+}
+
+void WebSocketClient::attemptReconnect()
+{
+    if (m_shuttingDown || webSocket.state() == QAbstractSocket::ConnectedState)
+        return;
+
+    if (webSocket.state() != QAbstractSocket::UnconnectedState) {
+        scheduleReconnect(QStringLiteral("socket-not-yet-unconnected"));
+        return;
+    }
+
+    openBackendSocket();
+}
+
+void WebSocketClient::onDisconnected()
+{
+    qWarning() << "[ASTRARX-BACKEND] disconnected";
+
+    // Release local playback resources and stale queued speech while the RF
+    // backend is unavailable. Reconnect is transparent to QML.
+    if (hdAudioPlayer)
+        hdAudioPlayer->stop();
+    if (sdAudioPlayer)
+        sdAudioPlayer->stop();
+
+    scheduleReconnect(QStringLiteral("disconnected"));
+}
+
+void WebSocketClient::onSocketError(QAbstractSocket::SocketError error)
+{
+    Q_UNUSED(error)
+    qWarning() << "[ASTRARX-BACKEND] socket error:" << webSocket.errorString();
+    scheduleReconnect(QStringLiteral("socket-error"));
 }
 
 void WebSocketClient::onConnected() {
+    m_reconnectTimer.stop();
+    m_reconnectDelayMs = 1000;
     m_explicitSquelchSeen = false;
     qDebug() << "Connected to receiver backend.";
     webSocket.sendTextMessage("SERVER DE CLIENT client=openwebrx.js type=receiver");
@@ -193,8 +495,9 @@ void WebSocketClient::onConnected() {
     // sendDspControl(-75000, 75000, 0, "wfm", 3, -1250000, -150, false);
     sendDspAction("start") ;
 
-    hdAudioPlayer->start();
-    sdAudioPlayer->start();
+    // Audio players start lazily on the first type-2/type-4 packet. This keeps
+    // the wire/UI contract unchanged while avoiding two unconditional ALSA opens
+    // at every backend connection.
     qDebug() << "address hdAudioPlayer::s" << hdAudioPlayer;
     emit openwebrxConnected();
 }
@@ -215,6 +518,7 @@ void WebSocketClient::resetSQLCount()
 }
 void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 {
+    CrashDiagnostics::checkpoint(CrashDiagnostics::CpWsBinary);
     if (message.isEmpty())
         return;
 
@@ -240,83 +544,63 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
         if (payloadBytes <= 0)
             break;
 
-        // Critical CPU gate: the display cannot use every incoming FFT frame.
-        // Decide before QVariant allocation/boxing and before Qt->QML delivery.
-        // Native Max Hold may still consume every frame when enabled.
-        const bool publishUiFrame = shouldPublishFftUiFrame();
-        const bool needNativeFrame = m_maxHoldEnabled;
-
-        if (!publishUiFrame && !needNativeFrame)
-            break;
-
-        QVariantList fftFrame;
+        m_fftDecodeScratch.clear();
 
         if (rxconfig.fft_compression == "none") {
-            const int sampleCount = payloadBytes / static_cast<int>(sizeof(float));
-            if (sampleCount <= 0)
+            if ((payloadBytes % static_cast<int>(sizeof(float))) != 0) {
+                // validateFftFrame() also documents this contract, but reject
+                // before allocating an impossible partial float vector.
+                static quint64 unalignedRejects = 0;
+                ++unalignedRejects;
+                if (unalignedRejects <= 8 || (unalignedRejects % 100) == 0) {
+                    qWarning() << "[R20.4 FFT REJECT] unaligned-payload"
+                               << "bytes=" << payloadBytes
+                               << "count=" << unalignedRejects;
+                }
                 break;
-
-            if (publishUiFrame)
-                fftFrame.reserve(sampleCount);
-            if (needNativeFrame)
-                prepareMaxHold(sampleCount);
-
-            const char *payload = message.constData() + 1;
-            for (int i = 0; i < sampleCount; ++i) {
-                float value = 0.0f;
-                std::memcpy(&value,
-                            payload + i * static_cast<int>(sizeof(float)),
-                            sizeof(float));
-
-                if (needNativeFrame)
-                    updateMaxHoldValue(i, value);
-                if (publishUiFrame)
-                    fftFrame.append(value);
             }
 
-            if (needNativeFrame)
-                publishMaxHoldIfDue();
+            const int sampleCount = payloadBytes / static_cast<int>(sizeof(float));
+            if (sampleCount <= 0 || sampleCount > m_fftMaxBins) {
+                qWarning() << "[R20.4 FFT REJECT] invalid-bin-count"
+                           << "bins=" << sampleCount
+                           << "max=" << m_fftMaxBins;
+                break;
+            }
+
+            m_fftDecodeScratch.resize(sampleCount);
+            std::memcpy(m_fftDecodeScratch.data(),
+                        message.constData() + 1,
+                        static_cast<size_t>(sampleCount) * sizeof(float));
         }
         else if (rxconfig.fft_compression == "adpcm") {
             fft_codec.reset();
-
             const QByteArray payloadView = QByteArray::fromRawData(
                         message.constData() + 1,
                         payloadBytes);
-
-            // Decode into one reusable native vector. Dropped UI frames never
-            // allocate/box QVariant values; Max Hold can still see every frame.
-            fft_codec.decodeScaledToVector(
-                        payloadView,
-                        COMPRESS_FFT_PAD_N,
-                        0.01f,
-                        m_fftDecodeScratch);
-
-            if (needNativeFrame)
-                updateMaxHold(m_fftDecodeScratch);
-
-            if (publishUiFrame) {
-                fftFrame.reserve(m_fftDecodeScratch.size());
-                for (float value : m_fftDecodeScratch)
-                    fftFrame.append(value);
-            }
+            fft_codec.decodeScaledToVector(payloadView,
+                                           COMPRESS_FFT_PAD_N,
+                                           0.01f,
+                                           m_fftDecodeScratch);
+        }
+        else {
+            qWarning() << "[R20.4 FFT REJECT] unsupported compression"
+                       << rxconfig.fft_compression;
+            break;
         }
 
-        if (publishUiFrame && !fftFrame.isEmpty()) {
-            emit fftFrameUpdated(fftFrame);
+        if (!validateFftFrame(m_fftDecodeScratch,
+                              rxconfig.fft_compression == "none" ? payloadBytes : -1))
+            break;
 
-            // Preserve legacy direct consumers without duplicate cost in the
-            // normal project path.
-            static const QMetaMethod spectrumSignal =
-                    QMetaMethod::fromSignal(&WebSocketClient::spectrumUpdated);
-            static const QMetaMethod waterfallSignal =
-                    QMetaMethod::fromSignal(&WebSocketClient::waterfallUpdated);
+        // Full-resolution native Max Hold remains exact. Display frames are
+        // reduced only after this stage.
+        updateMaxHold(m_fftDecodeScratch);
 
-            if (isSignalConnected(spectrumSignal))
-                emit spectrumUpdated(fftFrame);
-            if (isSignalConnected(waterfallSignal))
-                emit waterfallUpdated(fftFrame);
-        }
+        // Production path: QVector<float> -> native QQuickPaintedItem.
+        // Legacy QVariantList/QML publication is disabled unless explicitly
+        // enabled with ISCAN_FFT_QML_PUBLISH=1.
+        publishNativeFftFrames(m_fftDecodeScratch);
         break;
     }
 
@@ -329,6 +613,7 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 
                 if (sdAudioPlayer)
                     sdAudioPlayer->pushAudio(data);
+                CrashDiagnostics::checkpoint(CrashDiagnostics::CpWsAudioPostPush);
             } else {
                 qWarning() << "Invalid PCM size:" << data.size();
             }
@@ -356,6 +641,7 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 
                 if (hdAudioPlayer)
                     hdAudioPlayer->pushAudio(data);
+                CrashDiagnostics::checkpoint(CrashDiagnostics::CpWsAudioPostPush);
             } else {
                 qWarning() << "Invalid PCM size:" << data.size();
             }
@@ -370,6 +656,7 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
 
             if (hdAudioPlayer)
                 hdAudioPlayer->pushAudio(pcm);
+            CrashDiagnostics::checkpoint(CrashDiagnostics::CpWsAudioPostPush);
         }
 
         if (!m_explicitSquelchSeen) {
@@ -389,6 +676,7 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
         qWarning() << "Unknown binary message type:" << type;
         break;
     }
+    CrashDiagnostics::checkpoint(CrashDiagnostics::CpWsBinaryReturn);
 }
 
 void WebSocketClient::handleConfigMessage(const QJsonObject &config)
@@ -731,21 +1019,19 @@ void WebSocketClient::applySoftwareVolume(QByteArray &pcm16)
 
 void WebSocketClient::processAdpcmAndPlay(const QByteArray &adpcmData)
 {
-    PCMImaAdpcmCodec *m_decoder;
     if (!hdAudioPlayer) {
         qWarning() << "[AudioManager] hdAudioPlayer is null" << hdAudioPlayer;
-        return;
-    }
-    if (!m_decoder) {
-        qWarning() << "[AudioManager] decoder is null" << m_decoder;
         return;
     }
     if (adpcmData.isEmpty())
         return;
 
-    // 1) decode ADPCM → PCM16
-    QByteArray adpcmChunk = adpcmData; // from WebSocket
-    QVector<qint16> pcmSamples = m_decoder->decodeWithSync(adpcmChunk);
+    // Match the active type-4 ADPCM path: decoder lifetime is local to the
+    // synchronized packet. The previous uninitialized raw pointer was undefined
+    // behavior and could dereference a random address.
+    PCMImaAdpcmCodec decoder;
+    QByteArray adpcmChunk = adpcmData;
+    QVector<qint16> pcmSamples = decoder.decodeWithSync(adpcmChunk);
 
     if (pcmSamples.isEmpty())
         return;
@@ -766,7 +1052,7 @@ void WebSocketClient::playTestTone()
         return;
     }
 
-    const int sampleRate = 48000;
+    const int sampleRate = qMax(1, hdAudioPlayer->sampleRate());
     const float freq = 1000.0f;    // 1 kHz
     const int durationMs = 200;    // 0.2 s
     const int totalSamples = sampleRate * durationMs / 1000;

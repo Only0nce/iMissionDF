@@ -71,8 +71,9 @@ void DspInitWorker::init()
         sigma->setMixerVolume(AUDIOIN_VOLUME_CH3_ADDRESS,SIDETONE_VOLUME_CH3_MODE_ADDRESS,SIDETONE_VOLUME_CH3_MODE_VALUE,1);
         sigma->setMixerVolume(AUDIOIN_VOLUME_CH4_ADDRESS,SIDETONE_VOLUME_CH4_MODE_ADDRESS,SIDETONE_VOLUME_CH4_MODE_VALUE,1);
 
-        sigma->setFIRfilter(MOD_FIR1_ALG0_FIRSIGMA300ALG1FIRCOEFF0_ADDR,MOD_FIR1_COUNT,nullptr); // (คุณ set จริงใน main ต่อ)
-        sigma->setFIRfilter(MOD_FIR2_ALG0_FIRSIGMA300ALG5FIRCOEFF0_ADDR,MOD_FIR2_COUNT,nullptr);
+        // FIR coefficients are programmed later by the authoritative main
+        // initialization path. Never call setFIRfilter() with nullptr: the
+        // implementation dereferences every coefficient entry.
 
         // input gains
         codec->setInputGain(CODECCH1_I2S1, m_in1);

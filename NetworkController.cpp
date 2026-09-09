@@ -1899,6 +1899,57 @@ QVariantMap NetworkController::queryDhcpInfo(const QString &iface)
     return parseDeviceShow(iface);
 }
 
+void NetworkController::requestLoadAllLanConfig()
+{
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self]() {
+        NetworkController worker;
+        const QVariantMap result = worker.loadAllLanConfig();
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, result]() {
+            if (self)
+                emit self->lanConfigReady(result);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void NetworkController::requestLoadConfig(const QString &iface)
+{
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self, iface]() {
+        NetworkController worker;
+        const QVariantMap result = worker.loadConfig(iface);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, iface, result]() {
+            if (self)
+                emit self->lanInterfaceConfigReady(iface, result);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void NetworkController::requestDhcpInfo(const QString &iface)
+{
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self, iface]() {
+        NetworkController worker;
+        const QVariantMap result = worker.queryDhcpInfo(iface);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, iface, result]() {
+            if (self)
+                emit self->dhcpInfoReady(iface, result);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
 // ============================================================
 // WiFi
 // ============================================================
@@ -3090,6 +3141,24 @@ QStringList NetworkController::cellularModuleLogs(int maxLines)
 }
 
 
+bool NetworkController::isCellularRealtimeActive() const
+{
+#if HARDWARE_HAS_5G
+    return m_cellularRealtimeTimer && m_cellularRealtimeTimer->isActive();
+#else
+    return false;
+#endif
+}
+
+int NetworkController::cellularRealtimeIntervalMs() const
+{
+#if HARDWARE_HAS_5G
+    return m_cellularRealtimeTimer ? m_cellularRealtimeTimer->interval() : 8000;
+#else
+    return 8000;
+#endif
+}
+
 void NetworkController::startCellularRealtime(int intervalMs)
 {
 #if HARDWARE_HAS_5G
@@ -3097,14 +3166,20 @@ void NetworkController::startCellularRealtime(int intervalMs)
         return;
 
     intervalMs = qBound(5000, intervalMs, 30000);
+    m_cellularRealtimeDesiredActive = true;
 
     if (m_cellularRealtimeTimer->interval() != intervalMs)
         m_cellularRealtimeTimer->setInterval(intervalMs);
 
-    qWarning() << "[5G] startCellularRealtime intervalMs =" << intervalMs;
-    // Emit cached/current status once, then continue at the throttled interval.
-    pollCellularRealtime();
+    if (m_cellularRealtimeSuspended) {
+        qWarning() << "[5G] startCellularRealtime deferred while reset is active intervalMs =" << intervalMs;
+        return;
+    }
 
+    qWarning() << "[5G] startCellularRealtime intervalMs =" << intervalMs;
+    // R20.2: callers already request an explicit asynchronous status snapshot.
+    // Do not launch a second duplicate cellularStatus() query here. The timer
+    // owns subsequent periodic refreshes.
     if (!m_cellularRealtimeTimer->isActive())
         m_cellularRealtimeTimer->start();
 #else
@@ -3115,9 +3190,41 @@ void NetworkController::startCellularRealtime(int intervalMs)
 void NetworkController::stopCellularRealtime()
 {
 #if HARDWARE_HAS_5G
+    m_cellularRealtimeDesiredActive = false;
     if (m_cellularRealtimeTimer)
         m_cellularRealtimeTimer->stop();
     qWarning() << "[5G] stopCellularRealtime";
+#endif
+}
+
+void NetworkController::suspendCellularRealtime()
+{
+#if HARDWARE_HAS_5G
+    m_cellularRealtimeSuspended = true;
+    if (m_cellularRealtimeTimer)
+        m_cellularRealtimeTimer->stop();
+    qWarning() << "[5G] suspendCellularRealtime desiredActive =" << m_cellularRealtimeDesiredActive;
+#endif
+}
+
+void NetworkController::resumeCellularRealtime(bool immediatePoll)
+{
+#if HARDWARE_HAS_5G
+    m_cellularRealtimeSuspended = false;
+    if (!m_cellularRealtimeTimer || !m_cellularRealtimeDesiredActive) {
+        qWarning() << "[5G] resumeCellularRealtime no active request";
+        return;
+    }
+
+    qWarning() << "[5G] resumeCellularRealtime intervalMs ="
+               << m_cellularRealtimeTimer->interval()
+               << "immediatePoll =" << immediatePoll;
+    if (immediatePoll)
+        pollCellularRealtime();
+    if (!m_cellularRealtimeTimer->isActive())
+        m_cellularRealtimeTimer->start();
+#else
+    Q_UNUSED(immediatePoll)
 #endif
 }
 
@@ -3140,18 +3247,46 @@ QVariantMap NetworkController::cellularRealtimeSnapshot()
 void NetworkController::pollCellularRealtime()
 {
 #if HARDWARE_HAS_5G
-    QVariantMap status = cellularStatus();
-    status[QStringLiteral("menuID")] = QStringLiteral("lte_state");
-    status[QStringLiteral("realtime")] = true;
-    status[QStringLiteral("timestamp")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+    // R20.2: cellularStatus() performs several service/device/log probes and can
+    // block for seconds. Never execute it on the Qt GUI/WebSocket audio thread.
+    if (m_cellularRealtimeSuspended || m_cellularRealtimeQueryInFlight)
+        return;
 
-    const QJsonObject obj = QJsonObject::fromVariantMap(status);
-    const QString compact = QString::fromUtf8(QJsonDocument(obj).toJson(QJsonDocument::Compact));
+    m_cellularRealtimeQueryInFlight = true;
+    QPointer<NetworkController> self(this);
 
-    if (compact != m_lastCellularRealtimeJson) {
-        m_lastCellularRealtimeJson = compact;
-        emit cellularRealtimeStatusChanged(status);
-    }
+    QThread *thread = QThread::create([self]() {
+        NetworkController worker;
+        QVariantMap status = worker.cellularStatus();
+
+        if (!self)
+            return;
+
+        QMetaObject::invokeMethod(self, [self, status]() mutable {
+            if (!self)
+                return;
+
+            self->m_cellularRealtimeQueryInFlight = false;
+            if (self->m_cellularRealtimeSuspended || !self->m_cellularRealtimeDesiredActive)
+                return;
+
+            status[QStringLiteral("menuID")] = QStringLiteral("lte_state");
+            status[QStringLiteral("realtime")] = true;
+            status[QStringLiteral("timestamp")] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+            const QJsonObject obj = QJsonObject::fromVariantMap(status);
+            const QString compact = QString::fromUtf8(
+                QJsonDocument(obj).toJson(QJsonDocument::Compact));
+
+            if (compact != self->m_lastCellularRealtimeJson) {
+                self->m_lastCellularRealtimeJson = compact;
+                emit self->cellularRealtimeStatusChanged(status);
+            }
+        }, Qt::QueuedConnection);
+    });
+
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
 #endif
 }
 

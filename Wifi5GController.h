@@ -31,6 +31,7 @@ private:
     // Query commands can call nmcli/mmcli and may block for seconds.
     // Keep them off the UI thread and only emit compact JSON back to QML.
     void sendSnapshot();
+    void sendWifiConfig(const QString &menuId);
     void sendWifiScan(const QString &iface,
                       const QString &menuId = QStringLiteral("wifiScan"));
     void sendWifiState(const QString &iface, const QString &menuId);

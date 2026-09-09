@@ -96,6 +96,9 @@ void ImaAdpcmCodec::decodeScaledToVector(const QByteArray &data,
 
 qint16 ImaAdpcmCodec::decodeNibble(quint8 nibble)
 {
+    // Keep the table lookup safe even if this helper is called directly in
+    // the future instead of through the currently masked byte-decode paths.
+    nibble &= 0x0F;
     stepIndex += indexTable[nibble];
     stepIndex = std::clamp(stepIndex, 0, 88);
 

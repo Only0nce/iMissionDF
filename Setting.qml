@@ -242,7 +242,11 @@ Item {
             return
         }
 
-        var result = NetworkController.loadAllLanConfig()
+        // R20.2: nmcli/device probing runs off the Qt GUI/audio event loop.
+        NetworkController.requestLoadAllLanConfig()
+    }
+
+    function applyLanInterfacesResult(result) {
         var list = []
         var map = {}
 
@@ -288,11 +292,7 @@ Item {
             statusMessage = "NetworkController is not available"
             return
         }
-        var info = NetworkController.queryDhcpInfo(interfaceName)
-        if (info) {
-            replaceLanInfo(interfaceName, info)
-            applyLanInfo(lanByIface[interfaceName])
-        }
+        NetworkController.requestDhcpInfo(interfaceName)
     }
 
     function loadLanSetting() {
@@ -306,11 +306,7 @@ Item {
             return
         }
 
-        var config = NetworkController.loadConfig(interfaceName)
-        if (config) {
-            replaceLanInfo(interfaceName, config)
-            applyLanInfo(lanByIface[interfaceName])
-        }
+        NetworkController.requestLoadConfig(interfaceName)
     }
 
     function selectLan(iface) {
@@ -365,6 +361,25 @@ Item {
             statusMessage = message
             if (iface === interfaceName)
                 loadLanInterfaces()
+        }
+        function onLanConfigReady(result) {
+            applyLanInterfacesResult(result)
+        }
+        function onLanInterfaceConfigReady(iface, result) {
+            if (iface !== interfaceName)
+                return
+            if (result) {
+                replaceLanInfo(iface, result)
+                applyLanInfo(lanByIface[iface])
+            }
+        }
+        function onDhcpInfoReady(iface, info) {
+            if (iface !== interfaceName)
+                return
+            if (info) {
+                replaceLanInfo(iface, info)
+                applyLanInfo(lanByIface[iface])
+            }
         }
     }
 
@@ -938,8 +953,13 @@ Item {
                 item.initialNetworkPage = "wifi"
                 item.forceSingleNetworkPage = true
                 item.hideInternalNetworkTabs = true
-                item.requestToast.connect(function(text) { statusMessage = text })
             }
+        }
+
+        Connections {
+            target: wifiLoader.item
+            ignoreUnknownSignals: true
+            function onRequestToast(text) { statusMessage = text }
         }
 
         Loader {
@@ -954,8 +974,13 @@ Item {
                 item.initialNetworkPage = "cellular"
                 item.forceSingleNetworkPage = true
                 item.hideInternalNetworkTabs = true
-                item.requestToast.connect(function(text) { statusMessage = text })
             }
+        }
+
+        Connections {
+            target: cellularLoader.item
+            ignoreUnknownSignals: true
+            function onRequestToast(text) { statusMessage = text }
         }
 
 

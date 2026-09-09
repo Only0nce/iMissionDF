@@ -16,6 +16,7 @@ Item {
     property alias volumeHeadphoneCtrlLevel: volumeHeadphoneCtrlLevel
     property real rotate: 270
     property bool mute: true
+    signal muteToggleRequested()
     property string stringVolume: text3.text
     property string stringHead: text4.text
     property string stringAudio: text9.text
@@ -69,14 +70,6 @@ Item {
     //     console.log("after wsClient.isMute():", wsClient.isMute(),mute)
     // }
 
-    Connections {
-        target: wsClient
-        function onMutedChanged(m) {
-            mute = m
-            console.log("mutedChanged ->", m)
-        }
-    }
-
     Rectangle {
         id: rectangle9
         width: 45
@@ -120,10 +113,6 @@ Item {
                 levelmin: 0
                 slider2.value:inivalue
                 progressBar2.value: slider2.value
-                progressBar2.onValueChanged:
-                {
-                    mute = false
-                }
             }
             Text {
                 id: text9
@@ -158,29 +147,7 @@ Item {
                 // rotation: rotate
                 verticalAlignment: Image.AlignVCenter
             }
-            onClicked: {
-                console.log("before VolumeDrawer onClicked Mute software",mute,wsClient.isMute())
-                mute = !mute
-                console.log("after VolumeDrawer onClicked Mute software",mute,wsClient.isMute())
-                if(!mute){
-                    // beforemuteAudio = scanVolLevel
-                    wsClient.setSpeakerVolumeMute(0)
-                    mainWindows.setSqlLevel(0)
-                    mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((0-255)/2).toFixed(1)+'}}')
-                    currentSqlLevel = (0-255)/2
-                    mainWindows.setSqlOffManual();
-                    console.log("currentSqlLevel = (0-255)/2")
-                }
-                else{
-                    wsClient.setSpeakerVolumeMute(1)
-                    mainWindows.setSqlLevel(scanSqlLevel)
-                    mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
-                    currentSqlLevel = (scanSqlLevel-255)/2
-                    mainWindows.setSqlOffManual();
-                    console.log("currentSqlLevel = (255-255)/2")
-                }
-                // mute = !mute
-            }
+            onClicked: muteToggleRequested()
         }
     }
 
@@ -336,7 +303,7 @@ Item {
             width: 45
             height: 45
             anchors.top: parent.top
-            onClicked: { mute = !mute }
+            onClicked: muteToggleRequested()
             enabled: false
             contentItem: Image {
                 visible: true

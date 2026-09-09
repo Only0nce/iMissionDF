@@ -1,4 +1,5 @@
 #include "Mainwindows.h"
+#include "CrashDiagnostics.h"
 #include "logwatcher.h"
 #include "qthread.h"
 #include "InputEventReader.h"
@@ -13,6 +14,9 @@
 #include <QNetworkInterface>
 #include <QNetworkAddressEntry>
 #include <QHostAddress>
+#include <QTimeZone>
+#include <QPointer>
+#include <cmath>
 
 
 bool Mainwindows::getSqlActive() const
@@ -20,14 +24,45 @@ bool Mainwindows::getSqlActive() const
     return currentSQLValue;
 }
 
-Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
+Mainwindows::Mainwindows(QObject *parent)
+    : Mainwindows(nullptr, parent)
+{
+}
+
+Mainwindows::Mainwindows(NetworkController *networkController, QObject *parent)
+    : QObject(parent),
+      netWorkController(networkController ? networkController : new NetworkController(this))
 {
     qInfo().noquote() << "[ASTRARX-COMPAT-BUILD] revision=20260817-bidirectional-span-stability-r10";
+    qInfo().noquote() << "[R20 BACKEND HARDENING] revision=20260909-no-ui-backend-hardening";
+    qInfo().noquote() << "[R20.1 STABILITY] revision=20260909-5g-volume-diagnostics-no-ui";
+    qInfo().noquote() << "[R20.2 STABILITY] revision=20260909-network-qml-lifetime-no-ui";
     #ifdef PLATFORM_JETSON
 //        system("systemctl stop alsarecd.service");
     #endif
     // iPatchServerSocket = new SocketClient;
     socketClientReconnectTimer = new QTimer(this);
+
+    // Keep the historical 500 ms scan cadence without blocking the Qt event
+    // loop for the full 3.2 MHz sweep. No QML/UI contract changes.
+    m_scanFreqTimer = new QTimer(this);
+    m_scanFreqTimer->setInterval(500);
+    m_scanFreqTimer->setSingleShot(false);
+    connect(m_scanFreqTimer, &QTimer::timeout,
+            this, &Mainwindows::sendNextScanFrequencyStep);
+
+    // QML preset writers historically use setfrequency followed by a delayed
+    // dspcontrol. If AstraRX needs longer than that fixed delay, offset_freq can
+    // be applied relative to the old center. Defer only that racing DSP command
+    // until the authoritative center snapshot arrives; timeout falls back to the
+    // legacy behavior so existing workflows are not stranded.
+    m_centerTuneGuardTimer = new QTimer(this);
+    m_centerTuneGuardTimer->setSingleShot(true);
+    m_centerTuneGuardTimer->setInterval(2000);
+    connect(m_centerTuneGuardTimer, &QTimer::timeout, this, [this]() {
+        cancelCenterTuneTransaction(QStringLiteral("confirmation-timeout"), true);
+    });
+
     // wsClient = new WebSocketClient;
     myDatabase = new Database("ScanRF","orinnx","Ifz8zean6868**","127.0.0.1");
     qWarning() << "MYDATABASE ONLYONE";
@@ -68,13 +103,22 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
         emit updateReceiverFreq(static_cast<double>(centerHz),
                                 offsetHz,
                                 static_cast<double>(receiverHz));
+        handleCenterTuneConfirmation(centerHz);
     });
     connect(&wsClient,&WebSocketClient::openwebrxConnected,this,&Mainwindows::openwebrxConnected);
     connect(&wsClient,&WebSocketClient::updateProfiles,this,&Mainwindows::updateProfiles);
     connect(&wsClient,&WebSocketClient::onSQLChanged,this,&Mainwindows::onSQLChanged);
     connect(&wsClient,&WebSocketClient::onTemperatureChanged,this,&Mainwindows::onTemperatureChanged);
     connect(&wsClient, &WebSocketClient::backendError,
-            this, &Mainwindows::frequencyTuneError);
+            this, [this](const QString &message) {
+        // A rejected/failed source retune must not later apply a deferred DSP
+        // offset against an unrelated center frequency.
+        cancelCenterTuneTransaction(QStringLiteral("backend-error"), false);
+        emit frequencyTuneError(message);
+    });
+    connect(&wsClient.webSocket, &QWebSocket::disconnected, this, [this]() {
+        cancelCenterTuneTransaction(QStringLiteral("backend-disconnected"), false);
+    });
     connect(fileUpdateWatcher,&FileUpdateWatcher::fileAppearedOrChanged,this,&Mainwindows::fileUpdated);
 
     connect(wsServer,&ChatServer::onNewClientConneced,this,&Mainwindows::onNewClientConneced);
@@ -105,7 +149,7 @@ Mainwindows::Mainwindows(QObject *parent) : QObject(parent)
     //    connect(wsServer, &ChatServer::getServerHomePage,this, &Mainwindows::getServerHomePage);
     //    connect(this, &Mainwindows::SquelchStatusChange,wsServer, &ChatServer::SquelchStatusChange);
 
-    QTimer::singleShot(1000, [manager]() {
+    QTimer::singleShot(1000, manager, [manager]() {
         manager->loadConfig(ALSARECCONF);
         manager->applyAllConfigs();
     });
@@ -274,7 +318,12 @@ Mainwindows::~Mainwindows()
     qInfo().noquote() << "[Mainwindows] shutdown begin";
     if (m_sqlWatcherTimer)
         m_sqlWatcherTimer->stop();
-    socketClientReconnectTimer->stop();
+    if (m_scanFreqTimer)
+        m_scanFreqTimer->stop();
+    if (m_centerTuneGuardTimer)
+        m_centerTuneGuardTimer->stop();
+    if (socketClientReconnectTimer)
+        socketClientReconnectTimer->stop();
     qInfo().noquote() << "[Mainwindows] shutdown complete: no raw SQL watcher/SetFreqWorker threads";
 }
 
@@ -823,6 +872,10 @@ Q_INVOKABLE void Mainwindows::setSqlOffManual()
 Q_INVOKABLE void Mainwindows::setSpeakerVolume(const unsigned char volume)
 {
     qDebug() << "setSpeakerVolume" << volume;
+    requestedSpeakerVolume = volume;
+    CrashDiagnostics::event(CrashDiagnostics::CpVolumeHardware,
+                            "VOLUME", "speaker hardware apply", this,
+                            requestedSpeakerVolume, volume);
     VolumeOutCH4 = volume;
     if(volume < 165){
         VolumeOutCH4 = 50;
@@ -850,6 +903,10 @@ Q_INVOKABLE void Mainwindows::setSpeakerVolume(const unsigned char volume)
 
 Q_INVOKABLE void Mainwindows::setHeadphoneVolume(const unsigned char volume)
 {
+    requestedHeadphoneVolume = volume;
+    CrashDiagnostics::event(CrashDiagnostics::CpVolumeHardware,
+                            "VOLUME", "headphone hardware apply", this,
+                            requestedHeadphoneVolume, volume);
     // VolumeOutCH3 = volume;
     // VolumeOutCH4 = volume;
     VolumeOutCH2 = volume;
@@ -863,27 +920,49 @@ Q_INVOKABLE void Mainwindows::setHeadphoneVolume(const unsigned char volume)
 }
 
 
-Q_INVOKABLE void Mainwindows::sCanfreq(){
-    qDebug() << "let's begin sCanfreq";
+Q_INVOKABLE void Mainwindows::sCanfreq()
+{
+    if (!m_scanFreqTimer)
+        return;
 
-    QJsonObject params;
-    QJsonObject msg;
-    int i=-1600000;
-
-    while(i<1600000){
-        params["offset_freq"] = i;
-        msg["type"]   = QStringLiteral("dspcontrol");
-        msg["params"] = params;
-
-        const QString json = QString::fromUtf8(QJsonDocument(msg).toJson(QJsonDocument::Compact));
-        sendmessage(json);               // หรือ wsClient->sendTextMessage(json);
-        qDebug() << "json" << json;
-        QThread::msleep(500);
-        i = i+1000;
+    if (m_scanFreqTimer->isActive()) {
+        qWarning() << "sCanfreq already running";
+        return;
     }
 
-    qDebug() << "sCanfreq done";
+    qDebug() << "let's begin sCanfreq";
+    m_scanFreqOffsetHz = -1600000;
+
+    // Preserve the old behavior where the first point is sent immediately.
+    sendNextScanFrequencyStep();
+    if (m_scanFreqOffsetHz < 1600000)
+        m_scanFreqTimer->start();
 }
+
+void Mainwindows::sendNextScanFrequencyStep()
+{
+    if (m_scanFreqOffsetHz >= 1600000) {
+        if (m_scanFreqTimer)
+            m_scanFreqTimer->stop();
+        qDebug() << "sCanfreq done";
+        return;
+    }
+
+    QJsonObject params;
+    params["offset_freq"] = m_scanFreqOffsetHz;
+
+    QJsonObject msg;
+    msg["type"] = QStringLiteral("dspcontrol");
+    msg["params"] = params;
+
+    const QString json = QString::fromUtf8(
+        QJsonDocument(msg).toJson(QJsonDocument::Compact));
+    sendmessage(json);
+    qDebug() << "json" << json;
+
+    m_scanFreqOffsetHz += 1000;
+}
+
 #ifdef PLATFORM_JETSON
 
 void Mainwindows::scheduleReset5GModemNoReboot(int delayMs)
@@ -915,17 +994,63 @@ void Mainwindows::reset5GModemNoReboot()
         return;
     }
 
-    qWarning() << "[5G] reset5GModemNoReboot background start";
+    CrashDiagnostics::event(CrashDiagnostics::CpMainReset5G,
+                            "5G", "reset start", this);
+
+    // Cellular status collection is synchronous and runs on the Qt/main thread.
+    // During PCIe/QMI recovery some probes can block for seconds, starving the
+    // AstraRX WebSocket receive path before audio reaches the ALSA worker.
+    // Suspend only that polling during reset; the page/UI itself is unchanged.
+    m_resumeCellularRealtimeAfter5GReset = false;
+    m_cellularRealtimeIntervalBefore5GResetMs = 8000;
+    if (netWorkController) {
+        m_resumeCellularRealtimeAfter5GReset = netWorkController->isCellularRealtimeActive();
+        m_cellularRealtimeIntervalBefore5GResetMs = netWorkController->cellularRealtimeIntervalMs();
+        netWorkController->suspendCellularRealtime();
+    }
+
+    qWarning() << "[5G] reset5GModemNoReboot background start"
+               << "resumeRealtime=" << m_resumeCellularRealtimeAfter5GReset
+               << "intervalMs=" << m_cellularRealtimeIntervalBefore5GResetMs;
     emit reset5GModemStarted();
 
-    QtConcurrent::run([this]() {
-        const bool ready = reset5GModemNoRebootWorker();
+    const QPointer<Mainwindows> self(this);
+    QtConcurrent::run([self]() {
+        // The worker is intentionally static: it performs OS/service recovery
+        // only and must never dereference a Mainwindows that may be shutting down.
+        const bool ready = Mainwindows::reset5GModemNoRebootWorker();
 
-        QMetaObject::invokeMethod(this, [this, ready]() {
-            m_reset5GBusy.storeRelease(0);
+        if (!self)
+            return;
+
+        QMetaObject::invokeMethod(self.data(), [self, ready]() {
+            if (!self)
+                return;
+
+            const int realtimeIntervalMs = self->m_cellularRealtimeIntervalBefore5GResetMs;
+            self->m_resumeCellularRealtimeAfter5GReset = false;
+            self->m_reset5GBusy.storeRelease(0);
 
             qWarning() << "[5G] reset5GModemNoReboot background finished ready =" << ready;
-            emit reset5GModemFinished(ready);
+            CrashDiagnostics::event(CrashDiagnostics::CpMainReset5G,
+                                    "5G", ready ? "reset finished ready" : "reset finished failed",
+                                    self.data(), ready ? 1 : 0, realtimeIntervalMs);
+
+            // Publish completion before any status refresh. This guarantees the
+            // existing Restarting -> Restart transition is not held hostage by
+            // a slow modem/status command.
+            emit self->reset5GModemFinished(ready);
+
+            // Resume the exact polling cadence that was active before reset.
+            // Defer it slightly so the completion signal/QML state is processed
+            // before a potentially expensive status snapshot starts.
+            if (self->netWorkController) {
+                QPointer<Mainwindows> resumeSelf(self);
+                QTimer::singleShot(250, self.data(), [resumeSelf]() {
+                    if (resumeSelf && resumeSelf->netWorkController)
+                        resumeSelf->netWorkController->resumeCellularRealtime(false);
+                });
+            }
         }, Qt::QueuedConnection);
     });
 }
@@ -1043,24 +1168,37 @@ bool Mainwindows::reset5GModemNoRebootWorker()
         return false;
     };
 
-    auto dump5GDebug = [&]() {
-        runShell("dump 5G debug",
-                 "echo '=== service ==='; "
-                 "systemctl status 5g-pcie-recover.service --no-pager -l | tail -80 || true; "
-                 "systemctl status quectel-cm.service --no-pager -l | tail -80 || true; "
-                 "echo '=== lspci ==='; "
-                 "lspci -Dnn | grep -i -E '1eac|100b|mhi|quectel' || true; "
-                 "echo '=== /dev/mhi* ==='; "
-                 "ls -l /dev/mhi* 2>/dev/null || true; "
-                 "echo '=== rmnet/wwan ==='; "
-                 "ip -br link | grep -E 'rmnet|wwan|mhi' || true; "
-                 "echo '=== recover log ==='; "
-                 "tail -120 /var/log/5g-pcie-recover.log 2>/dev/null || true; "
-                 "echo '=== quectel log ==='; "
-                 "tail -120 /tmp/quectel-CM.log 2>/dev/null || true; "
-                 "echo '=== dmesg ==='; "
-                 "dmesg -T | grep -i -E 'mhi|qmi|rmnet|pcie|quectel|1eac|aer|fatal|reset' | tail -120",
-                 30000);
+    auto schedule5GDebugDump = []() {
+        // Diagnostics must never extend the user-visible reset transaction.
+        // Collect the same evidence in a detached process after failure and
+        // write it to a stable file for field inspection.
+        const QString cmd =
+            "echo '=== service ==='; "
+            "systemctl status 5g-pcie-recover.service --no-pager -l | tail -80 || true; "
+            "systemctl status quectel-cm.service --no-pager -l | tail -80 || true; "
+            "echo '=== lspci ==='; "
+            "lspci -Dnn | grep -i -E '1eac|100b|mhi|quectel' || true; "
+            "echo '=== /dev/mhi* ==='; "
+            "ls -l /dev/mhi* 2>/dev/null || true; "
+            "echo '=== rmnet/wwan ==='; "
+            "ip -br link | grep -E 'rmnet|wwan|mhi' || true; "
+            "echo '=== recover log ==='; "
+            "tail -120 /var/log/5g-pcie-recover.log 2>/dev/null || true; "
+            "echo '=== quectel log ==='; "
+            "tail -120 /tmp/quectel-CM.log 2>/dev/null || true; "
+            "echo '=== dmesg ==='; "
+            "dmesg -T | grep -i -E 'mhi|qmi|rmnet|pcie|quectel|1eac|aer|fatal|reset' | tail -120; "
+            "echo '=== captured ==='; date -Is";
+
+        const QString wrapped = QStringLiteral("(%1) > /tmp/iScanMR10-5g-reset-debug.log 2>&1").arg(cmd);
+        qint64 pid = 0;
+        const bool started = QProcess::startDetached(QStringLiteral("sh"),
+                                                     QStringList() << QStringLiteral("-c") << wrapped,
+                                                     QString(),
+                                                     &pid);
+        qWarning() << "[5G] scheduled detached failure diagnostics started=" << started
+                   << "pid=" << pid
+                   << "path=/tmp/iScanMR10-5g-reset-debug.log";
     };
 
     // 1) Stop QConnectManager first.
@@ -1084,14 +1222,14 @@ bool Mainwindows::reset5GModemNoRebootWorker()
 
     if (recoverRet != 0) {
         qWarning() << "[5G] recover service failed ret =" << recoverRet;
-        dump5GDebug();
+        schedule5GDebugDump();
         return false;
     }
 
     // 4) Confirm QMI/rmnet ready before starting quectel-CM.
     if (!waitQmiReady()) {
         qWarning() << "[5G] QMI not ready after recover service";
-        dump5GDebug();
+        schedule5GDebugDump();
         return false;
     }
 
@@ -1102,7 +1240,7 @@ bool Mainwindows::reset5GModemNoRebootWorker()
 
     if (qcmRet != 0) {
         qWarning() << "[5G] quectel-cm.service restart failed ret =" << qcmRet;
-        dump5GDebug();
+        schedule5GDebugDump();
         return false;
     }
 
@@ -1113,11 +1251,9 @@ bool Mainwindows::reset5GModemNoRebootWorker()
 
     if (activeRet != 0) {
         qWarning() << "[5G] quectel-cm.service is not active";
-        dump5GDebug();
+        schedule5GDebugDump();
         return false;
     }
-
-    dump5GDebug();
 
     qWarning() << "[5G] reset5GModemNoRebootWorker done - service mode OK";
     return true;
@@ -1899,6 +2035,59 @@ void Mainwindows::socketClientReconnect()
     // }
 }
 
+void Mainwindows::handleCenterTuneConfirmation(quint64 confirmedCenterHz)
+{
+    if (!m_centerTuneGuardPending || m_centerTuneGuardTargetHz == 0)
+        return;
+
+    const qint64 errorHz = qAbs(static_cast<qint64>(confirmedCenterHz)
+                                - static_cast<qint64>(m_centerTuneGuardTargetHz));
+    if (errorHz > 1)
+        return;
+
+    if (m_centerTuneGuardTimer)
+        m_centerTuneGuardTimer->stop();
+
+    const QString deferred = m_centerTuneDeferredDsp;
+    qInfo() << "[QT5-FREQ-TXN] center confirmed"
+            << "target=" << m_centerTuneGuardTargetHz
+            << "confirmed=" << confirmedCenterHz
+            << "deferred=" << !deferred.isEmpty();
+
+    m_centerTuneGuardPending = false;
+    m_centerTuneGuardTargetHz = 0;
+    m_centerTuneDeferredDsp.clear();
+
+    if (!deferred.isEmpty())
+        sendmessage(deferred);
+}
+
+void Mainwindows::cancelCenterTuneTransaction(const QString &reason, bool flushDeferred)
+{
+    if (!m_centerTuneGuardPending && m_centerTuneDeferredDsp.isEmpty())
+        return;
+
+    if (m_centerTuneGuardTimer)
+        m_centerTuneGuardTimer->stop();
+
+    const QString deferred = m_centerTuneDeferredDsp;
+    qWarning() << "[QT5-FREQ-TXN] end without confirmation"
+               << "reason=" << reason
+               << "target=" << m_centerTuneGuardTargetHz
+               << "flushDeferred=" << flushDeferred
+               << "deferred=" << !deferred.isEmpty();
+
+    m_centerTuneGuardPending = false;
+    m_centerTuneGuardTargetHz = 0;
+    m_centerTuneDeferredDsp.clear();
+
+    // Timeout keeps the legacy eventual-send behavior for compatibility. A
+    // backend error deliberately drops the dependent DSP command because its
+    // offset would otherwise be applied against the wrong RF center.
+    if (flushDeferred && !deferred.isEmpty())
+        sendmessage(deferred);
+}
+
 void Mainwindows::sendmessageToWeb(const QString &jsonMessage)
 {
     qDebug() << "sendmessageToWeb JSON to backend:" << jsonMessage;
@@ -1909,12 +2098,44 @@ void Mainwindows::sendmessage(const QString &jsonMessage)
 {
     QJsonParseError parseError;
     const QJsonDocument parsed = QJsonDocument::fromJson(jsonMessage.toUtf8(), &parseError);
+
+    if (wsClient.webSocket.state() != QAbstractSocket::ConnectedState) {
+        qWarning() << "[ASTRARX-BACKEND] send while disconnected; command not sent:"
+                   << jsonMessage;
+        return;
+    }
+
     if (parseError.error == QJsonParseError::NoError && parsed.isObject()) {
         const QJsonObject obj = parsed.object();
         const QString type = obj.value("type").toString();
         const QJsonObject params = obj.value("params").toObject();
-        if (type == "setfrequency" || params.contains("offset_freq")) {
+
+        if (type == "setfrequency" || params.contains("offset_freq"))
             qInfo().noquote() << "[QT5-FREQ-TX]" << jsonMessage;
+
+        if (type == QStringLiteral("setfrequency")) {
+            const double targetValue = params.value(QStringLiteral("frequency")).toDouble(0.0);
+            if (std::isfinite(targetValue) && targetValue > 0.0) {
+                m_centerTuneGuardPending = true;
+                m_centerTuneGuardTargetHz = static_cast<quint64>(qRound64(targetValue));
+                m_centerTuneDeferredDsp.clear();
+                if (m_centerTuneGuardTimer)
+                    m_centerTuneGuardTimer->start();
+
+                qInfo() << "[QT5-FREQ-TXN] center request"
+                        << "target=" << m_centerTuneGuardTargetHz;
+            }
+        } else if (type == QStringLiteral("dspcontrol")
+                   && params.contains(QStringLiteral("offset_freq"))
+                   && m_centerTuneGuardPending) {
+            // Coalesce to the newest dependent DSP command. Existing QML may
+            // send this 500 ms after setfrequency; the backend snapshot, not a
+            // guessed delay, now decides when it is safe to apply.
+            m_centerTuneDeferredDsp = jsonMessage;
+            qInfo() << "[QT5-FREQ-TXN] defer dspcontrol"
+                    << "target=" << m_centerTuneGuardTargetHz
+                    << "offset=" << params.value(QStringLiteral("offset_freq")).toInt();
+            return;
         }
     }
 
@@ -2745,12 +2966,36 @@ void Mainwindows::deleteScanGroupByKey(const QString &groupKeyThai)
             << ", cardsProfilesArray size =" << cardsProfilesArray.size();
 }
 
-void Mainwindows::setLocation(QString location){
-    if (!location.contains("Select")){
-        QString command = QString("ln -sf /usr/share/zoneinfo/%1  /etc/localtime").arg(location);
-        system(command.toStdString().c_str());
-        timeLocation = location;
+void Mainwindows::setLocation(QString location)
+{
+    location = location.trimmed();
+    if (location.isEmpty() || location.contains(QStringLiteral("Select")))
+        return;
+
+    const QByteArray zoneId = location.toUtf8();
+    if (!QTimeZone::availableTimeZoneIds().contains(zoneId)) {
+        qWarning() << "[TIMEZONE] rejected unknown timezone:" << location;
+        return;
     }
+
+    const QString zonePath = QStringLiteral("/usr/share/zoneinfo/") + location;
+    if (!QFileInfo::exists(zonePath)) {
+        qWarning() << "[TIMEZONE] zoneinfo file missing:" << zonePath;
+        return;
+    }
+
+    // No shell: location is passed as an argv item, eliminating command
+    // injection while preserving the same ln -sf operation and UI behavior.
+    const int rc = QProcess::execute(QStringLiteral("ln"),
+                                     {QStringLiteral("-sf"),
+                                      zonePath,
+                                      QStringLiteral("/etc/localtime")});
+    if (rc != 0) {
+        qWarning() << "[TIMEZONE] ln failed rc=" << rc << "zone=" << location;
+        return;
+    }
+
+    timeLocation = location;
 }
 
 bool Mainwindows::setHwclockFromSystem()
