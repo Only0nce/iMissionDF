@@ -10,7 +10,12 @@ Item {
     height: 110
 
     Material.theme: Material.Dark
-    Material.accent: Material.Teal
+    Material.accent: "#6EF2E8"
+
+    readonly property color primaryText: "#F4FBFF"
+    readonly property color secondaryText: "#D3E1E7"
+    readonly property color fieldBackground: "#B30A141B"
+    readonly property color fieldBorder: "#805E7A86"
 
     // property real low_cut: -30000  // default
     // property real high_cut: 30000
@@ -21,8 +26,10 @@ Item {
         running: true
         interval: 10000
         onTriggered: {
-            bandwidthScaleControl.opacity = 0.5
-            mouseArea.enabled = true
+            // CUDA1.6: parent HUD card provides translucency; keep text and
+            // controls fully opaque/readable instead of fading the whole item.
+            bandwidthScaleControl.opacity = 1.0
+            mouseArea.enabled = false
         }
     }
 
@@ -32,8 +39,9 @@ Item {
 
     Rectangle {
         id: rectangle
-        color: "#A0000000"
-        radius: 5
+        color: "transparent"
+        radius: 0
+        border.width: 0
         anchors.fill: parent
 
         ColumnLayout {
@@ -49,14 +57,25 @@ Item {
 
                 Label {
                     text: "Low :"
-                    color: Material.foreground
-                    font.pointSize: 10
+                    color: secondaryText
+                    font.pointSize: 11
                 }
                 TextField {
                     id: lowField
                     text: low_cut.toString()
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                     Layout.preferredWidth: 95
+                    font.pointSize: 11
+                    color: primaryText
+                    selectionColor: "#6EF2E8"
+                    selectedTextColor: "#071018"
+                    font.bold: true
+                    background: Rectangle {
+                        radius: 4
+                        color: fieldBackground
+                        border.width: 1
+                        border.color: fieldBorder
+                    }
                     validator: IntValidator { bottom: -250000; top: 0 }  // ช่วงค่าที่รองรับ
                     onEditingFinished: {
                         low_cut = parseInt(text)
@@ -68,16 +87,26 @@ Item {
 
                 Label {
                     text: "High :"
-                    color: Material.foreground
+                    color: secondaryText
                     font.pointSize: 10
                 }
                 TextField {
                     id: highField
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    font.pointSize: 10
+                    font.pointSize: 11
                     validator: IntValidator { bottom: 0; top: 250000 }  // ช่วงค่าที่รองรับ
                     text: high_cut.toString()
                     Layout.preferredWidth: 95
+                    color: primaryText
+                    selectionColor: "#6EF2E8"
+                    selectedTextColor: "#071018"
+                    font.bold: true
+                    background: Rectangle {
+                        radius: 4
+                        color: fieldBackground
+                        border.width: 1
+                        border.color: fieldBorder
+                    }
                     onEditingFinished: {
                         high_cut = parseInt(text)
                         sendBandwidthUpdate()
@@ -88,8 +117,8 @@ Item {
             Label {
                 text: "Analog Demod Bandwidth (Hz)"
                 font.bold: true
-                font.pointSize: 10
-                color: Material.foreground
+                font.pointSize: 11
+                color: primaryText
                 horizontalAlignment: Text.AlignHCenter
                 Layout.alignment: Qt.AlignHCenter
             }

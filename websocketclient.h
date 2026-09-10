@@ -256,14 +256,19 @@ private:
     bool m_fftStrictSize = true;
     int m_fftMaxBins = 65536;
     int m_spectrumDisplayBins = 8192;
-    int m_waterfallDisplayBins = 1280;
+    int m_waterfallDisplayBins = 2048;
 
     QElapsedTimer m_fftUiPublishTimer;
     int m_fftUiPublishIntervalMs = 40;       // legacy QML bridge: 25 Hz
     QElapsedTimer m_spectrumDisplayTimer;
-    int m_spectrumDisplayIntervalMs = 40;    // native spectrum: 25 Hz
+    int m_spectrumDisplayIntervalMs = 16;    // native spectrum: target up to ~60 Hz
     QElapsedTimer m_waterfallDisplayTimer;
-    int m_waterfallDisplayIntervalMs = 50;   // native waterfall: 20 Hz
+    int m_waterfallDisplayIntervalMs = 16;   // native waterfall: target up to ~60 Hz
+
+    // FPS telemetry is diagnostic-only and bounded. It lets us distinguish
+    // AstraRX source cadence from Qt/GPU render cadence on the target.
+    QElapsedTimer m_fftSourceStatsTimer;
+    quint64 m_fftSourceStatsFrames = 0;
     QElapsedTimer m_fftAutoScaleTimer;
     int m_fftAutoScaleIntervalMs = 500;
     double m_fftNoiseDb = -120.0;

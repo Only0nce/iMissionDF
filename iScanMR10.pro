@@ -103,6 +103,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 X86_SOURCES += \
     CrashDiagnostics.cpp \
     FftDisplayItem.cpp \
+    SpectrumCudaProcessor.cpp \
+    SpectrumCudaWorker.cpp \
     Databases.cpp \
     FileUpdateWatcher.cpp \
     I2CReadWrite.cpp \
@@ -155,6 +157,8 @@ X86_HEADERS += \
     ChatServer.h \
     CrashDiagnostics.h \
     FftDisplayItem.h \
+    SpectrumCudaProcessor.h \
+    SpectrumCudaWorker.h \
     Databases.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1_PARAM.h \
@@ -203,6 +207,8 @@ X86_HEADERS += \
 JETSON_SOURCES += \
     CrashDiagnostics.cpp \
     FftDisplayItem.cpp \
+    SpectrumCudaProcessor.cpp \
+    SpectrumCudaWorker.cpp \
     Databases.cpp \
     FileUpdateWatcher.cpp \
     I2CReadWrite.cpp \
@@ -269,6 +275,8 @@ JETSON_HEADERS += \
     ChatServer.h \
     CrashDiagnostics.h \
     FftDisplayItem.h \
+    SpectrumCudaProcessor.h \
+    SpectrumCudaWorker.h \
     Databases.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1.h \
     DesignDSP_REC_V1/DesignDSP_REC_V1_IC_1_PARAM.h \
@@ -337,6 +345,12 @@ linux-jetson-orin-g++ {
     SOURCES = $$JETSON_SOURCES
     HEADERS = $$JETSON_HEADERS
 
+    # R20.4-SPECTRUM-CUDA1 uses a target-side CUDA plugin loaded at runtime.
+    # The main Qt application therefore keeps the existing cross-compile
+    # toolchain unchanged. Build/install libiscan_spectrum_cuda.so on Orin
+    # with build_spectrum_cuda_plugin.sh; missing/failed plugin falls back to
+    # the asynchronous CPU worker without terminating the application.
+
     INCLUDEPATH += /home/ubuntu/BackupData/BackupData/OrinNx/Jetson_Linux_R35.3.1_aarch64/QtSource/sysroot/usr/local/include
 
     LIBS += -L/usr/local/lib \
@@ -392,4 +406,5 @@ linux-jetson-orin-g++ {
     LIBS += -lGL
 }
 
-DISTFILES +=
+DISTFILES += SpectrumCudaKernels.cu \
+    build_spectrum_cuda_plugin.sh

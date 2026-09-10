@@ -40,7 +40,12 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
     m_fftStrictSize = envEnabled("ISCAN_FFT_STRICT_SIZE", true);
     m_fftMaxBins = envPositiveInt("ISCAN_FFT_MAX_BINS", 65536, 1048576);
     m_spectrumDisplayBins = envPositiveInt("ISCAN_SPECTRUM_DISPLAY_BINS", 8192, m_fftMaxBins);
-    m_waterfallDisplayBins = envPositiveInt("ISCAN_WATERFALL_DISPLAY_BINS", 1280, m_fftMaxBins);
+    m_waterfallDisplayBins = envPositiveInt("ISCAN_WATERFALL_DISPLAY_BINS", 2048, m_fftMaxBins);
+    // CUDA1.1/FPS60: the previous production path was hard-capped to
+    // 25 Hz Spectrum and 20 Hz Waterfall. 16 ms removes that artificial
+    // bottleneck while still allowing A/B overrides on the target.
+    m_spectrumDisplayIntervalMs = envPositiveInt("ISCAN_SPECTRUM_FRAME_MS", 16, 1000);
+    m_waterfallDisplayIntervalMs = envPositiveInt("ISCAN_WATERFALL_FRAME_MS", 16, 1000);
 
     qInfo().noquote() << "[R20.4 FFT Runtime]"
                       << "qmlPublish=" << m_fftQmlPublish
@@ -48,6 +53,8 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
                       << "maxBins=" << m_fftMaxBins
                       << "spectrumDisplayBins=" << m_spectrumDisplayBins
                       << "waterfallDisplayBins=" << m_waterfallDisplayBins
+                      << "spectrumFrameMs=" << m_spectrumDisplayIntervalMs
+                      << "waterfallFrameMs=" << m_waterfallDisplayIntervalMs
                       << "renderer=native-qquickpainteditem";
     // Connect Qt signals exactly once. connectToServer() may be called again for
     // reconnect/target changes without multiplying message handlers.
@@ -322,8 +329,14 @@ void WebSocketClient::publishNativeFftFrames(const QVector<float> &fftFrame)
     if (shouldPublishSpectrumFrame())
         emit spectrumDisplayFrame(peakPoolForDisplay(fftFrame, m_spectrumDisplayBins));
 
-    if (shouldPublishWaterfallFrame())
-        emit waterfallDisplayFrame(peakPoolForDisplay(fftFrame, m_waterfallDisplayBins));
+    if (shouldPublishWaterfallFrame()) {
+        // CUDA1.1/FPS60: do NOT peak-pool Waterfall on the WebSocket/Qt
+        // receive thread. Send the implicitly-shared native frame to the
+        // Spectrum CUDA worker; CUDA performs the display reduction there.
+        // If CUDA is unavailable, the same work runs on the dedicated CPU
+        // worker rather than blocking the UI/WebSocket event loop.
+        emit waterfallDisplayFrame(fftFrame);
+    }
 
     if (shouldPublishFftUiFrame()) {
         const QVariantList legacy = fftToVariantList(fftFrame);
@@ -592,6 +605,22 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
         if (!validateFftFrame(m_fftDecodeScratch,
                               rxconfig.fft_compression == "none" ? payloadBytes : -1))
             break;
+
+        // Source-FPS telemetry: this measures real FFT messages arriving from
+        // AstraRX. A 60 Hz renderer cannot invent 60 independent RF snapshots
+        // if the server itself is sending at a lower cadence.
+        if (!m_fftSourceStatsTimer.isValid())
+            m_fftSourceStatsTimer.start();
+        ++m_fftSourceStatsFrames;
+        if (m_fftSourceStatsTimer.elapsed() >= 5000) {
+            const double sec = std::max(0.001, m_fftSourceStatsTimer.elapsed() / 1000.0);
+            const double sourceFps = static_cast<double>(m_fftSourceStatsFrames) / sec;
+            qInfo() << "[FFT-SOURCE-5S]"
+                    << "fps=" << QString::number(sourceFps, 'f', 1)
+                    << "bins=" << m_fftDecodeScratch.size();
+            m_fftSourceStatsFrames = 0;
+            m_fftSourceStatsTimer.restart();
+        }
 
         // Full-resolution native Max Hold remains exact. Display frames are
         // reduced only after this stage.

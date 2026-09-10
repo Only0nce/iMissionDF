@@ -1554,15 +1554,19 @@ Item {
             Item {
                 id: gridViewport
                 anchors.top: parent.top
-                anchors.horizontalCenter: parent.horizontalCenter
 
                 property int maxColumns: 5
                 property int sidePad: 24
                 property int cardW: 320
                 property int cardH: 150
+                // CUDA1.9: keep the vertical scrollbar/card edge clear of the
+                // Scan/Memory/Delete/Filter action rail on the right.
+                property int rightActionRail: 172
+                property real usableWidth: Math.max(cardW, parent.width - rightActionRail - sidePad * 2)
 
-                width: Math.min(parent.width - sidePad * 2, cardW * maxColumns)
-                height: cardH * 2
+                width: Math.min(usableWidth, cardW * maxColumns)
+                x: sidePad + Math.max(0, (usableWidth - width) / 2)
+                height: Math.min(cardH * 2, Math.max(cardH, parent.height - 8))
                 clip: true
 
                 GridView {
@@ -1724,20 +1728,27 @@ Item {
             Item {
                 id: detailViewport2
                 anchors.top: parent.top
-                anchors.horizontalCenter: parent.horizontalCenter
                 clip: true
 
                 property int maxColumns: 5
-                property int sidePad: 24
+                property int sidePad: 12
                 property int cardW: 320
                 property int cardH: 150
                 property int rows: 2
 
                 property int gapX: 20
                 property int gapY: 10
+                // The Back rail is 140 px wide + 12 px gap. Previously the
+                // detail grid consumed parent.width-48 and the Back rail was
+                // therefore placed at negative x and clipped. Reserve both
+                // side rails explicitly.
+                property int leftBackRail: 164
+                property int rightActionRail: 172
+                property real usableWidth: Math.max(cardW, parent.width - leftBackRail - rightActionRail - sidePad * 2)
 
-                width: Math.min(parent.width - sidePad * 2, cardW * maxColumns)
-                height: cardH * rows
+                width: Math.min(usableWidth, cardW * maxColumns)
+                x: leftBackRail + sidePad + Math.max(0, (usableWidth - width) / 2)
+                height: Math.min(cardH * rows, Math.max(cardH, parent.height - 8))
 
                 GridView {
                     id: detailGrid

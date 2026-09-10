@@ -7,8 +7,9 @@ Item {
     height: 75
     Rectangle {
         id: rectangle
-        color: "#A0000000"
-        radius: 5
+        color: "transparent"
+        radius: 0
+        border.width: 0
         anchors.fill: parent
         Canvas {
             id: analogSMeter
@@ -20,8 +21,8 @@ Item {
 
             property int tickCount: 10
             property color needleColor: "#FF4444"
-            property color tickColor: "#AAAAAA"
-            property color textColor: "#FFFFFF"
+            property color tickColor: "#D3E1E7"
+            property color textColor: "#F4FBFF"
 
             Timer {
                 interval: 100
@@ -52,7 +53,7 @@ Item {
                 ctx.stroke();
 
                 // --- Tick marks ---
-                ctx.font = "10px monospace";
+                ctx.font = "11px monospace";
                 ctx.fillStyle = tickColor;
 
                 for (let i = 0; i <= tickCount; ++i) {
@@ -64,7 +65,11 @@ Item {
                     ctx.lineTo(x, h / 2 + 4);
                     ctx.stroke();
 
-                    ctx.fillText(Math.round(db), x - 10, h / 2 + 16);
+                    const tickLabel = Math.round(db).toString();
+                    ctx.fillStyle = "rgba(0,0,0,0.90)";
+                    ctx.fillText(tickLabel, x - 9, h / 2 + 17);
+                    ctx.fillStyle = tickColor;
+                    ctx.fillText(tickLabel, x - 10, h / 2 + 16);
                 }
 
                 // --- Needle ---
@@ -79,10 +84,12 @@ Item {
                 ctx.stroke();
 
                 // --- Value Label ---
-                ctx.fillStyle = textColor;
                 const valueStr = smeterBuffered.toFixed(1) + " dBm";
                 const labelWidth = ctx.measureText(valueStr).width;
                 const safeX = Math.max(0, Math.min(w - labelWidth, needleX - labelWidth / 2));
+                ctx.fillStyle = "rgba(0,0,0,0.92)";
+                ctx.fillText(valueStr, safeX + 1, h / 2 - 13);
+                ctx.fillStyle = textColor;
                 ctx.fillText(valueStr, safeX, h / 2 - 14);
             }
         }

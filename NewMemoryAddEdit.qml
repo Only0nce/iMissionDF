@@ -1009,15 +1009,19 @@ Item {
     Item {
         id: gridViewport
         anchors.top: parent.top
-        anchors.horizontalCenter: parent.horizontalCenter
 
         property int maxColumns: 5
         property int sidePad: 24
         property int cardW: 320
         property int cardH: 150
+        // CUDA1.9: reserve the production action column on the right so the
+        // always-on scrollbar and last card never sit underneath mode/filter buttons.
+        property int rightActionRail: 172
+        property real usableWidth: Math.max(cardW, parent.width - rightActionRail - sidePad * 2)
 
-        width: Math.min(parent.width - sidePad * 2, cardW * maxColumns)
-        height: cardH * 2
+        width: Math.min(usableWidth, cardW * maxColumns)
+        x: sidePad + Math.max(0, (usableWidth - width) / 2)
+        height: Math.min(cardH * 2, Math.max(cardH, parent.height - 8))
         clip: true
 
         GridView {

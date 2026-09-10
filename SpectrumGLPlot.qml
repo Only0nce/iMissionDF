@@ -16,6 +16,7 @@ Item {
     id: root
     anchors.fill: parent
 
+
     property real priStart: 0
     property real priStop: 0
 
@@ -38,11 +39,48 @@ Item {
 
     property real dataCount : 0
     property real smeterLevel: -100
+    // R20.4-SPECTRUM-A3: AstraRX WebV2-inspired analyzer palette.
+    // The native renderer interpolates between stops for a smooth waterfall.
     property var  waterfallColorMap: [
-        0x000008, 0x000040, 0x0000A0, 0x0030FF,
-        0x00A0FF, 0x00E0FF, 0x00FF80, 0x80FF00,
-        0xFFFF00, 0xFF8000, 0xFF2000, 0xFF0000, 0xFFFFFF
+        0x030712, 0x071B4D, 0x0A3B92, 0x0D72D8,
+        0x12B6E8, 0x28D6C0, 0x54DC7B, 0xA6E34B,
+        0xF0DE43, 0xF6A53A, 0xEF5B36, 0xE82F37, 0xFFF2D0
     ]
+
+    // R20.4-SPECTRUM-CUDA1.8-READABILITY-PASS:
+// Waterfall remains the dominant analyzer surface (58%). Persistent bottom HUD
+// controls now use separate low-opacity gray cards (not one large pod), while
+// the data-driven legend grows vertically and SCAN/MEMORY live directly below
+// it as a compact right-side vertical toggle rail.
+// R20.4-SPECTRUM-CUDA1.3-FLOATING-WORKSPACE:
+    // Spectrum/Waterfall now own the full receiver workspace. Scan/Memory are
+    // presented as a non-modal floating workspace above the live analyzer, so
+    // the CUDA/FPS60 renderer is never resized, destroyed, or recreated when
+    // the operator opens folders/results.
+    readonly property real analyzerHeight: height
+    readonly property real spectrumRatio: 0.42
+    readonly property color analyzerBackground: "#081018"
+    readonly property color analyzerPanel: "#0D1721"
+    readonly property color analyzerBorder: "#263948"
+    readonly property color analyzerAccent: "#35D5BD"
+    // CUDA1.11 visual polish: dedicated trace colors so Spectrum styling can
+    // evolve without changing selection/HUD accent semantics.
+    readonly property color spectrumLiveColor: "#49F3DD"
+    readonly property color spectrumMaxHoldColor: "#FFBE4A"
+    readonly property color analyzerText: "#EEF6FB"
+    readonly property color analyzerMuted: "#91A4B3"
+    // CUDA1.8 readability pass: dynamic Waterfall content can become very bright
+    // (cyan/green/yellow), so card chrome must provide stable contrast while
+    // text/controls remain fully opaque. Hover raises contrast smoothly rather
+    // than changing content opacity.
+    readonly property color waterfallHudCardColor: Qt.rgba(0.035, 0.055, 0.070, 0.72)
+    readonly property color waterfallHudCardHoverColor: Qt.rgba(0.040, 0.070, 0.090, 0.86)
+    readonly property color waterfallHudCardBorder: Qt.rgba(0.50, 0.68, 0.74, 0.28)
+    readonly property color waterfallHudCardHoverBorder: Qt.rgba(0.43, 0.90, 0.83, 0.68)
+    readonly property color hudPrimaryText: "#F4FBFF"
+    readonly property color hudSecondaryText: "#D3E1E7"
+    readonly property color hudAccentText: "#6EF2E8"
+    readonly property real waterfallHudCardRadius: 8
 
     // Phase 4 runtime budgets. Full-span FFT is preserved; only UI delivery and
     // rendering cadence are bounded to avoid saturating one CPU core.
@@ -94,6 +132,52 @@ Item {
     property real zoomStep: root.width
     property string start_mod: ""
     property real xPos: 0
+
+    // R20.4-SPECTRUM-CUDA1.2: receiver-selection geometry is a first-class
+    // QML state so the measurement HUD can remain physically attached to the
+    // selected listening band without relying on Canvas paint side effects.
+    readonly property real selectedReceiverHz: centerFreq + offsetFrequency
+    readonly property real selectionLeftFreqHz: selectedReceiverHz + low_cut
+    readonly property real selectionRightFreqHz: selectedReceiverHz + high_cut
+    readonly property real selectionLeftX: ((selectionLeftFreqHz - viewStartFreq) / Math.max(1.0, visibleSpanHz)) * Math.max(1.0, width)
+    readonly property real selectionRightX: ((selectionRightFreqHz - viewStartFreq) / Math.max(1.0, visibleSpanHz)) * Math.max(1.0, width)
+    readonly property real selectionCenterX: ((selectedReceiverHz - viewStartFreq) / Math.max(1.0, visibleSpanHz)) * Math.max(1.0, width)
+    readonly property bool selectionVisible: Math.max(selectionLeftX, selectionRightX) >= 0
+                                             && Math.min(selectionLeftX, selectionRightX) <= width
+
+    property bool selectionMetricsLocked: false
+    readonly property real selectionMetricsPanelOpacity: selectionMetricsLocked ? 1.0 : 0.28
+    readonly property real selectionMetricsMargin: 8
+    readonly property real selectionMetricsEdgeMargin: 8
+
+    // Floating Scan/Memory workspace. The existing folder/result components stay
+    // alive for the lifetime of SpectrumGLPlot; opening/closing this panel changes
+    // presentation only and therefore preserves scan state and waterfall history.
+    property bool floatingWorkspaceOpen: false
+    readonly property string floatingWorkspaceTitle: widgetView ? "SCAN WORKSPACE" : "MEMORY WORKSPACE"
+    // CUDA1.4: reserve a dedicated HUD dock inside the Waterfall. The floating
+    // workspace now stops above this dock instead of competing with bandwidth,
+    // S-meter and intensity controls for the same bottom pixels.
+    readonly property real waterfallHudDockHeight: 92
+    readonly property real waterfallHudSideMargin: 10
+    readonly property real waterfallRightToggleHeight: 108
+    readonly property real waterfallRightToggleWidth: 96
+    // Leave generous left/right Waterfall gutters for the WATERFALL label,
+    // Pause/Clear actions and data-driven scale.  At 1920/1648-class layouts
+    // this still leaves enough width for four scan-result cards + side actions.
+    // CUDA1.9: the original 76% x 39% floating workspace was too tight for
+    // the production Scan/Memory layouts (Back rail + always-on scrollbars +
+    // right-side action column). Expand it while preserving the Waterfall HUD
+    // and right utility rail as visible safe areas.
+    readonly property real floatingWorkspaceSideSafe: waterfallRightToggleWidth + waterfallHudSideMargin + 18
+    readonly property real floatingWorkspaceTopSafe: 28
+    readonly property real floatingWorkspaceBottomMargin: waterfallHudDockHeight + 14
+    readonly property real floatingWorkspaceWidth: Math.max(620,
+        Math.min(root.width * 0.86, root.width - (floatingWorkspaceSideSafe * 2)))
+    readonly property real floatingWorkspaceHeight: Math.max(360,
+        Math.min(root.height * 0.56,
+                 root.height - floatingWorkspaceBottomMargin - floatingWorkspaceTopSafe))
+
     property real setCenterFreq: centerFreq
 
     property int offsetStart: -1600000
@@ -109,11 +193,12 @@ Item {
     Theme { id: theme }
 
     // ============================================================
-    // ✅ FIX CPU: throttle spectrum paint (30fps)
+    // CUDA1.1/FPS60: presentation-side invalidations are no longer capped
+    // at 30 Hz. Native FFT delivery is independently capped at ~60 Hz.
     // ============================================================
     Timer {
         id: spectrumPaintTimer
-        interval: 33
+        interval: 16
         repeat: false
         onTriggered: {
             if (root.runtimeActive)
@@ -126,6 +211,25 @@ Item {
             return
         if (!spectrumPaintTimer.running)
             spectrumPaintTimer.start()
+    }
+
+    function openFloatingWorkspace(scanMode) {
+        // Existing global contract: widgetView=true => Scan, false => Memory.
+        widgetView = !!scanMode
+        floatingWorkspaceOpen = true
+    }
+
+    function toggleFloatingWorkspace(scanMode) {
+        const requestedScan = !!scanMode
+        if (floatingWorkspaceOpen && widgetView === requestedScan) {
+            floatingWorkspaceOpen = false
+            return
+        }
+        openFloatingWorkspace(requestedScan)
+    }
+
+    function closeFloatingWorkspace() {
+        floatingWorkspaceOpen = false
     }
 
     function rebuildWaterfallPalette(colors) {
@@ -186,6 +290,7 @@ Item {
             wsClient.setMaxHoldEnabled(false)
 
         // Stop UI-owned realtime work when this page is not active.
+        floatingWorkspaceOpen = false
         spectrumPaintTimer.stop()
         scanTimer.stop()
         zoomNavTimer.stop()
@@ -450,12 +555,12 @@ Item {
         if (plotWidth < width)
             plotWidth = width
         Qt.callLater(syncZoomNavFromRatio)
-        invalidateViewport(true)
+        invalidateViewport()
     }
 
     onViewPanRatioChanged: {
         if (runtimeActive)
-            invalidateViewport(true)
+            invalidateViewport()
     }
 
 
@@ -477,6 +582,8 @@ Item {
     Component.onCompleted: {
         runtimeInitialized = true
         console.log("[ASTRARX-COMPAT-QML] revision=20260817-bidirectional-span-stability-r10")
+        console.log("[R20.4-SPECTRUM-CUDA1.8-READABILITY-PASS] spectrum42=1 waterfall58=1 stableContrastHud=1 highContrastText=1 darkRightRail=1")
+        console.log("[R20.4-SPECTRUM-CUDA1.11-SPECTRUM-VISUAL-POLISH] gradientFill=1 liveTrace=#49F3DD maxHold=#FFBE4A")
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
 
@@ -547,18 +654,17 @@ Item {
             viewPanRatio = clamped
     }
 
-    function invalidateViewport(clearWaterfallHistory) {
+    function invalidateViewport() {
+        // AstraRX AB6 semantics: zoom/pan/resize are view transforms only.
+        // The native waterfall keeps history on the full acquisition RF axis
+        // and reprojects it at paint time, so history must never be cleared here.
         scheduleSpectrumPaint()
+        if (waterfallCanvas && runtimeActive)
+            waterfallCanvas.requestPaint()
         if (overlayCanvas)
             overlayCanvas.requestPaint()
         if (spectrumGridCanvas)
             spectrumGridCanvas.invalidate()
-
-        if (clearWaterfallHistory && waterfallCanvas) {
-            waterfallCanvas.clearBeforeNextPaint = true
-            if (runtimeActive)
-                waterfallCanvas.requestPaint()
-        }
     }
 
     function zoomIn() {
@@ -579,7 +685,7 @@ Item {
         viewPanRatio = clamp01(viewPanRatio)
         Qt.callLater(syncZoomNavFromRatio)
         zoomNav.rectangle.opacity = 1
-        invalidateViewport(true)
+        invalidateViewport()
     }
 
     function smeterValueUpdated(smeter) { smeterLevel = smeter }
@@ -752,6 +858,22 @@ Item {
         }
     }
 
+    // ============================================================
+    // AstraRX WebV2-inspired local analyzer surface. This rectangle is
+    // confined to the existing Spectrum/Waterfall footprint only.
+    // ============================================================
+    Rectangle {
+        id: analyzerBackdrop
+        x: 0
+        y: 0
+        width: root.width
+        height: root.analyzerHeight
+        color: root.analyzerBackground
+        border.color: root.analyzerBorder
+        border.width: 1
+        z: 0
+    }
+
     /* ============================================================
        ✅ Fix4: Cached grid canvas (X axis on TOP, works x86+Jetson)
        - DO NOT set visible:false (x86 often won't render => drawImage blank)
@@ -767,7 +889,7 @@ Item {
         // Spectrum no longer composites this full canvas every 33 ms.
         visible: true
         opacity: 1.0
-        z: 0
+        z: 1
 
         renderTarget: Canvas.FramebufferObject
         renderStrategy: Canvas.Immediate
@@ -808,7 +930,7 @@ Item {
                 ctx.moveTo(0, y)
                 ctx.lineTo(w, y)
                 ctx.stroke()
-                ctx.fillText(db.toFixed(0) + " dBm ", 4, y - 2)
+                ctx.fillText(db.toFixed(0) + " dBFS ", 4, y - 2)
             }
 
             // ===== X axis (TOP) + freq labels =====
@@ -885,11 +1007,11 @@ Item {
 
     FftDisplayItem {
         id: spectrumCanvas
-        z: 1
+        z: 2
         // Geometry, mapping, colors and Max Hold behavior intentionally match
         // the previous Canvas renderer. Only the execution path moves to C++.
         width: root.width
-        height: parent.height / 4
+        height: root.analyzerHeight * root.spectrumRatio
         x: 0
 
         backend: (typeof wsClient !== "undefined") ? wsClient : null
@@ -901,8 +1023,8 @@ Item {
         viewStartFreq: root.viewStartFreq
         viewStopFreq: root.viewStopFreq
         sampleRate: Math.max(1, root.sampRate)
-        spectrumColor: "#00FF00"
-        maxHoldColor: theme.maxHoldLine
+        spectrumColor: root.spectrumLiveColor
+        maxHoldColor: root.spectrumMaxHoldColor
 
         property alias clearPeakTimer: clearPeakTimer
         showMaxHold: true
@@ -924,13 +1046,213 @@ Item {
         onHeightChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
     }
 
+    // R20.4-SPECTRUM-CUDA1.2: measurement HUD is physically attached to the
+    // selected receiver band. It automatically flips to the opposite side when
+    // the preferred side would run out of safe plot space. Only the LOCK button
+    // accepts pointer input; the rest of the panel remains transparent to the
+    // existing click/drag-to-tune MouseArea below it.
+    Item {
+        id: selectionMetricsOverlay
+        width: 202
+        height: 86
+        z: 40
+        visible: root.runtimeActive && root.selectionVisible
+
+        readonly property real bandLeft: Math.min(root.selectionLeftX, root.selectionRightX)
+        readonly property real bandRight: Math.max(root.selectionLeftX, root.selectionRightX)
+        readonly property real safeLeft: root.selectionMetricsEdgeMargin
+        // Reserve the existing zoom-tool footprint so the attached HUD flips
+        // before it can hide beneath those controls on the right edge.
+        readonly property real safeRight: Math.max(safeLeft,
+                                                   spectrumCanvas.width
+                                                   - ((zoom && zoom.visible) ? (zoom.width + 20) : safeLeft))
+        readonly property real needWidth: width + root.selectionMetricsMargin
+        readonly property real spaceLeft: Math.max(0, bandLeft - safeLeft)
+        readonly property real spaceRight: Math.max(0, safeRight - bandRight)
+        property bool placeLeft: false
+        readonly property real flipHysteresisPx: 16
+
+        function updateAttachedSide() {
+            // Stay on the current side until the opposite side has a little
+            // extra room. This prevents left/right flicker while dragging near
+            // the flip threshold, while still guaranteeing edge avoidance.
+            if (placeLeft) {
+                if ((spaceLeft < needWidth && spaceRight >= needWidth)
+                        || spaceRight >= needWidth + flipHysteresisPx)
+                    placeLeft = false
+            } else {
+                if ((spaceRight < needWidth && spaceLeft >= needWidth)
+                        || (spaceRight < needWidth
+                            && spaceLeft > spaceRight + flipHysteresisPx))
+                    placeLeft = true
+            }
+        }
+
+        onSpaceLeftChanged: updateAttachedSide()
+        onSpaceRightChanged: updateAttachedSide()
+        onNeedWidthChanged: updateAttachedSide()
+        Component.onCompleted: updateAttachedSide()
+
+        readonly property real requestedX: placeLeft
+                                                ? bandLeft - width - root.selectionMetricsMargin
+                                                : bandRight + root.selectionMetricsMargin
+
+        x: Math.max(safeLeft, Math.min(requestedX, safeRight - width))
+        y: 25
+
+        // Small visual bridge makes the panel read as one object with the
+        // receiver-selection band while preserving the original tuning gesture.
+        Rectangle {
+            id: selectionMetricsBridge
+            width: Math.max(2, root.selectionMetricsMargin)
+            height: 2
+            y: 18
+            x: selectionMetricsOverlay.placeLeft
+                   ? selectionMetricsOverlay.width
+                   : -width
+            color: root.analyzerAccent
+            opacity: root.selectionMetricsLocked ? 0.95 : 0.45
+        }
+
+        Rectangle {
+            id: selectionMetricsPanel
+            anchors.fill: parent
+            radius: 7
+            color: root.analyzerPanel
+            opacity: root.selectionMetricsPanelOpacity
+            border.width: 1
+            border.color: root.selectionMetricsLocked ? root.analyzerAccent : root.analyzerBorder
+
+            Behavior on opacity {
+                NumberAnimation { duration: 120; easing.type: Easing.OutQuad }
+            }
+        }
+
+        Column {
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: 8
+            anchors.rightMargin: 8
+            anchors.topMargin: 7
+            spacing: 3
+
+            Row {
+                width: parent.width
+                spacing: 6
+                Text {
+                    width: 47
+                    text: "PEAK"
+                    color: root.analyzerMuted
+                    font.pixelSize: 9
+                    font.bold: true
+                }
+                Text {
+                    width: 79
+                    horizontalAlignment: Text.AlignRight
+                    text: spectrumCanvas.measurementsValid
+                          ? spectrumCanvas.peakDb.toFixed(1) + " dBFS" : "—"
+                    color: root.analyzerText
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.bold: true
+                }
+                Text {
+                    width: 48
+                    horizontalAlignment: Text.AlignRight
+                    text: spectrumCanvas.measurementsValid
+                          ? (spectrumCanvas.peakFrequencyHz / 1e6).toFixed(3) : ""
+                    color: root.analyzerMuted
+                    font.pixelSize: 8
+                    font.family: "monospace"
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: 6
+                Text {
+                    width: 47
+                    text: "NOISE"
+                    color: root.analyzerMuted
+                    font.pixelSize: 9
+                    font.bold: true
+                }
+                Text {
+                    width: 79
+                    horizontalAlignment: Text.AlignRight
+                    text: spectrumCanvas.measurementsValid
+                          ? spectrumCanvas.noiseFloorDb.toFixed(1) + " dBFS" : "—"
+                    color: root.analyzerText
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.bold: true
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: 6
+                Text {
+                    width: 47
+                    text: "SNR"
+                    color: root.analyzerMuted
+                    font.pixelSize: 9
+                    font.bold: true
+                }
+                Text {
+                    width: 79
+                    horizontalAlignment: Text.AlignRight
+                    text: spectrumCanvas.measurementsValid
+                          ? spectrumCanvas.snrDb.toFixed(1) + " dB" : "—"
+                    color: root.analyzerAccent
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.bold: true
+                }
+            }
+        }
+
+        // LOCK changes panel opacity only. It deliberately does not freeze RF
+        // tuning or metric values, so the HUD continues to stick to the current
+        // receiver-selection bar exactly as requested.
+        Rectangle {
+            id: selectionMetricsLockButton
+            width: 42
+            height: 18
+            radius: 4
+            anchors.right: parent.right
+            anchors.rightMargin: 6
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 5
+            color: root.selectionMetricsLocked ? root.analyzerAccent : "#99131F29"
+            border.width: 1
+            border.color: root.selectionMetricsLocked ? root.analyzerAccent : root.analyzerBorder
+            z: 3
+
+            Text {
+                anchors.centerIn: parent
+                text: root.selectionMetricsLocked ? "LOCKED" : "LOCK"
+                color: root.selectionMetricsLocked ? "#081018" : root.analyzerText
+                font.pixelSize: 8
+                font.bold: true
+            }
+
+            MouseArea {
+                anchors.fill: parent
+                acceptedButtons: Qt.LeftButton
+                onClicked: root.selectionMetricsLocked = !root.selectionMetricsLocked
+            }
+        }
+    }
+
     FftDisplayItem {
         id: waterfallCanvas
-        z: 1
+        z: 2
         y: spectrumCanvas.height
         x: 0
         width: root.width
-        height: parent.height / 4
+        height: Math.max(1, root.analyzerHeight - spectrumCanvas.height)
 
         backend: (typeof wsClient !== "undefined") ? wsClient : null
         mode: FftDisplayItem.Waterfall
@@ -948,6 +1270,135 @@ Item {
             function onWaterfallColorUpdate(colors) {
                 root.rebuildWaterfallPalette(colors)
             }
+        }
+    }
+
+    // Waterfall title/actions are local to this subsystem. Pause preserves
+    // history; Clear is the only view-side action that explicitly discards it.
+    Row {
+        id: waterfallHeader
+        x: 10
+        y: waterfallCanvas.y + 8
+        spacing: 8
+        z: 110
+
+        Text {
+            text: "WATERFALL"
+            color: root.analyzerText
+            font.pixelSize: 11
+            font.bold: true
+            font.letterSpacing: 1.0
+        }
+        Text {
+            text: "SMOOTH · PERSISTENT"
+            color: root.analyzerAccent
+            font.pixelSize: 9
+            font.bold: true
+        }
+    }
+
+    Row {
+        id: waterfallActions
+        anchors.right: waterfallCanvas.right
+        anchors.rightMargin: 76
+        y: waterfallCanvas.y + 5
+        spacing: 6
+        z: 111
+
+        Rectangle {
+            width: 62; height: 26; radius: 6
+            color: waterfallCanvas.waterfallPaused ? "#243746" : "#CC0D1721"
+            border.color: root.analyzerBorder
+            Text { anchors.centerIn: parent; text: waterfallCanvas.waterfallPaused ? "Resume" : "Pause"; color: root.analyzerText; font.pixelSize: 10; font.bold: true }
+            MouseArea { anchors.fill: parent; onClicked: waterfallCanvas.waterfallPaused = !waterfallCanvas.waterfallPaused }
+        }
+        Rectangle {
+            width: 54; height: 26; radius: 6
+            color: "#CC0D1721"; border.color: root.analyzerBorder
+            Text { anchors.centerIn: parent; text: "Clear"; color: root.analyzerText; font.pixelSize: 10; font.bold: true }
+            MouseArea { anchors.fill: parent; onClicked: waterfallCanvas.clearHistory() }
+        }
+    }
+
+    // AB8-style data-driven waterfall scale. The gradient uses the exact same
+    // palette stops as the C++ renderer; P/N are live visible-spectrum values.
+    Item {
+        id: waterfallLegend
+        width: 66
+        // CUDA1.6: extend the color legend through most of the Waterfall while
+        // reserving deterministic space for the vertical SCAN/MEMORY toggles
+        // and the bottom HUD dock. The lower edge can therefore never overlap
+        // S-meter / intensity cards.
+        height: Math.max(180, waterfallCanvas.height
+                              - root.waterfallHudDockHeight
+                              - root.waterfallRightToggleHeight
+                              - 58)
+        anchors.right: waterfallCanvas.right
+        anchors.rightMargin: 6
+        anchors.top: waterfallCanvas.top
+        anchors.topMargin: 38
+        z: 112
+
+        Rectangle {
+            anchors.fill: parent
+            radius: 6
+            color: "#D9081118"
+            border.color: "#70577B86"
+        }
+
+        Canvas {
+            id: waterfallScaleCanvas
+            x: 8
+            y: 16
+            width: 12
+            height: Math.max(20, parent.height - 34)
+            antialiasing: false
+            onHeightChanged: requestPaint()
+            onPaint: {
+                const ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                const gradient = ctx.createLinearGradient(0, 0, 0, height)
+                const colors = root.waterfallColorMap || []
+                if (!colors.length) return
+                for (let i = 0; i < colors.length; ++i) {
+                    const packed = Number(colors[colors.length - 1 - i]) >>> 0
+                    const hex = "#" + ("000000" + packed.toString(16)).slice(-6)
+                    gradient.addColorStop(i / Math.max(1, colors.length - 1), hex)
+                }
+                ctx.fillStyle = gradient
+                ctx.fillRect(0, 0, width, height)
+            }
+            Connections {
+                target: root
+                function onWaterfallColorMapChanged() { waterfallScaleCanvas.requestPaint() }
+            }
+        }
+
+        function levelY(dbValue) {
+            const minDb = root.waterfallMinDb
+            const maxDb = Math.max(minDb + 0.001, root.waterfallMaxDb)
+            const clamped = Math.max(minDb, Math.min(maxDb, Number(dbValue)))
+            return waterfallScaleCanvas.y + (1.0 - (clamped - minDb) / (maxDb - minDb)) * waterfallScaleCanvas.height
+        }
+
+        Text { x: 25; y: 5; text: root.waterfallMaxDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+        Text { x: 25; anchors.verticalCenter: parent.verticalCenter; text: ((root.waterfallMinDb + root.waterfallMaxDb) * 0.5).toFixed(0); color: root.hudSecondaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+        Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 13; text: root.waterfallMinDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+        Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 2; text: "dBFS"; color: root.hudSecondaryText; font.pixelSize: 9; font.bold: true }
+
+        Rectangle {
+            visible: spectrumCanvas.measurementsValid
+            x: 2; y: waterfallLegend.levelY(spectrumCanvas.peakDb) - 7
+            width: 18; height: 14; radius: 3
+            color: "#E6F6A53A"
+            Text { anchors.centerIn: parent; text: "P"; color: "#081018"; font.pixelSize: 9; font.bold: true }
+        }
+        Rectangle {
+            visible: spectrumCanvas.measurementsValid
+            x: 2; y: waterfallLegend.levelY(spectrumCanvas.noiseFloorDb) - 7
+            width: 18; height: 14; radius: 3
+            color: "#E635D5BD"
+            Text { anchors.centerIn: parent; text: "N"; color: "#081018"; font.pixelSize: 9; font.bold: true }
         }
     }
 
@@ -973,13 +1424,13 @@ Item {
             let canvasWidth = width;
             let canvasHeight = height;
 
-            let offsetFreqAbs = centerFreq + offsetFrequency;
-            let freqLeft = offsetFreqAbs + low_cut;
-            let freqRight = offsetFreqAbs + high_cut;
+            let offsetFreqAbs = root.selectedReceiverHz;
+            let freqLeft = root.selectionLeftFreqHz;
+            let freqRight = root.selectionRightFreqHz;
 
-            let x1 = ((freqLeft - startFreq) / freqRange) * canvasWidth;
-            let x2 = ((freqRight - startFreq) / freqRange) * canvasWidth;
-            let xCenter = ((offsetFreqAbs - startFreq) / freqRange) * canvasWidth;
+            let x1 = root.selectionLeftX;
+            let x2 = root.selectionRightX;
+            let xCenter = root.selectionCenterX;
 
             ctx.fillStyle = theme.selectionFillCss;
             ctx.fillRect(x1, 0, x2 - x1, canvasHeight);
@@ -1196,90 +1647,432 @@ Item {
 
     }
 
-    RowLayout {
-        x: 10
-        y: 230
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.rightMargin: 10
-        anchors.bottomMargin: 25
-        AnalogSMeter {
-            id: smeterOverlay
-            Layout.preferredWidth: 300
-            Layout.preferredHeight: 60
-        }
-
-        WaterfallScaleControl {
-            id: waterfallScaleControl
-            z: 99
-            waterfallMinDb: root.waterfallMinDb
-            waterfallMaxDb: root.waterfallMaxDb
-            onWaterfallMinDbChanged: {
-                root.waterfallMinDb = waterfallMinDb
-            }
-            onWaterfallMaxDbChanged: {
-                root.waterfallMaxDb = waterfallMaxDb
-            }
-            onManualScaleEdited: {
-                root.autoScaleEnabled = false
-                root.autoScaleInitialized = false
-            }
-            Layout.preferredWidth: 300
-            Layout.preferredHeight: 75
-        }
-    }
-
-    RowLayout {
-        y: 380
-        anchors.left: parent.left
-        anchors.bottom: parent.bottom
-        anchors.leftMargin: 10
-        anchors.bottomMargin: 25
-        BandwidthScaleControl {
-            id: bandwidthScaleControl
-            visible: receiverMode.get(scanReceiverModeSelected).mode === "Analog"
-            z: 99
-            // bwRangeSlider.to: receiverMode.get(scanReceiverModeSelected).name === "WFM" ? 250e3 : 50e3
-            // bwRangeSlider.from: receiverMode.get(scanReceiverModeSelected).name === "WFM" ? -250e3 : -50e3
-            Layout.preferredWidth: 300
-            Layout.preferredHeight: 75
-        }
-
-        CheckBox {
-            text: "Show Max Hold"
-            Layout.alignment: Qt.AlignLeft | Qt.AlignBottom
-            onCheckedChanged: {
-                // spectrumCanvas.clearPeaks()
-                spectrumCanvas.showMaxHold = checked
-            }
-            checked: spectrumCanvas.showMaxHold
-        }
-    }
-
-    /* === จุดยึดกลาง: ขนาด “เต็มกรอบ” ตามที่ต้องการ === */
+    /* ============================================================
+       R20.4-SPECTRUM-CUDA1.4: Waterfall HUD dock / layout cleanup
+       ------------------------------------------------------------
+       All persistent analyzer controls live on one explicit overlay layer
+       above the Waterfall renderer.  Left / center / right safe zones keep
+       the controls readable and prevent the floating workspace from covering
+       them.  No control is re-created when Scan/Memory opens.
+       ============================================================ */
     Item {
-        id: memorySlot
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.topMargin: parent.height / 1.9      // <<< ใช้ตำแหน่งเดียวกับของเดิม
-        height: parent.height / 2
-        z: 50
+        id: waterfallHudLayer
+        x: 0
+        y: waterfallCanvas.y
+        width: waterfallCanvas.width
+        height: waterfallCanvas.height
+        z: 108
+        visible: root.runtimeActive
+
+        // LEFT POD: layout container only. Each persistent control owns its
+        // own compact translucent card; there is deliberately no large pod fill.
+        Rectangle {
+            id: waterfallLeftHudPod
+            width: Math.min(520, Math.max(380, waterfallHudLayer.width * 0.31))
+            height: root.waterfallHudDockHeight - 12
+            anchors.left: parent.left
+            anchors.leftMargin: root.waterfallHudSideMargin
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            color: "transparent"
+            border.width: 0
+
+            RowLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                Rectangle {
+                    id: bandwidthHudCard
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 340
+                    Layout.preferredHeight: 78
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: root.waterfallHudCardRadius
+                    color: bandwidthCardHover.hovered ? root.waterfallHudCardHoverColor : root.waterfallHudCardColor
+                    border.width: 1
+                    border.color: bandwidthCardHover.hovered ? root.waterfallHudCardHoverBorder : root.waterfallHudCardBorder
+                    scale: bandwidthCardHover.hovered ? 1.012 : 1.0
+                    transformOrigin: Item.Center
+
+                    Behavior on color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    HoverHandler { id: bandwidthCardHover }
+
+                    BandwidthScaleControl {
+                        id: bandwidthScaleControl
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        visible: receiverMode.get(scanReceiverModeSelected).mode === "Analog"
+                        opacity: 1.0
+                    }
+                }
+
+                Rectangle {
+                    id: maxHoldHudCard
+                    Layout.preferredWidth: 158
+                    Layout.preferredHeight: 54
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: root.waterfallHudCardRadius
+                    color: maxHoldCardHover.hovered ? root.waterfallHudCardHoverColor : root.waterfallHudCardColor
+                    border.width: 1
+                    border.color: maxHoldCardHover.hovered ? root.waterfallHudCardHoverBorder : root.waterfallHudCardBorder
+                    scale: maxHoldCardHover.hovered ? 1.018 : 1.0
+                    transformOrigin: Item.Center
+
+                    Behavior on color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    HoverHandler { id: maxHoldCardHover }
+
+                    CheckBox {
+                        id: maxHoldCheckBox
+                        anchors.centerIn: parent
+                        text: "Show Max Hold"
+                        opacity: 1.0
+                        Material.foreground: root.hudPrimaryText
+                        Material.accent: root.hudAccentText
+                        font.pixelSize: 12
+                        font.bold: true
+                        onCheckedChanged: spectrumCanvas.showMaxHold = checked
+                        checked: spectrumCanvas.showMaxHold
+                    }
+                }
+            }
+        }
+
+        // RIGHT POD: transparent layout owner. S-meter and intensity controls
+        // each receive an independent translucent gray card for legibility.
+        Rectangle {
+            id: waterfallRightHudPod
+            width: Math.min(650, Math.max(520, waterfallHudLayer.width * 0.39))
+            height: root.waterfallHudDockHeight - 12
+            anchors.right: parent.right
+            anchors.rightMargin: root.waterfallHudSideMargin
+            anchors.bottom: parent.bottom
+            anchors.bottomMargin: 6
+            color: "transparent"
+            border.width: 0
+
+            RowLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                Rectangle {
+                    id: smeterHudCard
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 300
+                    Layout.preferredHeight: 68
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: root.waterfallHudCardRadius
+                    color: smeterCardHover.hovered ? root.waterfallHudCardHoverColor : root.waterfallHudCardColor
+                    border.width: 1
+                    border.color: smeterCardHover.hovered ? root.waterfallHudCardHoverBorder : root.waterfallHudCardBorder
+                    scale: smeterCardHover.hovered ? 1.012 : 1.0
+                    transformOrigin: Item.Center
+
+                    Behavior on color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    HoverHandler { id: smeterCardHover }
+
+                    AnalogSMeter {
+                        id: smeterOverlay
+                        anchors.fill: parent
+                        anchors.margins: 3
+                    }
+                }
+
+                Rectangle {
+                    id: waterfallScaleHudCard
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 310
+                    Layout.preferredHeight: 78
+                    Layout.alignment: Qt.AlignVCenter
+                    radius: root.waterfallHudCardRadius
+                    color: waterfallScaleCardHover.hovered ? root.waterfallHudCardHoverColor : root.waterfallHudCardColor
+                    border.width: 1
+                    border.color: waterfallScaleCardHover.hovered ? root.waterfallHudCardHoverBorder : root.waterfallHudCardBorder
+                    scale: waterfallScaleCardHover.hovered ? 1.012 : 1.0
+                    transformOrigin: Item.Center
+
+                    Behavior on color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on border.color { ColorAnimation { duration: 180; easing.type: Easing.OutCubic } }
+                    Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                    HoverHandler { id: waterfallScaleCardHover }
+
+                    WaterfallScaleControl {
+                        id: waterfallScaleControl
+                        anchors.fill: parent
+                        anchors.margins: 3
+                        opacity: 1.0
+                        waterfallMinDb: root.waterfallMinDb
+                        waterfallMaxDb: root.waterfallMaxDb
+                        onWaterfallMinDbChanged: root.waterfallMinDb = waterfallMinDb
+                        onWaterfallMaxDbChanged: root.waterfallMaxDb = waterfallMaxDb
+                        onManualScaleEdited: {
+                            root.autoScaleEnabled = false
+                            root.autoScaleInitialized = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
-    NewMemoryAddEdit {
-        id: newMemoryAddEdit
-        anchors.fill: memorySlot
-        visible: !widgetView
-        z: 51
-        radioMemLists: radioMemList    // ✅ ส่ง ListModel id: radioMemList เข้าไป
+    /* ============================================================
+       R20.4-SPECTRUM-CUDA1.9: Expanded floating workspace
+       (inherits CUDA1.6 full-screen analyzer/floating workspace)
+       ------------------------------------------------------------
+       - Spectrum/Waterfall remain full-size and live behind this panel.
+       - Existing Scan/Memory folder components are reused unchanged.
+       - The panel is never Loader-created/destroyed, preserving QML state.
+       - Only geometry/opacity animate; CUDA/FBO/FFT ownership is untouched.
+       ============================================================ */
+
+    // CUDA1.6: SCAN/MEMORY are a persistent vertical toggle rail attached
+    // directly below the Waterfall color legend. The rail remains visible while
+    // the floating workspace is open, so the active mode can be toggled closed
+    // or switched without reaching across the display.
+    Item {
+        id: floatingWorkspaceLauncher
+        width: root.waterfallRightToggleWidth
+        height: root.waterfallRightToggleHeight
+        // Keep the larger touch targets on the same right edge as the color
+        // legend so they read as one continuous Waterfall utility rail.
+        x: waterfallLegend.x + waterfallLegend.width - width
+        y: waterfallLegend.y + waterfallLegend.height + 5
+        z: 113
+        visible: root.runtimeActive
+        opacity: visible ? 0.96 : 0.0
+
+        Behavior on opacity { NumberAnimation { duration: 120 } }
+
+        Column {
+            anchors.fill: parent
+            spacing: 4
+
+            Rectangle {
+                width: parent.width
+                height: (parent.height - parent.spacing) / 2
+                radius: 8
+                color: root.floatingWorkspaceOpen && widgetView
+                       ? "#F0189286"
+                       : (scanLaunchArea.pressed ? "#F0167F76"
+                          : (scanLaunchArea.containsMouse ? "#F0243E48" : "#D612252D"))
+                border.width: 1
+                border.color: root.floatingWorkspaceOpen && widgetView
+                              ? "#D06EF2E8"
+                              : (scanLaunchArea.containsMouse ? "#B066B9C3" : "#704B6973")
+                scale: scanLaunchArea.pressed ? 0.97 : (scanLaunchArea.containsMouse ? 1.025 : 1.0)
+                transformOrigin: Item.Center
+                Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                Text {
+                    anchors.centerIn: parent
+                    text: "SCAN"
+                    color: root.hudPrimaryText
+                    font.pixelSize: 14
+                    font.bold: true
+                    font.letterSpacing: 0.6
+                }
+                MouseArea {
+                    id: scanLaunchArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: root.toggleFloatingWorkspace(true)
+                }
+            }
+
+            Rectangle {
+                width: parent.width
+                height: (parent.height - parent.spacing) / 2
+                radius: 8
+                color: root.floatingWorkspaceOpen && !widgetView
+                       ? "#F0189286"
+                       : (memoryLaunchArea.pressed ? "#F0167F76"
+                          : (memoryLaunchArea.containsMouse ? "#F0243E48" : "#D612252D"))
+                border.width: 1
+                border.color: root.floatingWorkspaceOpen && !widgetView
+                              ? "#D06EF2E8"
+                              : (memoryLaunchArea.containsMouse ? "#B066B9C3" : "#704B6973")
+                scale: memoryLaunchArea.pressed ? 0.97 : (memoryLaunchArea.containsMouse ? 1.025 : 1.0)
+                transformOrigin: Item.Center
+                Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                Behavior on border.color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                Text {
+                    anchors.centerIn: parent
+                    text: "MEMORY"
+                    color: root.hudPrimaryText
+                    font.pixelSize: 13
+                    font.bold: true
+                    font.letterSpacing: 0.3
+                }
+                MouseArea {
+                    id: memoryLaunchArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    onClicked: root.toggleFloatingWorkspace(false)
+                }
+            }
+        }
     }
 
-    LogDeviceScanner {
-        id: logDeviceScanner
-        visible: widgetView
-        anchors.fill: memorySlot
-        z: 52
+    Item {
+        id: floatingWorkspace
+        width: root.floatingWorkspaceWidth
+        height: root.floatingWorkspaceHeight
+        x: (root.width - width) / 2
+        y: root.floatingWorkspaceOpen
+           ? root.height - height - root.floatingWorkspaceBottomMargin
+           : root.height + 24
+        z: 120
+        enabled: root.floatingWorkspaceOpen
+        opacity: root.floatingWorkspaceOpen ? 1.0 : 0.0
+
+        Behavior on y {
+            NumberAnimation { duration: 280; easing.type: Easing.OutCubic }
+        }
+        Behavior on opacity {
+            NumberAnimation { duration: 180; easing.type: Easing.OutQuad }
+        }
+
+        // Lightweight shadow without introducing QtGraphicalEffects/GPU passes.
+        Rectangle {
+            x: 5
+            y: 8
+            width: parent.width
+            height: parent.height
+            radius: 15
+            color: "#90000000"
+        }
+
+        Rectangle {
+            id: floatingWorkspacePanel
+            anchors.fill: parent
+            radius: 14
+            color: "#F20B1C26"
+            border.width: 1
+            border.color: "#80548C98"
+            clip: true
+
+            // R20.4-SPECTRUM-CUDA1.10: header text uses content-driven spacing;
+            // the LIVE badge follows the actual workspace title width instead of a
+            // fixed x-offset, preventing SCAN/MEMORY title overlap.
+            Rectangle {
+                id: floatingWorkspaceHeader
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 44
+                color: "#F20A1821"
+                border.width: 0
+
+                Text {
+                    id: floatingWorkspaceTitleText
+                    anchors.left: parent.left
+                    anchors.leftMargin: 14
+                    anchors.verticalCenter: parent.verticalCenter
+                    width: Math.min(implicitWidth, Math.max(120, parent.width * 0.34))
+                    text: root.floatingWorkspaceTitle
+                    color: root.analyzerText
+                    font.pixelSize: 14
+                    font.bold: true
+                    elide: Text.ElideRight
+                    maximumLineCount: 1
+                    wrapMode: Text.NoWrap
+                }
+
+                Rectangle {
+                    height: 22
+                    width: 178
+                    radius: 6
+                    anchors.left: floatingWorkspaceTitleText.right
+                    anchors.leftMargin: 12
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: "#401A8D83"
+                    border.width: 1
+                    border.color: "#5535D5BD"
+
+                    Text {
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        verticalAlignment: Text.AlignVCenter
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "SPECTRUM + WATERFALL LIVE"
+                        color: root.analyzerAccent
+                        opacity: 0.90
+                        font.pixelSize: 9
+                        font.bold: true
+                        elide: Text.ElideRight
+                        maximumLineCount: 1
+                        wrapMode: Text.NoWrap
+                    }
+                }
+
+                Rectangle {
+                    width: 34
+                    height: 28
+                    radius: 7
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    color: floatingCloseArea.pressed ? "#36505E" : "#B21B2D38"
+                    border.width: 1
+                    border.color: root.analyzerBorder
+                    Text { anchors.centerIn: parent; text: "×"; color: root.analyzerText; font.pixelSize: 20; font.bold: true }
+                    MouseArea {
+                        id: floatingCloseArea
+                        anchors.fill: parent
+                        onClicked: root.closeFloatingWorkspace()
+                    }
+                }
+            }
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: floatingWorkspaceHeader.bottom
+                height: 1
+                color: root.analyzerBorder
+                opacity: 0.9
+            }
+
+            Item {
+                id: memorySlot
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: floatingWorkspaceHeader.bottom
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
+                anchors.topMargin: 9
+                anchors.bottomMargin: 10
+            }
+
+            // Existing production Scan/Memory implementations are deliberately
+            // not duplicated. Their Folder -> Group/Channel -> Detail behavior,
+            // Delete, Filter and mode buttons all remain authoritative here.
+            NewMemoryAddEdit {
+                id: newMemoryAddEdit
+                anchors.fill: memorySlot
+                visible: root.floatingWorkspaceOpen && !widgetView
+                enabled: visible
+                z: 2
+                radioMemLists: radioMemList
+            }
+
+            LogDeviceScanner {
+                id: logDeviceScanner
+                anchors.fill: memorySlot
+                visible: root.floatingWorkspaceOpen && widgetView
+                enabled: visible
+                z: 3
+            }
+        }
     }
 
     /* ============================================================
@@ -1489,8 +2282,10 @@ Item {
             // ✅ Fix4: rebuild cached grid
             if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
 
-            if (profileCards.count > 0)
+            if (profileCards.count > 0) {
                 widgetView = true
+                root.floatingWorkspaceOpen = true
+            }
 
             trigerScan = true
             if (typeof signalProfileCards === "function")
@@ -1566,6 +2361,7 @@ Item {
 
                 if(profileCards.count > 0){
                     widgetView = true
+                    root.floatingWorkspaceOpen = true
                 }
                 console.log("[PeakScan] all done")
                 trigerScan = true

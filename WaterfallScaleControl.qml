@@ -8,7 +8,10 @@ Item {
     height: 75
 
     Material.theme: Material.Dark
-    Material.accent: Material.Teal
+    Material.accent: "#6EF2E8"
+
+    readonly property color primaryText: "#F4FBFF"
+    readonly property color secondaryText: "#D3E1E7"
 
     // These will be bound to your waterfall logic
     property real waterfallMinDb: -130
@@ -21,8 +24,10 @@ Item {
         running: true
         interval: 10000
         onTriggered: {
-            waterfallScaleControl.opacity = 0.5
-            mouseArea.enabled = true
+            // CUDA1.6: parent HUD card provides translucency; keep text and
+            // controls fully opaque/readable instead of fading the whole item.
+            waterfallScaleControl.opacity = 1.0
+            mouseArea.enabled = false
         }
     }
 
@@ -32,8 +37,10 @@ Item {
 
     Rectangle {
         id: rectangle
-        color: "#80000000"
-        radius: 5
+        color: "transparent"
+        radius: 0
+        border.color: "transparent"
+        border.width: 0
         anchors.fill: parent
 
         ColumnLayout {
@@ -53,9 +60,10 @@ Item {
                     Layout.leftMargin: 8
                     Layout.fillWidth: true
                     minimumPixelSize: 10
-                    font.pointSize: 10
-                    color: Material.foreground
-                    text: "Min: "+waterfallMinDb.toFixed(1) +" dB"
+                    font.pointSize: 11
+                    font.bold: true
+                    color: primaryText
+                    text: "Min: "+waterfallMinDb.toFixed(1) +" dBFS"
                 }
 
                 Text {
@@ -64,9 +72,10 @@ Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                     minimumPixelSize: 10
-                    font.pointSize: 10
-                    color: Material.foreground
-                    text: "Max: "+waterfallMaxDb.toFixed(1) +" dB"
+                    font.pointSize: 11
+                    font.bold: true
+                    color: primaryText
+                    text: "Max: "+waterfallMaxDb.toFixed(1) +" dBFS"
                 }
             }
 
@@ -103,9 +112,9 @@ Item {
 
 
             Text {
-                text: "Scale"
+                text: "Intensity Scale · dBFS"
                 font.bold: true
-                font.pointSize: 10
+                font.pointSize: 11
                 horizontalAlignment: Text.AlignHCenter
                 Layout.bottomMargin: 4
                 Layout.preferredHeight: 12
@@ -113,7 +122,7 @@ Item {
                 Layout.fillWidth: true
                 minimumPixelSize: 10
                 Layout.alignment: Qt.AlignHCenter | Qt.AlignVCenter
-                color: Material.foreground
+                color: primaryText
             }
         }
 
