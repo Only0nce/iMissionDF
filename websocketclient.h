@@ -260,10 +260,8 @@ private:
 
     QElapsedTimer m_fftUiPublishTimer;
     int m_fftUiPublishIntervalMs = 40;       // legacy QML bridge: 25 Hz
-    QElapsedTimer m_spectrumDisplayTimer;
-    int m_spectrumDisplayIntervalMs = 16;    // native spectrum: target up to ~60 Hz
-    QElapsedTimer m_waterfallDisplayTimer;
-    int m_waterfallDisplayIntervalMs = 16;   // native waterfall: target up to ~60 Hz
+    QElapsedTimer m_analyzerDisplayTimer;
+    int m_analyzerDisplayIntervalMs = 11;    // CUDA1.26: lockstep native analyzer source cap (~90 Hz)
 
     // FPS telemetry is diagnostic-only and bounded. It lets us distinguish
     // AstraRX source cadence from Qt/GPU render cadence on the target.
@@ -285,8 +283,7 @@ private:
     QVector<float> m_fftDecodeScratch;
 
     bool shouldPublishFftUiFrame();
-    bool shouldPublishSpectrumFrame();
-    bool shouldPublishWaterfallFrame();
+    bool shouldPublishAnalyzerFrame();
     bool validateFftFrame(const QVector<float> &fftFrame, int payloadBytes = -1);
     QVector<float> peakPoolForDisplay(const QVector<float> &source, int limit) const;
     void publishNativeFftFrames(const QVector<float> &fftFrame);

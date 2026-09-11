@@ -55,7 +55,7 @@ Item {
 // R20.4-SPECTRUM-CUDA1.3-FLOATING-WORKSPACE:
     // Spectrum/Waterfall now own the full receiver workspace. Scan/Memory are
     // presented as a non-modal floating workspace above the live analyzer, so
-    // the CUDA/FPS60 renderer is never resized, destroyed, or recreated when
+    // the CUDA/high-FPS renderer is never resized, destroyed, or recreated when
     // the operator opens folders/results.
     readonly property real analyzerHeight: height
     // CUDA1.21: operator-adjustable Spectrum/Waterfall split. The divider is
@@ -242,16 +242,19 @@ Item {
     Theme { id: theme }
 
     // ============================================================
-    // CUDA1.1/FPS60: presentation-side invalidations are no longer capped
-    // at 30 Hz. Native FFT delivery is independently capped at ~60 Hz.
+    // CUDA1.26/FPS90-SYNC: interaction-triggered invalidations are paired so
+    // Spectrum and Waterfall cannot be kicked out of phase by QML events. The
+    // sustained 90 Hz cadence itself is owned by the shared C++ clock.
     // ============================================================
     Timer {
         id: spectrumPaintTimer
-        interval: 16
+        interval: 11
         repeat: false
         onTriggered: {
-            if (root.runtimeActive)
+            if (root.runtimeActive) {
                 spectrumCanvas.requestPaint()
+                waterfallCanvas.requestPaint()
+            }
         }
     }
 
@@ -588,7 +591,6 @@ Item {
     onSampRateChanged: {
         if (runtimeActive) {
             scheduleSpectrumPaint()
-            waterfallCanvas.requestPaint()
             overlayCanvas.requestPaint()
         }
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
@@ -642,6 +644,7 @@ Item {
         console.log("[R20.4-SPECTRUM-CUDA1.15-SELECTED-FREQUENCY-METRICS] selectedFrequencyLevel=1 localNoise=1 localSnr=1")
         console.log("[R20.4-SPECTRUM-CUDA1.20-MANUAL-LOCKED-INTENSITY-SCALE] manualIntensity=1 autoScale=0 spectrumSharesIntensity=1 sharedPlotTop=18 smeterCalibration=latched-median5")
         console.log("[R20.4-SPECTRUM-CUDA1.25-TALL-ICE-BLUE-PAN] dividerHoldMs=3000 panPalette=ice-blue panHeight=44 panTrackHeight=30 panIdleOpacity=0.28 panHoverOpacity=0.96")
+        console.log("[R20.4-SPECTRUM-CUDA1.26-FPS90-LOCKSTEP] targetPresentFps=90 sharedClock=1 sourceLockstep=1 analyzerFrameMs=11 pairedQmlInvalidation=1")
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
 
@@ -719,8 +722,6 @@ Item {
         // The native waterfall keeps history on the full acquisition RF axis
         // and reprojects it at paint time, so history must never be cleared here.
         scheduleSpectrumPaint()
-        if (waterfallCanvas && runtimeActive)
-            waterfallCanvas.requestPaint()
         if (overlayCanvas)
             overlayCanvas.requestPaint()
         if (spectrumGridCanvas)

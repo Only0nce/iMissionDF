@@ -5,6 +5,10 @@
 #include "CrashDiagnostics.h"
 
 #include <QDebug>
+#include <QGuiApplication>
+#include <QList>
+#include <QPointer>
+#include <QScreen>
 #include <QImage>
 #include <QLinearGradient>
 #include <QMetaType>
@@ -40,6 +44,107 @@ qint64 monotonicMs()
     return std::chrono::duration_cast<std::chrono::milliseconds>(
                 Clock::now().time_since_epoch()).count();
 }
+
+class AnalyzerPresentationClock final
+{
+public:
+    AnalyzerPresentationClock()
+    {
+        m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 90, 240);
+        QScreen *screen = QGuiApplication::primaryScreen();
+        const double displayHz = screen ? screen->refreshRate() : 0.0;
+        m_effectiveFps = (displayHz >= 30.0)
+                ? qMin(m_requestedFps, qMax(30, qRound(displayHz)))
+                : m_requestedFps;
+        // Run slightly ahead of the requested cadence and let Qt Quick/vsync
+        // coalesce onto the physical refresh boundary. This avoids choosing a
+        // 17 ms timer for a 60 Hz panel (58.8 Hz) while keeping 90 Hz at 11 ms.
+        m_intervalMs = qMax(1, static_cast<int>(std::floor(1000.0
+                                         / static_cast<double>(m_effectiveFps))));
+        m_timer.setTimerType(Qt::PreciseTimer);
+        m_timer.setInterval(m_intervalMs);
+        m_timer.setSingleShot(false);
+        QObject::connect(&m_timer, &QTimer::timeout, [this]() { tick(); });
+    }
+
+    void add(FftDisplayItem *item)
+    {
+        if (!item)
+            return;
+        for (const QPointer<FftDisplayItem> &existing : m_items) {
+            if (existing == item)
+                return;
+        }
+        m_items.append(QPointer<FftDisplayItem>(item));
+        if (!m_timer.isActive()) {
+            m_statsTimer.start();
+            m_ticks = 0;
+            m_timer.start();
+        }
+    }
+
+    void remove(FftDisplayItem *item)
+    {
+        for (int i = m_items.size() - 1; i >= 0; --i) {
+            if (m_items.at(i).isNull() || m_items.at(i) == item)
+                m_items.removeAt(i);
+        }
+        if (m_items.isEmpty())
+            m_timer.stop();
+    }
+
+    int intervalMs() const noexcept { return m_intervalMs; }
+    int requestedFps() const noexcept { return m_requestedFps; }
+    int effectiveFps() const noexcept { return m_effectiveFps; }
+
+private:
+    void tick()
+    {
+        ++m_ticks;
+        for (int i = m_items.size() - 1; i >= 0; --i) {
+            FftDisplayItem *item = m_items.at(i).data();
+            if (!item) {
+                m_items.removeAt(i);
+                continue;
+            }
+            item->presentOnSharedClock();
+        }
+
+        if (!m_statsTimer.isValid())
+            m_statsTimer.start();
+        if (m_statsTimer.elapsed() >= 5000) {
+            const double sec = std::max(0.001, m_statsTimer.elapsed() / 1000.0);
+            const double tickFps = static_cast<double>(m_ticks) / sec;
+            QScreen *screen = QGuiApplication::primaryScreen();
+            const double displayHz = screen ? screen->refreshRate() : 0.0;
+            qInfo() << "[ANALYZER-PRESENT-5S]"
+                    << "requestedFps=" << m_requestedFps
+                    << "effectiveFps=" << m_effectiveFps
+                    << "tickFps=" << QString::number(tickFps, 'f', 1)
+                    << "intervalMs=" << m_intervalMs
+                    << "displayHz=" << QString::number(displayHz, 'f', 1)
+                    << "items=" << m_items.size();
+            m_ticks = 0;
+            m_statsTimer.restart();
+        }
+    }
+
+    QList<QPointer<FftDisplayItem>> m_items;
+    QTimer m_timer;
+    QElapsedTimer m_statsTimer;
+    quint64 m_ticks = 0;
+    int m_requestedFps = 90;
+    int m_effectiveFps = 90;
+    int m_intervalMs = 11;
+};
+
+AnalyzerPresentationClock &sharedAnalyzerPresentationClock()
+{
+    // Intentionally process-lifetime. This avoids QObject/QTimer destruction
+    // ordering hazards after QGuiApplication begins shutting down.
+    static AnalyzerPresentationClock *clock = new AnalyzerPresentationClock();
+    return *clock;
+}
 }
 
 FftDisplayItem::FftDisplayItem(QQuickItem *parent)
@@ -60,25 +165,14 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     setRenderTarget(QQuickPaintedItem::Image);
 #endif
 
-    // CUDA1.1/FPS60: decouple Spectrum presentation from AstraRX frame
-    // cadence. 16 ms targets a 60 Hz display; Qt Quick/vsync may coalesce
-    // redundant updates, so this does not busy-loop the GUI thread.
-    m_presentIntervalMs = envPositiveIntLocal("ISCAN_SPECTRUM_PRESENT_MS", 16, 100);
+    // CUDA1.26/FPS90-SYNC: one shared precise timer invalidates both Spectrum
+    // and Waterfall on the same GUI-thread tick. Independent item timers caused
+    // phase drift and unequal frame pacing even when both were configured to
+    // the same nominal interval.
+    AnalyzerPresentationClock &presentClock = sharedAnalyzerPresentationClock();
+    m_presentIntervalMs = presentClock.intervalMs();
     m_waterfallHistoryMaxBins = envPositiveIntLocal("ISCAN_WATERFALL_DISPLAY_BINS", 2048, 8192);
-    m_presentTimer.setInterval(m_presentIntervalMs);
-    m_presentTimer.setTimerType(Qt::PreciseTimer);
-    m_presentTimer.setSingleShot(false);
-    connect(&m_presentTimer, &QTimer::timeout, this, [this]() {
-        bool present = false;
-        {
-            QMutexLocker locker(&m_dataMutex);
-            present = m_renderEnabled
-                    && ((m_mode == Spectrum && !m_spectrumFrame.isEmpty())
-                        || (m_mode == Waterfall && !m_waterfallPaused && m_waterfallValidRows > 0));
-        }
-        if (present)
-            update();
-    });
+    presentClock.add(this);
 
     m_palette = {
         QColor(QStringLiteral("#030712")),
@@ -108,13 +202,15 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     // frame. The Spectrum item no longer creates an unused CUDA context/thread.
     refreshPresentationClock();
 
-    qInfo() << "[R20.4-SPECTRUM-CUDA1.1-FPS60]"
+    qInfo() << "[R20.4-SPECTRUM-CUDA1.26-FPS90-LOCKSTEP]"
             << "asyncComputeWorker=1"
             << "waterfallRingBuffer=1"
             << "cudaPeakPoolPalette=1"
             << "cudaHistoryRecolor=1"
             << "lazyCudaWorker=1"
             << "targetPresentMs=" << m_presentIntervalMs
+            << "requestedPresentFps=" << sharedAnalyzerPresentationClock().requestedFps()
+            << "effectivePresentFps=" << sharedAnalyzerPresentationClock().effectiveFps()
             << "waterfallGpuBins=" << m_waterfallHistoryMaxBins
 #ifdef PLATFORM_JETSON
             << "paintTarget=" << (renderTarget() == QQuickPaintedItem::FramebufferObject ? "fbo" : "image")
@@ -126,6 +222,7 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
 
 FftDisplayItem::~FftDisplayItem()
 {
+    sharedAnalyzerPresentationClock().remove(this);
     disconnectBackend();
     stopComputeWorker();
 }
@@ -304,18 +401,9 @@ void FftDisplayItem::setRenderEnabled(bool enabled)
 
 void FftDisplayItem::refreshPresentationClock()
 {
-    bool shouldRun = false;
-    {
-        QMutexLocker locker(&m_dataMutex);
-        shouldRun = m_renderEnabled && (m_mode == Spectrum || !m_waterfallPaused);
-    }
-
-    if (shouldRun) {
-        if (!m_presentTimer.isActive())
-            m_presentTimer.start();
-    } else {
-        m_presentTimer.stop();
-    }
+    // CUDA1.26: presentation lifetime is centralized. Per-item state is checked
+    // in presentOnSharedClock(), so mode/pause/render changes cannot de-phase
+    // Spectrum and Waterfall by starting/stopping independent timers.
 }
 
 void FftDisplayItem::setShowMaxHold(bool enabled)
@@ -686,7 +774,23 @@ void FftDisplayItem::setPalette(const QVariantList &colors)
 
 void FftDisplayItem::requestPaint()
 {
+    // Explicit UI invalidations are still allowed, but sustained analyzer
+    // presentation is owned by the shared 90 Hz clock. QML schedules Spectrum
+    // and Waterfall together so one-off interaction paints remain paired.
     update();
+}
+
+void FftDisplayItem::presentOnSharedClock()
+{
+    bool present = false;
+    {
+        QMutexLocker locker(&m_dataMutex);
+        present = m_renderEnabled
+                && ((m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+                    || (m_mode == Waterfall && !m_waterfallPaused && m_waterfallValidRows > 0));
+    }
+    if (present)
+        update();
 }
 
 void FftDisplayItem::clearPeaks()
@@ -775,9 +879,9 @@ void FftDisplayItem::onSpectrumFrame(const QVector<float> &frame)
         emit measurementsChanged();
         emit selectedMeasurementsChanged();
     }
-    // Presentation is clocked by m_presentTimer at ~60 Hz. Avoid issuing a
-    // second immediate update for every source frame, which used to create
-    // bursty render scheduling when WebSocket arrival jittered.
+    // Presentation is clocked by the shared analyzer clock at ~90 Hz. Avoid
+    // issuing a second immediate update for every source frame; source arrival
+    // jitter must not perturb the common Spectrum/Waterfall presentation phase.
 }
 
 void FftDisplayItem::onWaterfallFrame(const QVector<float> &frame)
@@ -788,16 +892,15 @@ void FftDisplayItem::onWaterfallFrame(const QVector<float> &frame)
 
 void FftDisplayItem::onMaxHoldFrame(const QVector<float> &frame)
 {
-    bool repaint = false;
     {
         QMutexLocker locker(&m_dataMutex);
         if (m_mode != Spectrum || !m_renderEnabled)
             return;
         m_maxHoldFrame = frame;
-        repaint = m_showMaxHold;
     }
-    if (repaint)
-        update();
+    // CUDA1.26: Max Hold arrival must not inject Spectrum-only paint bursts.
+    // The next shared analyzer tick presents the updated line together with the
+    // Waterfall, preserving equal steady-state paint cadence.
 }
 
 void FftDisplayItem::onSmeterValueUpdated(double smeterDb)
@@ -1185,10 +1288,10 @@ void FftDisplayItem::onWaterfallRowReady(quint64 generation,
         }
     }
 
-    // Normal Waterfall presentation is driven by the fixed ~60 Hz clock.
-    // Avoid a second bursty update on every worker completion.
-    if (painted && !m_presentTimer.isActive())
-        update();
+    // Normal Waterfall presentation is driven by the shared ~90 Hz clock.
+    // Worker completion only updates retained data; the next common tick paints
+    // both analyzer surfaces in lockstep.
+    Q_UNUSED(painted);
     if (needRecolor)
         requestHistoryRecolor();
     else if (!nextFrame.isEmpty())
@@ -1229,8 +1332,8 @@ void FftDisplayItem::onHistoryRecolorReady(quint64 generation,
         }
     }
 
-    if (applied && !m_presentTimer.isActive())
-        update();
+    // Recolor completion is presented on the next shared analyzer tick.
+    Q_UNUSED(applied);
     if (rerun)
         requestHistoryRecolor();
     else if (!nextFrame.isEmpty())
@@ -1536,7 +1639,8 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     double blend = 1.0;
     if (previousFrame.size() == currentFrame.size() && transitionStartMs > 0) {
         const qint64 ageMs = std::max<qint64>(0, monotonicMs() - transitionStartMs);
-        const double interpolationMs = std::max(16.0, std::min(42.0, sourcePeriodMs * 0.75));
+        const double interpolationMs = std::max(static_cast<double>(m_presentIntervalMs),
+                                                std::min(33.0, sourcePeriodMs * 0.75));
         blend = std::max(0.0, std::min(1.0, static_cast<double>(ageMs) / interpolationMs));
         // Smoothstep removes the small constant-velocity jerk at frame boundaries.
         blend = blend * blend * (3.0 - 2.0 * blend);
@@ -1581,7 +1685,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
         // floor. This keeps the grid visible while giving the live trace a
         // substantial analyzer-style body. Max Hold is rendered separately in
         // red-orange, so current energy and historical maxima are unambiguous.
-        // Still one fill pass: no glow/blur passes are added to the FPS60 path.
+        // Still one fill pass: no glow/blur passes are added to the high-FPS path.
         QLinearGradient fillGradient(0.0, plotTop, 0.0, plotBottom);
         fillGradient.setColorAt(0.00, QColor(210, 255, 88, 220)); // strongest: lime
         fillGradient.setColorAt(0.16, QColor(165, 255, 55, 216));
@@ -1634,7 +1738,7 @@ void FftDisplayItem::paintWaterfall(QPainter *painter)
 
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
 
-    // FPS60: render approximately one acquired FFT row per display pixel
+    // FPS90-SYNC: render approximately one acquired FFT row per display pixel
     // instead of resampling all 1024 retained history rows into a ~200 px
     // surface on every paint. The full 1024-row history is still retained for
     // persistence; only the visible tail is sampled for presentation.
@@ -1644,7 +1748,7 @@ void FftDisplayItem::paintWaterfall(QPainter *painter)
 
     // Smooth presentation between real rows without manufacturing RF values.
     // We only translate the already-acquired image by at most one row; the
-    // next real row resets the phase. If source cadence is >=60 Hz this phase
+    // next real row resets the phase. If source cadence is high this phase
     // naturally stays close to zero.
     qreal scrollOffset = 0.0;
     if (!m_waterfallPaused && m_lastWaterfallArrivalMs > 0
@@ -1714,7 +1818,8 @@ void FftDisplayItem::paint(QPainter *painter)
         qInfo() << "[SPECTRUM-RENDER-5S]"
                 << "mode=" << (modeSnapshot == Spectrum ? "spectrum" : "waterfall")
                 << "fps=" << QString::number(fps, 'f', 1)
-                << "targetMs=" << (modeSnapshot == Spectrum ? m_presentIntervalMs : 0);
+                << "targetMs=" << m_presentIntervalMs
+                << "sharedClock=1";
         m_paintStatsFrames = 0;
         m_paintStatsTimer.restart();
     }

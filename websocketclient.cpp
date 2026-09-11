@@ -41,11 +41,10 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
     m_fftMaxBins = envPositiveInt("ISCAN_FFT_MAX_BINS", 65536, 1048576);
     m_spectrumDisplayBins = envPositiveInt("ISCAN_SPECTRUM_DISPLAY_BINS", 8192, m_fftMaxBins);
     m_waterfallDisplayBins = envPositiveInt("ISCAN_WATERFALL_DISPLAY_BINS", 2048, m_fftMaxBins);
-    // CUDA1.1/FPS60: the previous production path was hard-capped to
-    // 25 Hz Spectrum and 20 Hz Waterfall. 16 ms removes that artificial
-    // bottleneck while still allowing A/B overrides on the target.
-    m_spectrumDisplayIntervalMs = envPositiveInt("ISCAN_SPECTRUM_FRAME_MS", 16, 1000);
-    m_waterfallDisplayIntervalMs = envPositiveInt("ISCAN_WATERFALL_FRAME_MS", 16, 1000);
+    // CUDA1.26/FPS90-SYNC: Spectrum and Waterfall source publication is gated
+    // by one timer so both always consume the same acquired FFT snapshot.
+    // 11 ms targets about 90 Hz when AstraRX itself supplies frames that fast.
+    m_analyzerDisplayIntervalMs = envPositiveInt("ISCAN_ANALYZER_FRAME_MS", 11, 1000);
 
     qInfo().noquote() << "[R20.4 FFT Runtime]"
                       << "qmlPublish=" << m_fftQmlPublish
@@ -53,8 +52,8 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
                       << "maxBins=" << m_fftMaxBins
                       << "spectrumDisplayBins=" << m_spectrumDisplayBins
                       << "waterfallDisplayBins=" << m_waterfallDisplayBins
-                      << "spectrumFrameMs=" << m_spectrumDisplayIntervalMs
-                      << "waterfallFrameMs=" << m_waterfallDisplayIntervalMs
+                      << "analyzerFrameMs=" << m_analyzerDisplayIntervalMs
+                      << "lockstepSource=1"
                       << "renderer=native-qquickpainteditem";
     // Connect Qt signals exactly once. connectToServer() may be called again for
     // reconnect/target changes without multiplying message handlers.
@@ -111,8 +110,7 @@ void WebSocketClient::setFftUiActive(bool active)
 
     // Make the first frame after entering the Spectrum page immediate.
     m_fftUiPublishTimer.invalidate();
-    m_spectrumDisplayTimer.invalidate();
-    m_waterfallDisplayTimer.invalidate();
+    m_analyzerDisplayTimer.invalidate();
     m_fftAutoScaleTimer.invalidate();
     m_fftAutoScaleValid = false;
     emit fftAutoScaleStatsChanged();
@@ -178,27 +176,14 @@ bool WebSocketClient::shouldPublishFftUiFrame()
     return false;
 }
 
-bool WebSocketClient::shouldPublishSpectrumFrame()
+bool WebSocketClient::shouldPublishAnalyzerFrame()
 {
-    if (!m_spectrumDisplayTimer.isValid()) {
-        m_spectrumDisplayTimer.start();
+    if (!m_analyzerDisplayTimer.isValid()) {
+        m_analyzerDisplayTimer.start();
         return true;
     }
-    if (m_spectrumDisplayTimer.elapsed() >= m_spectrumDisplayIntervalMs) {
-        m_spectrumDisplayTimer.restart();
-        return true;
-    }
-    return false;
-}
-
-bool WebSocketClient::shouldPublishWaterfallFrame()
-{
-    if (!m_waterfallDisplayTimer.isValid()) {
-        m_waterfallDisplayTimer.start();
-        return true;
-    }
-    if (m_waterfallDisplayTimer.elapsed() >= m_waterfallDisplayIntervalMs) {
-        m_waterfallDisplayTimer.restart();
+    if (m_analyzerDisplayTimer.elapsed() >= m_analyzerDisplayIntervalMs) {
+        m_analyzerDisplayTimer.restart();
         return true;
     }
     return false;
@@ -326,15 +311,11 @@ void WebSocketClient::publishNativeFftFrames(const QVector<float> &fftFrame)
 
     updateFftAutoScaleStats(fftFrame);
 
-    if (shouldPublishSpectrumFrame())
+    if (shouldPublishAnalyzerFrame()) {
+        // CUDA1.26: one acquisition gate feeds both views from the exact same
+        // FFT message. Spectrum display reduction stays on the receive thread
+        // as before; Waterfall display reduction remains on CUDA/CPU worker.
         emit spectrumDisplayFrame(peakPoolForDisplay(fftFrame, m_spectrumDisplayBins));
-
-    if (shouldPublishWaterfallFrame()) {
-        // CUDA1.1/FPS60: do NOT peak-pool Waterfall on the WebSocket/Qt
-        // receive thread. Send the implicitly-shared native frame to the
-        // Spectrum CUDA worker; CUDA performs the display reduction there.
-        // If CUDA is unavailable, the same work runs on the dedicated CPU
-        // worker rather than blocking the UI/WebSocket event loop.
         emit waterfallDisplayFrame(fftFrame);
     }
 
@@ -607,7 +588,7 @@ void WebSocketClient::onBinaryMessageReceived(const QByteArray &message)
             break;
 
         // Source-FPS telemetry: this measures real FFT messages arriving from
-        // AstraRX. A 60 Hz renderer cannot invent 60 independent RF snapshots
+        // AstraRX. A high-FPS renderer cannot invent independent RF snapshots
         // if the server itself is sending at a lower cadence.
         if (!m_fftSourceStatsTimer.isValid())
             m_fftSourceStatsTimer.start();

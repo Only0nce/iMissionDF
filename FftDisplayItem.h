@@ -160,6 +160,7 @@ public:
     bool cudaAccelerationActive() const noexcept { return m_cudaAccelerationActive; }
 
     Q_INVOKABLE void requestPaint();
+    void presentOnSharedClock();
     Q_INVOKABLE void clearPeaks();
     Q_INVOKABLE void clearHistory();
 
@@ -264,12 +265,11 @@ private:
     QVector<float> m_previousSpectrumFrame;
     QVector<float> m_maxHoldFrame;
 
-    // CUDA1.1/FPS60 presentation clock. Spectrum source frames may arrive at
-    // a cadence different from the display refresh. The 60 Hz clock decouples
-    // presentation from acquisition, while a short interpolation window makes
-    // 20-40 Hz source updates visually smooth without fabricating RF data.
-    QTimer m_presentTimer;
-    int m_presentIntervalMs = 16;
+    // CUDA1.26/FPS90-SYNC: Spectrum and Waterfall share one process-wide
+    // presentation clock. Keeping the target interval here is diagnostic-only;
+    // the actual timer is centralized so both items are invalidated on the same
+    // GUI-thread tick instead of drifting on independent timers.
+    int m_presentIntervalMs = 11;
     qint64 m_spectrumTransitionStartMs = 0;
     qint64 m_lastSpectrumArrivalMs = 0;
     double m_spectrumSourcePeriodMs = 40.0;
