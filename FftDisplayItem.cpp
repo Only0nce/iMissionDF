@@ -98,6 +98,7 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
 
     rebuildPaletteLutLocked();
     m_measurementTimer.start();
+    m_rfMetricsTelemetryTimer.start();
     m_computeStatsTimer.start();
     m_recolorDebounceTimer.setSingleShot(true);
     m_recolorDebounceTimer.setInterval(12);
@@ -216,6 +217,16 @@ void FftDisplayItem::setBackend(QObject *backendObject)
     disconnectBackend();
     m_backend = client;
 
+    // CUDA1.19: a new backend session gets a new one-time RF reference.
+    // Do not carry a calibration learned from another receiver/session.
+    {
+        QMutexLocker locker(&m_dataMutex);
+        m_spectrumCalibrationValid = false;
+        m_spectrumCalibrationOffsetDb = 0.0;
+        m_spectrumCalibrationSamples = 0;
+        m_spectrumCalibrationCandidates.clear();
+    }
+
     if (m_backend) {
         m_backendConnections.append(connect(m_backend.data(), &WebSocketClient::spectrumDisplayFrame,
                                             this, &FftDisplayItem::onSpectrumFrame,
@@ -226,6 +237,12 @@ void FftDisplayItem::setBackend(QObject *backendObject)
         m_backendConnections.append(connect(m_backend.data(), &WebSocketClient::maxHoldDisplayFrame,
                                             this, &FftDisplayItem::onMaxHoldFrame,
                                             Qt::DirectConnection));
+        // CUDA1.16: AstraRX already publishes the tuned receiver S-meter. Keep
+        // this low-rate scalar on the GUI object's thread; no FFT/QML array is
+        // involved and no CUDA synchronization is introduced.
+        m_backendConnections.append(connect(m_backend.data(), &WebSocketClient::smeterValueUpdated,
+                                            this, &FftDisplayItem::onSmeterValueUpdated,
+                                            Qt::QueuedConnection));
         m_backendConnections.append(connect(m_backend.data(), &QObject::destroyed,
                                             this, [this]() {
             m_backendConnections.clear();
@@ -237,8 +254,17 @@ void FftDisplayItem::setBackend(QObject *backendObject)
                 m_maxHoldFrame.clear();
                 clearHistoryLocked();
                 m_measurementsValid = false;
+                m_selectedMeasurementsValid = false;
+                m_receiverLevelValid = false;
+                m_spectrumCalibrationValid = false;
+                m_spectrumCalibrationOffsetDb = 0.0;
+                m_spectrumCalibrationSamples = 0;
+                m_spectrumCalibrationCandidates.clear();
             }
             emit measurementsChanged();
+            emit selectedMeasurementsChanged();
+            emit receiverLevelChanged();
+            emit spectrumCalibrationChanged();
             update();
         }));
     }
@@ -382,12 +408,30 @@ void FftDisplayItem::setMaxDb(double value)
     update();
 }
 
+void FftDisplayItem::setPlotTopInset(double value)
+{
+    if (!std::isfinite(value))
+        return;
+
+    value = std::max(0.0, value);
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (sameReal(m_plotTopInset, value))
+            return;
+        m_plotTopInset = value;
+    }
+
+    emit plotGeometryChanged();
+    update();
+}
+
 void FftDisplayItem::setFullStartFreq(double value)
 {
     if (!std::isfinite(value))
         return;
 
     bool clearEpoch = false;
+    bool selectedMetricsChanged = false;
     {
         QMutexLocker locker(&m_dataMutex);
         if (sameReal(m_fullStartFreq, value))
@@ -396,8 +440,14 @@ void FftDisplayItem::setFullStartFreq(double value)
         m_fullStartFreq = value;
         if (clearEpoch)
             clearHistoryLocked();
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty()) {
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+            selectedMetricsChanged = true;
+        }
     }
     emit frequencyMappingChanged();
+    if (selectedMetricsChanged)
+        emit selectedMeasurementsChanged();
     update();
 }
 
@@ -451,13 +501,107 @@ void FftDisplayItem::setSampleRate(double value)
         m_sampleRate = value;
         if (clearEpoch)
             clearHistoryLocked();
-        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty()) {
             updateMeasurementsLocked(m_spectrumFrame, true);
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+        }
     }
     emit frequencyMappingChanged();
-    if (m_mode == Spectrum)
+    if (m_mode == Spectrum) {
         emit measurementsChanged();
+        emit selectedMeasurementsChanged();
+    }
     update();
+}
+
+void FftDisplayItem::setMeasurementFrequencyHz(double value)
+{
+    if (!std::isfinite(value))
+        return;
+
+    bool receiverLevelInvalidated = false;
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (sameReal(m_measurementFrequencyHz, value))
+            return;
+        m_measurementFrequencyHz = value;
+
+        // The previously received S-meter sample belongs to the previous tuned
+        // receiver. Never display it against the newly moved selection bar.
+        receiverLevelInvalidated = m_receiverLevelValid;
+        m_receiverLevelValid = false;
+        m_receiverLevelFrequencyHz = value;
+        // QML coalesces offset commands for ~20 ms, and AstraRX needs a short
+        // processing interval before its S-meter belongs to the new receiver.
+        // Ignore immediately arriving samples so an old-frequency value is not
+        // relabelled as the new frequency while the user drags/tunes.
+        m_receiverLevelAcceptAfterMs = monotonicMs() + 120;
+
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+        else
+            m_selectedMeasurementsValid = false;
+    }
+
+    emit measurementReferenceChanged();
+    emit selectedMeasurementsChanged();
+    if (receiverLevelInvalidated)
+        emit receiverLevelChanged();
+}
+
+void FftDisplayItem::setMeasurementBandwidthHz(double value)
+{
+    if (!std::isfinite(value))
+        return;
+    value = std::max(0.0, value);
+
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (sameReal(m_measurementBandwidthHz, value))
+            return;
+        m_measurementBandwidthHz = value;
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+    }
+
+    emit measurementReferenceChanged();
+    emit selectedMeasurementsChanged();
+}
+
+void FftDisplayItem::setMeasurementLowCutHz(double value)
+{
+    if (!std::isfinite(value))
+        return;
+
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (sameReal(m_measurementLowCutHz, value))
+            return;
+        m_measurementLowCutHz = value;
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+    }
+
+    emit measurementReferenceChanged();
+    emit selectedMeasurementsChanged();
+}
+
+void FftDisplayItem::setMeasurementHighCutHz(double value)
+{
+    if (!std::isfinite(value))
+        return;
+
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (sameReal(m_measurementHighCutHz, value))
+            return;
+        m_measurementHighCutHz = value;
+        if (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+            updateSelectedMeasurementsLocked(m_spectrumFrame, true);
+    }
+
+    emit measurementReferenceChanged();
+    emit selectedMeasurementsChanged();
 }
 
 void FftDisplayItem::setSpectrumColor(const QColor &color)
@@ -621,13 +765,16 @@ void FftDisplayItem::onSpectrumFrame(const QVector<float> &frame)
         if (!m_measurementsValid || !m_measurementTimer.isValid()
                 || m_measurementTimer.elapsed() >= 200) {
             updateMeasurementsLocked(frame, true);
+            updateSelectedMeasurementsLocked(frame, true);
             m_measurementTimer.restart();
             metricsChanged = true;
         }
     }
 
-    if (metricsChanged)
+    if (metricsChanged) {
         emit measurementsChanged();
+        emit selectedMeasurementsChanged();
+    }
     // Presentation is clocked by m_presentTimer at ~60 Hz. Avoid issuing a
     // second immediate update for every source frame, which used to create
     // bursty render scheduling when WebSocket arrival jittered.
@@ -651,6 +798,142 @@ void FftDisplayItem::onMaxHoldFrame(const QVector<float> &frame)
     }
     if (repaint)
         update();
+}
+
+void FftDisplayItem::onSmeterValueUpdated(double smeterDb)
+{
+    if (!std::isfinite(smeterDb))
+        return;
+
+    bool changed = false;
+    bool calibrationChanged = false;
+    bool logTelemetry = false;
+    double freqHz = 0.0;
+    double fftPointDb = 0.0;
+    double fftNoiseDb = 0.0;
+    double fftSnrDb = 0.0;
+    double calibrationCandidateDb = 0.0;
+    double calibrationOffsetDb = 0.0;
+    double bandwidthHz = 0.0;
+    double lowCutHz = 0.0;
+    double highCutHz = 0.0;
+    bool fftValid = false;
+    bool calibrationValid = false;
+    quint32 calibrationSamples = 0;
+
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (m_mode != Spectrum || !std::isfinite(m_measurementFrequencyHz)
+                || m_measurementFrequencyHz <= 0.0)
+            return;
+        if (monotonicMs() < m_receiverLevelAcceptAfterMs)
+            return;
+
+        changed = !m_receiverLevelValid
+                || !sameReal(m_receiverLevelDb, smeterDb)
+                || !sameReal(m_receiverLevelFrequencyHz, m_measurementFrequencyHz);
+
+        m_receiverLevelDb = smeterDb;
+        m_receiverLevelFrequencyHz = m_measurementFrequencyHz;
+        m_receiverLevelValid = true;
+
+        // CUDA1.19: establish one stable visual RF-reference offset between
+        // native FFT amplitude and AstraRX's tuned S-meter, then freeze it for
+        // the backend session. CUDA1.18 continuously EMA-updated this offset,
+        // which made the Y-axis labels visibly breathe. The user explicitly
+        // prefers a fixed scale even if absolute calibration is a little off.
+        //
+        // Collect five trusted candidates after tune-settle. Do not publish any
+        // calibration while collecting; when the fifth arrives, latch the median
+        // once. Median rejection makes the one-time lock robust against a single
+        // stale S-meter or FFT transient without introducing ongoing movement.
+        if (!m_spectrumCalibrationValid
+                && m_selectedMeasurementsValid
+                && std::isfinite(m_selectedLevelDb)
+                && std::isfinite(m_selectedSnrDb)) {
+            calibrationCandidateDb = smeterDb - m_selectedLevelDb;
+
+            const bool candidateSane = std::isfinite(calibrationCandidateDb)
+                    && calibrationCandidateDb >= -60.0
+                    && calibrationCandidateDb <= 60.0;
+            const bool updateTrusted = m_selectedSnrDb >= 4.0;
+
+            if (candidateSane && updateTrusted) {
+                m_spectrumCalibrationCandidates.append(calibrationCandidateDb);
+                m_spectrumCalibrationSamples =
+                        static_cast<quint32>(m_spectrumCalibrationCandidates.size());
+
+                constexpr int cCalibrationLockSamples = 5;
+                if (m_spectrumCalibrationCandidates.size() >= cCalibrationLockSamples) {
+                    QVector<double> sorted = m_spectrumCalibrationCandidates;
+                    std::sort(sorted.begin(), sorted.end());
+                    const double oldOffset = m_spectrumCalibrationOffsetDb;
+                    m_spectrumCalibrationOffsetDb = sorted.at(sorted.size() / 2);
+                    m_spectrumCalibrationValid = true;
+                    calibrationChanged = !sameReal(oldOffset, m_spectrumCalibrationOffsetDb)
+                            || m_spectrumCalibrationSamples == cCalibrationLockSamples;
+                }
+            }
+        }
+
+        // Low-rate field telemetry shows both raw and RF-referenced domains.
+        // The offset is observational/presentation calibration only; it is not
+        // fed back into the FFT pipeline or receiver tuning. Once valid it is
+        // latched and no longer changes during this backend session.
+        logTelemetry = !m_rfMetricsTelemetryTimer.isValid()
+                || m_rfMetricsTelemetryTimer.elapsed() >= 5000;
+        if (logTelemetry) {
+            m_rfMetricsTelemetryTimer.restart();
+            freqHz = m_receiverLevelFrequencyHz;
+            fftPointDb = m_selectedLevelDb;
+            fftNoiseDb = m_selectedNoiseFloorDb;
+            fftSnrDb = m_selectedSnrDb;
+            bandwidthHz = m_measurementBandwidthHz;
+            lowCutHz = m_measurementLowCutHz;
+            highCutHz = m_measurementHighCutHz;
+            fftValid = m_selectedMeasurementsValid;
+            calibrationValid = m_spectrumCalibrationValid;
+            calibrationOffsetDb = m_spectrumCalibrationOffsetDb;
+            calibrationSamples = m_spectrumCalibrationSamples;
+        }
+    }
+
+    if (changed)
+        emit receiverLevelChanged();
+    if (calibrationChanged)
+        emit spectrumCalibrationChanged();
+
+    if (logTelemetry) {
+        if (fftValid) {
+            qInfo().nospace()
+                    << "[RF-METRICS] freq=" << (freqHz / 1.0e6) << "MHz"
+                    << " astra_smeter=" << smeterDb
+                    << " fft_point_raw=" << fftPointDb
+                    << " fft_local_noise_raw=" << fftNoiseDb
+                    << " fft_snr=" << fftSnrDb
+                    << " axis_cal_valid=" << (calibrationValid ? 1 : 0)
+                    << " axis_cal_latched=" << (calibrationValid ? 1 : 0)
+                    << " axis_cal_samples=" << calibrationSamples
+                    << " axis_cal_db=" << calibrationOffsetDb
+                    << " spectrum_rf=" << (fftPointDb + calibrationOffsetDb)
+                    << " noise_rf=" << (fftNoiseDb + calibrationOffsetDb)
+                    << " bw=" << bandwidthHz
+                    << " low_cut=" << lowCutHz
+                    << " high_cut=" << highCutHz;
+        } else {
+            qInfo().nospace()
+                    << "[RF-METRICS] freq=" << (freqHz / 1.0e6) << "MHz"
+                    << " astra_smeter=" << smeterDb
+                    << " fft_valid=0"
+                    << " axis_cal_valid=" << (calibrationValid ? 1 : 0)
+                    << " axis_cal_latched=" << (calibrationValid ? 1 : 0)
+                    << " axis_cal_samples=" << calibrationSamples
+                    << " axis_cal_db=" << calibrationOffsetDb
+                    << " bw=" << bandwidthHz
+                    << " low_cut=" << lowCutHz
+                    << " high_cut=" << highCutHz;
+        }
+    }
 }
 
 void FftDisplayItem::onComputeBackendReady(QString backendName, bool cudaActive, QString detail)
@@ -1004,6 +1287,136 @@ void FftDisplayItem::updateMeasurementsLocked(const QVector<float> &frame, bool 
               * m_sampleRate;
 }
 
+
+void FftDisplayItem::updateSelectedMeasurementsLocked(const QVector<float> &frame, bool force)
+{
+    Q_UNUSED(force)
+
+    m_selectedFrequencyHz = m_measurementFrequencyHz;
+
+    if (frame.size() < 2 || m_sampleRate <= 0.0
+            || !std::isfinite(m_measurementFrequencyHz)) {
+        m_selectedMeasurementsValid = false;
+        return;
+    }
+
+    const int lastIndex = frame.size() - 1;
+    const double normalized = (m_measurementFrequencyHz - m_fullStartFreq) / m_sampleRate;
+    if (!std::isfinite(normalized) || normalized < 0.0 || normalized > 1.0) {
+        m_selectedMeasurementsValid = false;
+        return;
+    }
+
+    // Measure the signal at the actual selected/listening frequency instead of
+    // searching for the strongest peak elsewhere in the viewport. A fractional
+    // bin position is linearly interpolated so tuning does not jump one whole FFT
+    // bin at a time when the receiver frequency sits between adjacent bins.
+    const double binPosition = normalized * static_cast<double>(lastIndex);
+    const int lowerIndex = std::max(0, std::min(lastIndex,
+                                static_cast<int>(std::floor(binPosition))));
+    const int upperIndex = std::max(0, std::min(lastIndex, lowerIndex + 1));
+    const double fraction = std::max(0.0, std::min(1.0,
+                                  binPosition - static_cast<double>(lowerIndex)));
+
+    const double lowerDb = static_cast<double>(frame.at(lowerIndex));
+    const double upperDb = static_cast<double>(frame.at(upperIndex));
+    double selectedLevel = 0.0;
+    if (std::isfinite(lowerDb) && std::isfinite(upperDb))
+        selectedLevel = lowerDb + (upperDb - lowerDb) * fraction;
+    else if (std::isfinite(lowerDb))
+        selectedLevel = lowerDb;
+    else if (std::isfinite(upperDb))
+        selectedLevel = upperDb;
+    else {
+        m_selectedMeasurementsValid = false;
+        return;
+    }
+
+    // Estimate a LOCAL noise floor around the selected receiver channel. Use
+    // the actual low_cut/high_cut passband when available (important for
+    // asymmetric SSB modes); measurementBandwidthHz remains a compatibility
+    // fallback for older QML callers. Two extra FFT bins on each side form a
+    // guard so filter skirts/the wanted signal do not bias the noise estimate.
+    const double binHz = m_sampleRate / static_cast<double>(lastIndex);
+    double lowCutHz = m_measurementLowCutHz;
+    double highCutHz = m_measurementHighCutHz;
+    if (!std::isfinite(lowCutHz) || !std::isfinite(highCutHz)
+            || highCutHz <= lowCutHz) {
+        const double halfBw = 0.5 * std::fabs(m_measurementBandwidthHz);
+        lowCutHz = -halfBw;
+        highCutHz = halfBw;
+    }
+
+    const double channelLeftHz = m_measurementFrequencyHz + std::min(lowCutHz, highCutHz);
+    const double channelRightHz = m_measurementFrequencyHz + std::max(lowCutHz, highCutHz);
+    const double leftChannelBin = ((channelLeftHz - m_fullStartFreq) / m_sampleRate)
+            * static_cast<double>(lastIndex);
+    const double rightChannelBin = ((channelRightHz - m_fullStartFreq) / m_sampleRate)
+            * static_cast<double>(lastIndex);
+
+    const double guardBins = 2.0;
+    const double channelSpanBins = std::max(1.0, rightChannelBin - leftChannelBin);
+    const double minimumOuterBins = 24.0;
+    const double preferredOuterBins = std::max(minimumOuterBins,
+                                                2.0 * channelSpanBins + 8.0);
+    const double outerCapBins = std::max(minimumOuterBins,
+                                          0.12 * static_cast<double>(lastIndex));
+    const double outerBins = std::min(preferredOuterBins, outerCapBins);
+
+    const int leftEnd = std::min(lastIndex,
+            static_cast<int>(std::floor(leftChannelBin - guardBins)));
+    const int leftStart = std::max(0,
+            static_cast<int>(std::ceil(leftChannelBin - guardBins - outerBins)));
+    const int rightStart = std::max(0,
+            static_cast<int>(std::ceil(rightChannelBin + guardBins)));
+    const int rightEnd = std::min(lastIndex,
+            static_cast<int>(std::floor(rightChannelBin + guardBins + outerBins)));
+
+    const int leftCount = std::max(0, leftEnd - leftStart + 1);
+    const int rightCount = std::max(0, rightEnd - rightStart + 1);
+    const int candidateCount = leftCount + rightCount;
+    if (candidateCount < 4) {
+        m_selectedMeasurementsValid = false;
+        return;
+    }
+
+    const int targetNoiseSamples = 256;
+    const int stride = std::max(1, candidateCount / targetNoiseSamples);
+    QVector<double> noiseSamples;
+    noiseSamples.reserve(std::min(candidateCount, targetNoiseSamples + 4));
+
+    int candidateOrdinal = 0;
+    auto appendRange = [&](int first, int last) {
+        for (int i = first; i <= last; ++i, ++candidateOrdinal) {
+            if ((candidateOrdinal % stride) != 0)
+                continue;
+            const double value = static_cast<double>(frame.at(i));
+            if (std::isfinite(value))
+                noiseSamples.append(value);
+        }
+    };
+
+    if (leftCount > 0)
+        appendRange(leftStart, leftEnd);
+    if (rightCount > 0)
+        appendRange(rightStart, rightEnd);
+
+    if (noiseSamples.size() < 4) {
+        m_selectedMeasurementsValid = false;
+        return;
+    }
+
+    std::sort(noiseSamples.begin(), noiseSamples.end());
+    const int noiseIndex = std::max(0, std::min(noiseSamples.size() - 1,
+        static_cast<int>(std::floor((noiseSamples.size() - 1) * 0.30))));
+    const double localNoise = noiseSamples.at(noiseIndex);
+
+    m_selectedMeasurementsValid = true;
+    m_selectedLevelDb = selectedLevel;
+    m_selectedNoiseFloorDb = localNoise;
+    m_selectedSnrDb = selectedLevel - localNoise;
+}
+
 int FftDisplayItem::mappedStartIndex(int count) const
 {
     if (count <= 1)
@@ -1049,6 +1462,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     bool renderEnabled = false;
     double minDb = -130.0;
     double maxDb = -80.0;
+    double plotTopInset = 18.0;
     double fullStartFreq = 0.0;
     double viewStartFreq = 0.0;
     double viewStopFreq = 0.0;
@@ -1072,6 +1486,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
         showMaxHold = m_showMaxHold;
         minDb = m_minDb;
         maxDb = m_maxDb;
+        plotTopInset = m_plotTopInset;
         fullStartFreq = m_fullStartFreq;
         viewStartFreq = m_viewStartFreq;
         viewStopFreq = m_viewStopFreq;
@@ -1085,8 +1500,14 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     if (itemWidth <= 0.0 || itemHeight <= 0.0)
         return;
 
-    const qreal xAxisHeight = std::min<qreal>(18.0, itemHeight);
-    const qreal plotHeight = std::max<qreal>(1.0, itemHeight - xAxisHeight);
+    // CUDA1.17: one plot geometry contract shared with the QML grid. The top
+    // inset is reserved for frequency labels; maxDb maps exactly to plotTop and
+    // minDb maps exactly to itemHeight. Previously the native trace used a
+    // shortened height but forgot the +top offset, producing up to 18 px drift.
+    const qreal plotTop = std::max<qreal>(0.0,
+        std::min<qreal>(static_cast<qreal>(plotTopInset), itemHeight));
+    const qreal plotBottom = itemHeight;
+    const qreal plotHeight = std::max<qreal>(1.0, plotBottom - plotTop);
     const int count = currentFrame.size();
     const double span = std::max(1.0, sampleRate);
     const double startRatio = std::max(0.0, std::min(1.0,
@@ -1106,7 +1527,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     const auto yForDbLocal = [&](float value) -> qreal {
         double db = std::isfinite(value) ? static_cast<double>(value) : minDb;
         db = std::max(minDb, std::min(maxDb, db));
-        return static_cast<qreal>(plotHeight - ((db - minDb) / rangeDb) * plotHeight);
+        return static_cast<qreal>(plotBottom - ((db - minDb) / rangeDb) * plotHeight);
     };
 
     // Smooth the visual transition between independent RF snapshots. This is
@@ -1152,29 +1573,30 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     const QPolygonF spectrum = buildPolyline(currentFrame, true);
     if (spectrum.size() >= 2) {
         QPolygonF fill = spectrum;
-        fill.append(QPointF(itemWidth, plotHeight));
-        fill.append(QPointF(0.0, plotHeight));
-        // CUDA1.11 visual polish: a restrained vertical gradient makes the
-        // live trace easier to follow over a busy grid without hiding RF data.
-        // Keep this to one fill pass + one line pass to preserve FPS60 budget.
-        QColor fillTop = spectrumColor;
-        QColor fillMid = spectrumColor.darker(125);
-        QColor fillBottom = spectrumColor.darker(175);
-        fillTop.setAlpha(58);
-        fillMid.setAlpha(32);
-        fillBottom.setAlpha(6);
-
-        QLinearGradient fillGradient(0.0, 0.0, 0.0, plotHeight);
-        fillGradient.setColorAt(0.0, fillTop);
-        fillGradient.setColorAt(0.58, fillMid);
-        fillGradient.setColorAt(1.0, fillBottom);
+        fill.append(QPointF(itemWidth, plotBottom));
+        fill.append(QPointF(0.0, plotBottom));
+        // CUDA1.13 green RF-instrument fill: one vertical gradient clipped by
+        // the real live-Spectrum polygon. Strong signals are bright lime-green,
+        // falling through saturated green/emerald into a very dark transparent
+        // floor. This keeps the grid visible while giving the live trace a
+        // substantial analyzer-style body. Max Hold is rendered separately in
+        // red-orange, so current energy and historical maxima are unambiguous.
+        // Still one fill pass: no glow/blur passes are added to the FPS60 path.
+        QLinearGradient fillGradient(0.0, plotTop, 0.0, plotBottom);
+        fillGradient.setColorAt(0.00, QColor(210, 255, 88, 220)); // strongest: lime
+        fillGradient.setColorAt(0.16, QColor(165, 255, 55, 216));
+        fillGradient.setColorAt(0.34, QColor(92, 244, 38, 205));  // vivid green
+        fillGradient.setColorAt(0.54, QColor(32, 210, 50, 186));  // green
+        fillGradient.setColorAt(0.72, QColor(12, 154, 55, 150));  // emerald
+        fillGradient.setColorAt(0.88, QColor(6, 92, 45, 108));    // dark green
+        fillGradient.setColorAt(1.00, QColor(3, 34, 27, 52));     // near-transparent floor
 
         painter->setPen(Qt::NoPen);
         painter->setBrush(fillGradient);
         painter->drawPolygon(fill);
 
         painter->setBrush(Qt::NoBrush);
-        QPen livePen(spectrumColor, 1.35);
+        QPen livePen(spectrumColor, 1.45);
         livePen.setCapStyle(Qt::RoundCap);
         livePen.setJoinStyle(Qt::RoundJoin);
         painter->setPen(livePen);
@@ -1182,7 +1604,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     }
 
     if (showMaxHold && maxHoldFrame.size() == currentFrame.size()) {
-        QPen maxHoldPen(maxHoldColor, 1.15);
+        QPen maxHoldPen(maxHoldColor, 1.25);
         maxHoldPen.setCapStyle(Qt::RoundCap);
         maxHoldPen.setJoinStyle(Qt::RoundJoin);
         painter->setPen(maxHoldPen);

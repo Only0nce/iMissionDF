@@ -33,6 +33,10 @@ public:
     Q_PROPERTY(bool waterfallPaused READ waterfallPaused WRITE setWaterfallPaused NOTIFY waterfallPausedChanged)
     Q_PROPERTY(double minDb READ minDb WRITE setMinDb NOTIFY levelsChanged)
     Q_PROPERTY(double maxDb READ maxDb WRITE setMaxDb NOTIFY levelsChanged)
+    // CUDA1.17: shared Spectrum plot geometry. QML grid and native trace use
+    // the same top inset so dBFS grid lines and rendered FFT amplitudes map to
+    // identical pixels. Waterfall ignores this property.
+    Q_PROPERTY(double plotTopInset READ plotTopInset WRITE setPlotTopInset NOTIFY plotGeometryChanged)
     Q_PROPERTY(double fullStartFreq READ fullStartFreq WRITE setFullStartFreq NOTIFY frequencyMappingChanged)
     Q_PROPERTY(double viewStartFreq READ viewStartFreq WRITE setViewStartFreq NOTIFY frequencyMappingChanged)
     Q_PROPERTY(double viewStopFreq READ viewStopFreq WRITE setViewStopFreq NOTIFY frequencyMappingChanged)
@@ -46,6 +50,33 @@ public:
     Q_PROPERTY(double noiseFloorDb READ noiseFloorDb NOTIFY measurementsChanged)
     Q_PROPERTY(double snrDb READ snrDb NOTIFY measurementsChanged)
     Q_PROPERTY(double peakFrequencyHz READ peakFrequencyHz NOTIFY measurementsChanged)
+
+    // CUDA1.15/1.16: receiver-local FFT measurements remain independent from
+    // the legacy viewport-wide Peak/Noise values above. AstraRX's existing
+    // per-receiver S-meter remains the authoritative RF LEVEL. CUDA1.18 also
+    // derives a filtered presentation-only offset between that RF reference and
+    // the selected FFT level so the Spectrum Y-axis can be read meaningfully.
+    // SNR itself remains a pure FFT-domain difference.
+    Q_PROPERTY(double measurementFrequencyHz READ measurementFrequencyHz WRITE setMeasurementFrequencyHz NOTIFY measurementReferenceChanged)
+    Q_PROPERTY(double measurementBandwidthHz READ measurementBandwidthHz WRITE setMeasurementBandwidthHz NOTIFY measurementReferenceChanged)
+    Q_PROPERTY(double measurementLowCutHz READ measurementLowCutHz WRITE setMeasurementLowCutHz NOTIFY measurementReferenceChanged)
+    Q_PROPERTY(double measurementHighCutHz READ measurementHighCutHz WRITE setMeasurementHighCutHz NOTIFY measurementReferenceChanged)
+    Q_PROPERTY(bool selectedMeasurementsValid READ selectedMeasurementsValid NOTIFY selectedMeasurementsChanged)
+    Q_PROPERTY(double selectedLevelDb READ selectedLevelDb NOTIFY selectedMeasurementsChanged)
+    Q_PROPERTY(double selectedNoiseFloorDb READ selectedNoiseFloorDb NOTIFY selectedMeasurementsChanged)
+    Q_PROPERTY(double selectedSnrDb READ selectedSnrDb NOTIFY selectedMeasurementsChanged)
+    Q_PROPERTY(double selectedFrequencyHz READ selectedFrequencyHz NOTIFY selectedMeasurementsChanged)
+    Q_PROPERTY(bool receiverLevelValid READ receiverLevelValid NOTIFY receiverLevelChanged)
+    Q_PROPERTY(double receiverLevelDb READ receiverLevelDb NOTIFY receiverLevelChanged)
+    Q_PROPERTY(double receiverLevelFrequencyHz READ receiverLevelFrequencyHz NOTIFY receiverLevelChanged)
+
+    // CUDA1.19: session-latched RF-reference calibration for the Spectrum Y axis.
+    // Raw FFT samples remain untouched in dBFS. A short trusted startup sample
+    // set establishes one RF-reference offset; that offset is then held fixed
+    // for the backend session so the Y axis never breathes with live S-meter/FFT
+    // jitter. Small absolute error is preferred over a moving scale.
+    Q_PROPERTY(bool spectrumCalibrationValid READ spectrumCalibrationValid NOTIFY spectrumCalibrationChanged)
+    Q_PROPERTY(double spectrumCalibrationOffsetDb READ spectrumCalibrationOffsetDb NOTIFY spectrumCalibrationChanged)
 
     // R20.4-SPECTRUM-CUDA1 telemetry only. The QML page does not depend on
     // these values; they are exposed for diagnostics/A-B testing.
@@ -77,6 +108,8 @@ public:
     void setMinDb(double value);
     double maxDb() const noexcept { return m_maxDb; }
     void setMaxDb(double value);
+    double plotTopInset() const noexcept { return m_plotTopInset; }
+    void setPlotTopInset(double value);
 
     double fullStartFreq() const noexcept { return m_fullStartFreq; }
     void setFullStartFreq(double value);
@@ -101,6 +134,28 @@ public:
     double snrDb() const noexcept { return m_snrDb; }
     double peakFrequencyHz() const noexcept { return m_peakFrequencyHz; }
 
+    double measurementFrequencyHz() const noexcept { return m_measurementFrequencyHz; }
+    void setMeasurementFrequencyHz(double value);
+    double measurementBandwidthHz() const noexcept { return m_measurementBandwidthHz; }
+    void setMeasurementBandwidthHz(double value);
+    double measurementLowCutHz() const noexcept { return m_measurementLowCutHz; }
+    void setMeasurementLowCutHz(double value);
+    double measurementHighCutHz() const noexcept { return m_measurementHighCutHz; }
+    void setMeasurementHighCutHz(double value);
+
+    bool selectedMeasurementsValid() const noexcept { return m_selectedMeasurementsValid; }
+    double selectedLevelDb() const noexcept { return m_selectedLevelDb; }
+    double selectedNoiseFloorDb() const noexcept { return m_selectedNoiseFloorDb; }
+    double selectedSnrDb() const noexcept { return m_selectedSnrDb; }
+    double selectedFrequencyHz() const noexcept { return m_selectedFrequencyHz; }
+
+    bool receiverLevelValid() const noexcept { return m_receiverLevelValid; }
+    double receiverLevelDb() const noexcept { return m_receiverLevelDb; }
+    double receiverLevelFrequencyHz() const noexcept { return m_receiverLevelFrequencyHz; }
+
+    bool spectrumCalibrationValid() const noexcept { return m_spectrumCalibrationValid; }
+    double spectrumCalibrationOffsetDb() const noexcept { return m_spectrumCalibrationOffsetDb; }
+
     QString computeBackend() const;
     bool cudaAccelerationActive() const noexcept { return m_cudaAccelerationActive; }
 
@@ -118,10 +173,15 @@ signals:
     void clearBeforeNextPaintChanged();
     void waterfallPausedChanged();
     void levelsChanged();
+    void plotGeometryChanged();
     void frequencyMappingChanged();
     void colorsChanged();
     void paletteChanged();
     void measurementsChanged();
+    void measurementReferenceChanged();
+    void selectedMeasurementsChanged();
+    void receiverLevelChanged();
+    void spectrumCalibrationChanged();
     void computeBackendChanged();
 
     // Internal queued worker requests. Large FFT/history buffers remain native
@@ -145,6 +205,7 @@ private slots:
     void onSpectrumFrame(const QVector<float> &frame);
     void onWaterfallFrame(const QVector<float> &frame);
     void onMaxHoldFrame(const QVector<float> &frame);
+    void onSmeterValueUpdated(double smeterDb);
 
     void onComputeBackendReady(QString backendName, bool cudaActive, QString detail);
     void onWaterfallRowReady(quint64 generation,
@@ -171,6 +232,7 @@ private:
     void appendProcessedWaterfallRowLocked(const QVector<float> &dbRow,
                                            const QVector<quint32> &argbRow);
     void updateMeasurementsLocked(const QVector<float> &frame, bool force = false);
+    void updateSelectedMeasurementsLocked(const QVector<float> &frame, bool force = false);
     void paintSpectrum(QPainter *painter);
     void paintWaterfall(QPainter *painter);
     int mappedStartIndex(int count) const;
@@ -187,6 +249,7 @@ private:
 
     double m_minDb = -130.0;
     double m_maxDb = -80.0;
+    double m_plotTopInset = 18.0;
     double m_fullStartFreq = 0.0;
     double m_viewStartFreq = 0.0;
     double m_viewStopFreq = 0.0;
@@ -252,6 +315,33 @@ private:
     double m_snrDb = 0.0;
     double m_peakFrequencyHz = 0.0;
     QElapsedTimer m_measurementTimer;
+
+    // CUDA1.15 selected-frequency FFT reference/results. CUDA1.16 keeps these
+    // as the local FFT-domain NOISE/SNR source while adding the existing
+    // AstraRX S-meter as a separate authoritative receiver LEVEL.
+    double m_measurementFrequencyHz = 0.0;
+    double m_measurementBandwidthHz = 0.0;
+    double m_measurementLowCutHz = 0.0;
+    double m_measurementHighCutHz = 0.0;
+    bool m_selectedMeasurementsValid = false;
+    double m_selectedLevelDb = 0.0;       // FFT point level, diagnostic only
+    double m_selectedNoiseFloorDb = 0.0;  // local FFT noise floor
+    double m_selectedSnrDb = 0.0;         // FFT point level - local FFT noise
+    double m_selectedFrequencyHz = 0.0;
+
+    bool m_receiverLevelValid = false;
+    double m_receiverLevelDb = 0.0;
+    double m_receiverLevelFrequencyHz = 0.0;
+    qint64 m_receiverLevelAcceptAfterMs = 0;
+
+    // CUDA1.19 calibration is latched once per backend session. It never modifies
+    // FFT samples, Max Hold, Waterfall data, or CUDA processing. Five trusted
+    // candidates are collected and the median is frozen until backend reset.
+    bool m_spectrumCalibrationValid = false;
+    double m_spectrumCalibrationOffsetDb = 0.0;
+    quint32 m_spectrumCalibrationSamples = 0;
+    QVector<double> m_spectrumCalibrationCandidates;
+    QElapsedTimer m_rfMetricsTelemetryTimer;
 
     // Paint cadence telemetry. Updated only by the Qt Quick render path.
     QElapsedTimer m_paintStatsTimer;

@@ -58,15 +58,54 @@ Item {
     // the CUDA/FPS60 renderer is never resized, destroyed, or recreated when
     // the operator opens folders/results.
     readonly property real analyzerHeight: height
-    readonly property real spectrumRatio: 0.42
+    // CUDA1.21: operator-adjustable Spectrum/Waterfall split. The divider is
+    // intentionally a persistent manual control: nothing changes this ratio
+    // except the operator dragging the dedicated handle.
+    property real spectrumRatio: 0.42
+    readonly property real spectrumDefaultRatio: 0.42
+    readonly property real spectrumMinRatio: 0.25
+    readonly property real spectrumMaxRatio: 0.72
+    property real pendingSpectrumRatio: spectrumRatio
+    property bool spectrumDividerDragActive: false
+    // CUDA1.23: the Spectrum/Waterfall divider is safety-locked by default.
+    // The operator must hold the high-contrast handle continuously for three
+    // seconds before a single resize gesture is armed. Releasing locks it again.
+    property bool spectrumDividerHoldActive: false
+    property bool spectrumDividerUnlocked: false
+    property bool spectrumDividerHasDraggedAfterUnlock: false
+    property int spectrumDividerHoldElapsedMs: 0
+    property int spectrumDividerHoldDurationMs: 3000
+    property real spectrumDividerPressRootY: 0
+    property real spectrumDividerPressRootX: 0
+    readonly property real spectrumDividerHoldProgress: Math.min(1.0,
+                                                                  spectrumDividerHoldElapsedMs
+                                                                  / Math.max(1, spectrumDividerHoldDurationMs))
+    readonly property int spectrumDividerHoldSecondsRemaining: Math.max(0,
+                                                                         Math.ceil((spectrumDividerHoldDurationMs
+                                                                                    - spectrumDividerHoldElapsedMs)
+                                                                                   / 1000.0))
+    readonly property real spectrumDividerPreUnlockMoveTolerancePx: 24
     readonly property color analyzerBackground: "#081018"
     readonly property color analyzerPanel: "#0D1721"
     readonly property color analyzerBorder: "#263948"
     readonly property color analyzerAccent: "#35D5BD"
-    // CUDA1.11 visual polish: dedicated trace colors so Spectrum styling can
-    // evolve without changing selection/HUD accent semantics.
-    readonly property color spectrumLiveColor: "#49F3DD"
-    readonly property color spectrumMaxHoldColor: "#FFBE4A"
+    // CUDA1.24 control palette: keep the warm amber safety divider and move
+    // the zoom-pan navigator to the selected Ice Blue instrument palette.
+    readonly property color dividerIdleColor: "#7A3B00"
+    readonly property color dividerHoverColor: "#B85A00"
+    readonly property color dividerHoldColor: "#D97706"
+    readonly property color dividerUnlockedColor: "#FF8A00"
+    readonly property color dividerBorderColor: "#FFD166"
+    readonly property color panPanelColor: "#13262E"
+    readonly property color panBorderColor: "#72B4C6"
+    readonly property color panTrackColor: "#315E6B"
+    readonly property color panThumbColor: "#8ED5E0"
+    readonly property color panTextColor: "#E6FAFF"
+    // CUDA1.13 RF-instrument palette: live Spectrum is neon lime-green with a
+    // green filled body; Max Hold is red-orange for instant visual separation.
+    // Selection/HUD accent semantics remain unchanged.
+    readonly property color spectrumLiveColor: "#B7FF3C"
+    readonly property color spectrumMaxHoldColor: "#FF3B2F"
     readonly property color analyzerText: "#EEF6FB"
     readonly property color analyzerMuted: "#91A4B3"
     // CUDA1.8 readability pass: dynamic Waterfall content can become very bright
@@ -103,6 +142,13 @@ Item {
     property real centerFreq: mainWindows.center_freq()    // Hz
     property int  sampRate:   mainWindows.samp_rate()      // Hz
 
+    // CUDA1.20: Spectrum and Waterfall again share the operator-controlled
+    // Intensity Min/Max range. The range is MANUAL/LOCKED by default: the
+    // operator can move either slider at any time, but no auto-scale timer is
+    // allowed to move it afterward. RF calibration changes only the Spectrum
+    // Y-axis labels; it never changes the raw FFT geometry or slider values.
+    readonly property real spectrumPlotTopPx: 18
+
     property real waterfallMinDb: -130
     property real waterfallMaxDb: -80
     property real waterfallMax: -80
@@ -123,7 +169,10 @@ Item {
     property int  high_cut: bwModel.get(scanBwSelected).high_cut
     property int  offsetSnapStep: 100     // Hz
 
-    property bool autoScaleEnabled: true
+    // Instrument behavior: manual scale is authoritative. Auto-scale is kept
+    // only as dormant compatibility code and is OFF by default.
+    property bool autoScaleEnabled: false
+    property bool intensityScaleLocked: true
     property bool autoScaleInitialized: false
     property real autoScaleAlpha: 0.18
 
@@ -293,7 +342,6 @@ Item {
         floatingWorkspaceOpen = false
         spectrumPaintTimer.stop()
         scanTimer.stop()
-        zoomNavTimer.stop()
         zoomTimer.stop()
         spectrumCanvas.clearPeakTimer.stop()
 
@@ -546,8 +594,14 @@ Item {
         if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
     }
 
-    onWaterfallMinDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
-    onWaterfallMaxDbChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
+    // CUDA1.20: operator Intensity edits own the raw vertical range for BOTH
+    // Spectrum and Waterfall. Changes therefore invalidate the Spectrum grid.
+    onWaterfallMinDbChanged: {
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+    }
+    onWaterfallMaxDbChanged: {
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+    }
 
     onWidthChanged: {
         // Keep the virtual zoom factor stable across window-size changes without
@@ -583,7 +637,11 @@ Item {
         runtimeInitialized = true
         console.log("[ASTRARX-COMPAT-QML] revision=20260817-bidirectional-span-stability-r10")
         console.log("[R20.4-SPECTRUM-CUDA1.8-READABILITY-PASS] spectrum42=1 waterfall58=1 stableContrastHud=1 highContrastText=1 darkRightRail=1")
-        console.log("[R20.4-SPECTRUM-CUDA1.11-SPECTRUM-VISUAL-POLISH] gradientFill=1 liveTrace=#49F3DD maxHold=#FFBE4A")
+        console.log("[R20.4-SPECTRUM-CUDA1.13-GREEN-SPECTRUM-RED-MAXHOLD] greenAreaFill=1 liveTrace=#B7FF3C maxHold=#FF3B2F")
+        console.log("[R20.4-SPECTRUM-CUDA1.14-FULL-CARD-LOCK-TOGGLE] fullMetricsMouseArea=1 lockBadgeVisualOnly=1")
+        console.log("[R20.4-SPECTRUM-CUDA1.15-SELECTED-FREQUENCY-METRICS] selectedFrequencyLevel=1 localNoise=1 localSnr=1")
+        console.log("[R20.4-SPECTRUM-CUDA1.20-MANUAL-LOCKED-INTENSITY-SCALE] manualIntensity=1 autoScale=0 spectrumSharesIntensity=1 sharedPlotTop=18 smeterCalibration=latched-median5")
+        console.log("[R20.4-SPECTRUM-CUDA1.25-TALL-ICE-BLUE-PAN] dividerHoldMs=3000 panPalette=ice-blue panHeight=44 panTrackHeight=30 panIdleOpacity=0.28 panHoverOpacity=0.96")
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
 
@@ -639,7 +697,8 @@ Item {
         if (!zoomNav || !zoomNav.rectangle)
             return
 
-        const travel = Math.max(0.0, zoomNav.width - zoomNav.rectangle.width)
+        const navWidth = zoomPanTrack.width
+        const travel = Math.max(0.0, navWidth - zoomNav.rectangle.width)
         zoomNav.rectangle.x = travel > 0.0 ? clamp01(viewPanRatio) * travel : 0.0
     }
 
@@ -647,7 +706,8 @@ Item {
         if (!zoomNav || !zoomNav.rectangle)
             return
 
-        const travel = Math.max(0.0, zoomNav.width - zoomNav.rectangle.width)
+        const navWidth = zoomPanTrack.width
+        const travel = Math.max(0.0, navWidth - zoomNav.rectangle.width)
         const nextRatio = travel > 0.0 ? zoomNav.rectangle.x / travel : 0.0
         const clamped = clamp01(nextRatio)
         if (Math.abs(clamped - viewPanRatio) > 0.000001)
@@ -684,7 +744,6 @@ Item {
     function applyZoom() {
         viewPanRatio = clamp01(viewPanRatio)
         Qt.callLater(syncZoomNavFromRatio)
-        zoomNav.rectangle.opacity = 1
         invalidateViewport()
     }
 
@@ -807,6 +866,8 @@ Item {
     }
 
     function autoScaleWaterfallColor() {
+        if (root.intensityScaleLocked || !root.autoScaleEnabled)
+            return
         if (typeof wsClient === "undefined" || !wsClient || !wsClient.fftAutoScaleValid)
             return
 
@@ -851,7 +912,7 @@ Item {
         id: autoScaleTimer
         interval: 500
         repeat: true
-        running: root.runtimeActive && autoScaleEnabled
+        running: root.runtimeActive && autoScaleEnabled && !root.intensityScaleLocked
         onTriggered: {
             if (root.runtimeActive)
                 autoScaleWaterfallColor()
@@ -907,6 +968,14 @@ Item {
         onWidthChanged:  invalidate()
         onHeightChanged: invalidate()
 
+        // CUDA1.20: Intensity Min/Max control the raw FFT geometry, while the
+        // one-time RF calibration only translates the displayed Y-axis labels.
+        // This keeps the scale manually adjustable without allowing it to drift.
+        Connections {
+            target: spectrumCanvas
+            function onSpectrumCalibrationChanged() { spectrumGridCanvas.invalidate() }
+        }
+
         onPaint: {
             var ctx = getContext("2d")
             var w = width
@@ -914,9 +983,16 @@ Item {
             ctx.clearRect(0, 0, w, h)
             if (w < 2 || h < 2) return
 
-            const minDb = root.waterfallMinDb
-            const maxDb = root.waterfallMaxDb
-            const rangeDb = Math.max(1e-6, (maxDb - minDb))
+            const calibrated = spectrumCanvas.spectrumCalibrationValid
+            const rawMinDb = root.waterfallMinDb
+            const rawMaxDb = Math.max(rawMinDb + 1.0, root.waterfallMaxDb)
+            const axisOffsetDb = calibrated ? spectrumCanvas.spectrumCalibrationOffsetDb : 0.0
+            const axisMinDb = rawMinDb + axisOffsetDb
+            const axisMaxDb = rawMaxDb + axisOffsetDb
+            const rawRangeDb = Math.max(1e-6, (rawMaxDb - rawMinDb))
+            const axisUnit = calibrated ? " dBm " : " dBFS "
+            const plotTop = Math.max(0, Math.min(root.spectrumPlotTopPx, h))
+            const plotHeight = Math.max(1, h - plotTop)
 
             // ===== Y grid + dB labels =====
             ctx.strokeStyle = theme.gridLine
@@ -924,18 +1000,22 @@ Item {
             ctx.font = "11px monospace"
             ctx.fillStyle = theme.axisText
 
-            for (var db = minDb; db <= maxDb; db += 10) {
-                let y = h - ((db - minDb) / rangeDb) * h
+            // Tick labels are in the calibrated RF domain, but Y geometry is
+            // calculated from the operator-selected raw Intensity range.
+            const firstAxisTick = Math.ceil(axisMinDb / 10.0) * 10.0
+            for (var axisDb = firstAxisTick; axisDb <= axisMaxDb + 0.001; axisDb += 10) {
+                const rawDb = axisDb - axisOffsetDb
+                let y = h - ((rawDb - rawMinDb) / rawRangeDb) * plotHeight
                 ctx.beginPath()
                 ctx.moveTo(0, y)
                 ctx.lineTo(w, y)
                 ctx.stroke()
-                ctx.fillText(db.toFixed(0) + " dBFS ", 4, y - 2)
+                ctx.fillText(axisDb.toFixed(0) + axisUnit, 4, y - 2)
             }
 
             // ===== X axis (TOP) + freq labels =====
-            const xAxisH   = 18
-            const yAxisBot = xAxisH
+            const xAxisH   = plotTop
+            const yAxisBot = plotTop
 
             // Draw only the logical viewport. Canvas width remains fixed,
             // while zoom/pan changes the visible frequency range.
@@ -1005,11 +1085,34 @@ Item {
         }
     }
 
+    // CUDA1.21: keep resize work bounded to display cadence while dragging.
+    // Mouse/touch move events may arrive much faster than the scene graph can
+    // present; coalescing them avoids needless native item resizes.
+    function clampSpectrumRatio(value) {
+        return Math.max(root.spectrumMinRatio,
+                        Math.min(root.spectrumMaxRatio, value))
+    }
+
+    function queueSpectrumRatioFromY(yInRoot) {
+        const h = Math.max(1.0, root.analyzerHeight)
+        root.pendingSpectrumRatio = root.clampSpectrumRatio(yInRoot / h)
+        if (!spectrumDividerApplyTimer.running)
+            spectrumDividerApplyTimer.start()
+    }
+
+    Timer {
+        id: spectrumDividerApplyTimer
+        interval: 16
+        repeat: false
+        onTriggered: root.spectrumRatio = root.pendingSpectrumRatio
+    }
+
     FftDisplayItem {
         id: spectrumCanvas
         z: 2
-        // Geometry, mapping, colors and Max Hold behavior intentionally match
-        // the previous Canvas renderer. Only the execution path moves to C++.
+        // Native Spectrum renderer. CUDA1.20 keeps the corrected shared top
+        // inset and restores the operator Intensity Min/Max as the raw vertical
+        // range shared with Waterfall. Manual edits are locked against auto drift.
         width: root.width
         height: root.analyzerHeight * root.spectrumRatio
         x: 0
@@ -1017,12 +1120,24 @@ Item {
         backend: (typeof wsClient !== "undefined") ? wsClient : null
         mode: FftDisplayItem.Spectrum
         renderEnabled: root.runtimeActive
+        // Raw FFT geometry follows the operator's Intensity range directly.
+        // RF calibration is label-only, so changing Min/Max never changes the
+        // latched offset and the scale never moves unless the operator moves it.
         minDb: root.waterfallMinDb
         maxDb: root.waterfallMaxDb
+        plotTopInset: root.spectrumPlotTopPx
         fullStartFreq: root.fullStartFreq
         viewStartFreq: root.viewStartFreq
         viewStopFreq: root.viewStopFreq
         sampleRate: Math.max(1, root.sampRate)
+        // AstraRX's existing tuned-receiver S-meter is authoritative for RF
+        // LEVEL. Native FFT remains responsible for FFT LEVEL/NOISE/SNR.
+        // Pass the real demod filter edges so local noise excludes asymmetric
+        // modes correctly instead of assuming a symmetric bandwidth.
+        measurementFrequencyHz: root.selectedReceiverHz
+        measurementBandwidthHz: Math.max(0, root.bandwidth) // compatibility fallback
+        measurementLowCutHz: root.low_cut
+        measurementHighCutHz: root.high_cut
         spectrumColor: root.spectrumLiveColor
         maxHoldColor: root.spectrumMaxHoldColor
 
@@ -1046,15 +1161,174 @@ Item {
         onHeightChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
     }
 
-    // R20.4-SPECTRUM-CUDA1.2: measurement HUD is physically attached to the
-    // selected receiver band. It automatically flips to the opposite side when
-    // the preferred side would run out of safe plot space. Only the LOCK button
-    // accepts pointer input; the rest of the panel remains transparent to the
-    // existing click/drag-to-tune MouseArea below it.
+    // CUDA1.23: dedicated Spectrum/Waterfall divider with a deliberate
+    // three-second press-and-hold safety gate. A short tap or an immediate drag
+    // cannot resize the analyzer. After the hold completes, the current press
+    // becomes a single resize gesture; releasing/canceling re-locks it.
+    Rectangle {
+        id: spectrumWaterfallDividerLine
+        x: 0
+        y: Math.round(spectrumCanvas.height) - 1
+        width: root.width
+        height: 2
+        z: 124
+        color: root.dividerBorderColor
+        opacity: root.spectrumDividerUnlocked ? 0.96
+                                               : (root.spectrumDividerHoldActive ? 0.82
+                                                                                 : (dividerMouse.containsMouse ? 0.74 : 0.48))
+        visible: root.runtimeActive
+    }
+
+    Timer {
+        id: spectrumDividerHoldTimer
+        interval: 100
+        repeat: true
+        running: root.spectrumDividerHoldActive && dividerMouse.pressed && !root.spectrumDividerUnlocked
+        onTriggered: {
+            root.spectrumDividerHoldElapsedMs = Math.min(root.spectrumDividerHoldDurationMs,
+                                                         root.spectrumDividerHoldElapsedMs + interval)
+            if (root.spectrumDividerHoldElapsedMs >= root.spectrumDividerHoldDurationMs) {
+                stop()
+                root.spectrumDividerHoldActive = false
+                root.spectrumDividerUnlocked = true
+                root.spectrumDividerDragActive = true
+                root.spectrumDividerHasDraggedAfterUnlock = false
+                // Do not resize just because the hold completed. The first
+                // post-unlock pointer movement performs the resize.
+            }
+        }
+    }
+
+    Item {
+        id: spectrumWaterfallDivider
+        width: 300
+        height: 66
+        x: Math.round((root.width - width) / 2)
+        y: Math.round(spectrumCanvas.height - height / 2)
+        z: 130
+        visible: root.runtimeActive
+
+        Rectangle {
+            id: spectrumDividerPill
+            width: 126
+            height: 36
+            anchors.centerIn: parent
+            radius: 14
+            color: root.spectrumDividerUnlocked ? root.dividerUnlockedColor
+                                                   : (root.spectrumDividerHoldActive ? root.dividerHoldColor
+                                                                                    : (dividerMouse.containsMouse ? root.dividerHoverColor
+                                                                                                                  : root.dividerIdleColor))
+            border.width: root.spectrumDividerUnlocked || root.spectrumDividerHoldActive || dividerMouse.containsMouse ? 2 : 1
+            border.color: root.dividerBorderColor
+
+            // Hold-progress track. It is intentionally small and local to the
+            // handle so the safety gesture is self-explanatory without adding
+            // a modal dialog over live RF data.
+            Rectangle {
+                id: dividerHoldTrack
+                x: 13
+                y: parent.height - 8
+                width: parent.width - 26
+                height: 3
+                radius: 1.5
+                color: Qt.rgba(1.0, 0.82, 0.40, 0.24)
+                visible: root.spectrumDividerHoldActive && !root.spectrumDividerUnlocked
+
+                Rectangle {
+                    width: parent.width * root.spectrumDividerHoldProgress
+                    height: parent.height
+                    radius: parent.radius
+                    color: "#FFF0A8"
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                anchors.verticalCenterOffset: root.spectrumDividerHoldActive ? -3 : 0
+                text: root.spectrumDividerUnlocked
+                      ? "DRAG"
+                      : (root.spectrumDividerHoldActive
+                         ? ("HOLD " + root.spectrumDividerHoldSecondsRemaining + "s")
+                         : "HOLD 3s")
+                color: "#FFF8E7"
+                font.pixelSize: 11
+                font.bold: true
+                font.letterSpacing: 0.7
+            }
+        }
+
+        MouseArea {
+            id: dividerMouse
+            anchors.fill: parent
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: root.spectrumDividerUnlocked ? Qt.SizeVerCursor : Qt.PointingHandCursor
+
+            function resetDividerGesture() {
+                spectrumDividerHoldTimer.stop()
+                spectrumDividerApplyTimer.stop()
+                root.spectrumDividerHoldActive = false
+                root.spectrumDividerUnlocked = false
+                root.spectrumDividerDragActive = false
+                root.spectrumDividerHasDraggedAfterUnlock = false
+                root.spectrumDividerHoldElapsedMs = 0
+            }
+
+            onPressed: {
+                const p = mapToItem(root, mouse.x, mouse.y)
+                root.spectrumDividerPressRootX = p.x
+                root.spectrumDividerPressRootY = p.y
+                root.spectrumDividerHoldElapsedMs = 0
+                root.spectrumDividerHoldActive = true
+                root.spectrumDividerUnlocked = false
+                root.spectrumDividerDragActive = false
+                root.spectrumDividerHasDraggedAfterUnlock = false
+                spectrumDividerHoldTimer.restart()
+            }
+
+            onPositionChanged: {
+                if (!pressed)
+                    return
+
+                const p = mapToItem(root, mouse.x, mouse.y)
+
+                if (!root.spectrumDividerUnlocked) {
+                    // Treat a substantial early movement as an accidental swipe
+                    // rather than secretly arming the resize operation.
+                    const dx = p.x - root.spectrumDividerPressRootX
+                    const dy = p.y - root.spectrumDividerPressRootY
+                    if (Math.sqrt(dx * dx + dy * dy) > root.spectrumDividerPreUnlockMoveTolerancePx)
+                        resetDividerGesture()
+                    return
+                }
+
+                root.spectrumDividerHasDraggedAfterUnlock = true
+                root.queueSpectrumRatioFromY(p.y)
+            }
+
+            onReleased: {
+                if (root.spectrumDividerUnlocked && root.spectrumDividerHasDraggedAfterUnlock) {
+                    const p = mapToItem(root, mouse.x, mouse.y)
+                    root.pendingSpectrumRatio = root.clampSpectrumRatio(
+                                p.y / Math.max(1.0, root.analyzerHeight))
+                    spectrumDividerApplyTimer.stop()
+                    root.spectrumRatio = root.pendingSpectrumRatio
+                }
+                resetDividerGesture()
+            }
+
+            onCanceled: resetDividerGesture()
+        }
+    }
+
+    // R20.4-SPECTRUM-CUDA1.20: RF LEVEL remains AstraRX's authoritative tuned
+    // receiver measurement. Spectrum/Noise use the one-time latched RF offset;
+    // operator Intensity Min/Max only changes view range. SNR remains FFT-domain.
     Item {
         id: selectionMetricsOverlay
-        width: 202
-        height: 86
+        width: 218
+        height: 102
         z: 40
         visible: root.runtimeActive && root.selectionVisible
 
@@ -1141,17 +1415,20 @@ Item {
                 width: parent.width
                 spacing: 6
                 Text {
-                    width: 47
-                    text: "PEAK"
+                    width: 55
+                    text: "RF LEVEL"
                     color: root.analyzerMuted
                     font.pixelSize: 9
                     font.bold: true
                 }
                 Text {
-                    width: 79
+                    width: 81
                     horizontalAlignment: Text.AlignRight
-                    text: spectrumCanvas.measurementsValid
-                          ? spectrumCanvas.peakDb.toFixed(1) + " dBFS" : "—"
+                    // Same backend value that drives the existing S-meter.
+                    // Preserve the project's current dBm presentation convention;
+                    // absolute calibration still depends on the receiver setup.
+                    text: spectrumCanvas.receiverLevelValid
+                          ? spectrumCanvas.receiverLevelDb.toFixed(1) + " dBm" : "—"
                     color: root.analyzerText
                     font.pixelSize: 11
                     font.family: "monospace"
@@ -1160,8 +1437,8 @@ Item {
                 Text {
                     width: 48
                     horizontalAlignment: Text.AlignRight
-                    text: spectrumCanvas.measurementsValid
-                          ? (spectrumCanvas.peakFrequencyHz / 1e6).toFixed(3) : ""
+                    text: spectrumCanvas.receiverLevelValid
+                          ? (spectrumCanvas.receiverLevelFrequencyHz / 1e6).toFixed(3) : ""
                     color: root.analyzerMuted
                     font.pixelSize: 8
                     font.family: "monospace"
@@ -1172,17 +1449,43 @@ Item {
                 width: parent.width
                 spacing: 6
                 Text {
-                    width: 47
+                    width: 55
+                    text: "SPECTRUM"
+                    color: root.analyzerMuted
+                    font.pixelSize: 9
+                    font.bold: true
+                }
+                Text {
+                    width: 81
+                    horizontalAlignment: Text.AlignRight
+                    text: spectrumCanvas.selectedMeasurementsValid && spectrumCanvas.spectrumCalibrationValid
+                          ? (spectrumCanvas.selectedLevelDb + spectrumCanvas.spectrumCalibrationOffsetDb).toFixed(1) + " dBm"
+                          : (spectrumCanvas.selectedMeasurementsValid
+                             ? spectrumCanvas.selectedLevelDb.toFixed(1) + " dBFS" : "—")
+                    color: root.spectrumLiveColor
+                    font.pixelSize: 11
+                    font.family: "monospace"
+                    font.bold: true
+                }
+            }
+
+            Row {
+                width: parent.width
+                spacing: 6
+                Text {
+                    width: 55
                     text: "NOISE"
                     color: root.analyzerMuted
                     font.pixelSize: 9
                     font.bold: true
                 }
                 Text {
-                    width: 79
+                    width: 81
                     horizontalAlignment: Text.AlignRight
-                    text: spectrumCanvas.measurementsValid
-                          ? spectrumCanvas.noiseFloorDb.toFixed(1) + " dBFS" : "—"
+                    text: spectrumCanvas.selectedMeasurementsValid && spectrumCanvas.spectrumCalibrationValid
+                          ? (spectrumCanvas.selectedNoiseFloorDb + spectrumCanvas.spectrumCalibrationOffsetDb).toFixed(1) + " dBm"
+                          : (spectrumCanvas.selectedMeasurementsValid
+                             ? spectrumCanvas.selectedNoiseFloorDb.toFixed(1) + " dBFS" : "—")
                     color: root.analyzerText
                     font.pixelSize: 11
                     font.family: "monospace"
@@ -1194,17 +1497,17 @@ Item {
                 width: parent.width
                 spacing: 6
                 Text {
-                    width: 47
+                    width: 55
                     text: "SNR"
                     color: root.analyzerMuted
                     font.pixelSize: 9
                     font.bold: true
                 }
                 Text {
-                    width: 79
+                    width: 81
                     horizontalAlignment: Text.AlignRight
-                    text: spectrumCanvas.measurementsValid
-                          ? spectrumCanvas.snrDb.toFixed(1) + " dB" : "—"
+                    text: spectrumCanvas.selectedMeasurementsValid
+                          ? spectrumCanvas.selectedSnrDb.toFixed(1) + " dB" : "—"
                     color: root.analyzerAccent
                     font.pixelSize: 11
                     font.family: "monospace"
@@ -1238,11 +1541,23 @@ Item {
                 font.bold: true
             }
 
-            MouseArea {
-                anchors.fill: parent
-                acceptedButtons: Qt.LeftButton
-                onClicked: root.selectionMetricsLocked = !root.selectionMetricsLocked
-            }
+        }
+
+        // CUDA1.14: make the complete metrics card a large touch target. Keeping
+        // one MouseArea here avoids nested click handlers (and accidental double
+        // toggles on the LOCK badge). It intentionally owns pointer presses that
+        // start inside the HUD, while the rest of the spectrum remains available
+        // to the existing click/drag-to-tune MouseArea below.
+        MouseArea {
+            id: selectionMetricsTouchArea
+            anchors.fill: parent
+            z: 10
+            acceptedButtons: Qt.LeftButton
+            hoverEnabled: true
+            preventStealing: true
+            cursorShape: Qt.PointingHandCursor
+
+            onClicked: root.selectionMetricsLocked = !root.selectionMetricsLocked
         }
     }
 
@@ -1300,23 +1615,59 @@ Item {
     Row {
         id: waterfallActions
         anchors.right: waterfallCanvas.right
-        anchors.rightMargin: 76
-        y: waterfallCanvas.y + 5
-        spacing: 6
+        // Leave the right color-legend rail unobstructed while making both
+        // actions large enough for reliable touch operation.
+        anchors.rightMargin: 86
+        y: waterfallCanvas.y + 8
+        spacing: 8
         z: 111
 
         Rectangle {
-            width: 62; height: 26; radius: 6
-            color: waterfallCanvas.waterfallPaused ? "#243746" : "#CC0D1721"
-            border.color: root.analyzerBorder
-            Text { anchors.centerIn: parent; text: waterfallCanvas.waterfallPaused ? "Resume" : "Pause"; color: root.analyzerText; font.pixelSize: 10; font.bold: true }
-            MouseArea { anchors.fill: parent; onClicked: waterfallCanvas.waterfallPaused = !waterfallCanvas.waterfallPaused }
+            id: pauseWaterfallButton
+            width: 96
+            height: 40
+            radius: 8
+            color: pauseWaterfallMouse.pressed ? "#304A5C"
+                                              : (waterfallCanvas.waterfallPaused ? "#243746" : "#CC0D1721")
+            border.width: 1
+            border.color: pauseWaterfallMouse.containsMouse ? root.analyzerAccent : root.analyzerBorder
+            Text {
+                anchors.centerIn: parent
+                text: waterfallCanvas.waterfallPaused ? "RESUME" : "PAUSE"
+                color: root.analyzerText
+                font.pixelSize: 12
+                font.bold: true
+            }
+            MouseArea {
+                id: pauseWaterfallMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: waterfallCanvas.waterfallPaused = !waterfallCanvas.waterfallPaused
+            }
         }
         Rectangle {
-            width: 54; height: 26; radius: 6
-            color: "#CC0D1721"; border.color: root.analyzerBorder
-            Text { anchors.centerIn: parent; text: "Clear"; color: root.analyzerText; font.pixelSize: 10; font.bold: true }
-            MouseArea { anchors.fill: parent; onClicked: waterfallCanvas.clearHistory() }
+            id: clearWaterfallButton
+            width: 88
+            height: 40
+            radius: 8
+            color: clearWaterfallMouse.pressed ? "#304A5C" : "#CC0D1721"
+            border.width: 1
+            border.color: clearWaterfallMouse.containsMouse ? root.analyzerAccent : root.analyzerBorder
+            Text {
+                anchors.centerIn: parent
+                text: "CLEAR"
+                color: root.analyzerText
+                font.pixelSize: 12
+                font.bold: true
+            }
+            MouseArea {
+                id: clearWaterfallMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: waterfallCanvas.clearHistory()
+            }
         }
     }
 
@@ -1499,71 +1850,102 @@ Item {
 
     }
 
+    // CUDA1.25: zoom-pan navigator remains next to the Spectrum divider, but
+    // its vertical touch target is enlarged for easier mouse/touch dragging.
+    // Width and pan math remain unchanged.
     Item {
         id: zoomNav
-        x: 0
-        y: 113
-        height: 20
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        z:97
-        visible: root.zoomFactor > 1.0001
+        width: Math.max(320, Math.min(760, root.width * 0.48))
+        height: 44
+        x: Math.round((root.width - width) / 2)
+        y: Math.round(spectrumCanvas.height + 38)
+        z: 118
+        visible: root.zoomFactor > 1.0001 && root.runtimeActive
         property alias rectangle: rectangle
+        readonly property bool interactionActive: zoomPanHoverArea.containsMouse
+                                                   || mouseArea1.containsMouse
+                                                   || mouseArea1.pressed
+        opacity: interactionActive ? 0.96 : 0.28
+
+        Behavior on opacity {
+            NumberAnimation { duration: 140; easing.type: Easing.InOutQuad }
+        }
+
+        // Passive hover surface: no button is accepted, so the actual thumb
+        // MouseArea retains all drag ownership while the whole navigator can
+        // brighten when the pointer approaches it.
+        MouseArea {
+            id: zoomPanHoverArea
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+        }
+
         Rectangle {
-            id: rectangle
-            width: Math.max(8, root.width / root.zoomFactor)
-            color: theme.zoomViewportCss
-            radius: 2
-            anchors.top: parent.top
-            anchors.bottom: parent.bottom
-            anchors.topMargin: 0
+            anchors.fill: parent
+            radius: 9
+            color: root.panPanelColor
+            border.width: zoomNav.interactionActive ? 2 : 1
+            border.color: root.panBorderColor
+        }
 
-            Behavior on opacity {
-                NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
-            }
+        Text {
+            anchors.left: parent.left
+            anchors.leftMargin: 9
+            anchors.verticalCenter: parent.verticalCenter
+            text: "PAN"
+            color: root.panTextColor
+            font.pixelSize: 10
+            font.bold: true
+            z: 2
+        }
 
-            MouseArea {
-                id: mouseArea1
+        Item {
+            id: zoomPanTrack
+            x: 40
+            y: 7
+            width: Math.max(40, zoomNav.width - 48)
+            height: zoomNav.height - 14
+
+            Rectangle {
                 anchors.fill: parent
-                drag.target: parent
-                drag.axis: Drag.XAxis
-                drag.minimumX: 0
-                drag.maximumX: zoomNav.width - parent.width
-
-                onReleased: root.updateViewPanFromNav()
-                onClicked:
-                    zoomNavTimer.restart()
-
-            }
-            onXChanged: {
-                zoomNavTimer.restart()
-                rectangle.opacity = 1
-                // onViewPanRatioChanged performs the single coalesced viewport invalidation.
-                root.updateViewPanFromNav()
+                radius: 7
+                color: root.panTrackColor
             }
 
-            onWidthChanged: {
-                const maxX = Math.max(0, zoomNav.width - width)
-                if (x > maxX)
-                    x = maxX
-                root.updateViewPanFromNav()
-            }
+            Rectangle {
+                id: rectangle
+                width: Math.max(18, zoomPanTrack.width / root.zoomFactor)
+                height: zoomPanTrack.height
+                color: root.panThumbColor
+                radius: 7
 
-        }
-        Timer {
-            id: zoomNavTimer
-            repeat: false
-            running: true
-            interval: 10000
-            onTriggered: {
-                rectangle.opacity = 0.5
-            }
-            onRunningChanged: {
-                if (running)
-                    rectangle.opacity = 1
+                MouseArea {
+                    id: mouseArea1
+                    anchors.fill: parent
+                    drag.target: parent
+                    drag.axis: Drag.XAxis
+                    drag.minimumX: 0
+                    drag.maximumX: Math.max(0, zoomPanTrack.width - parent.width)
+                    preventStealing: true
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeHorCursor
+
+                    onReleased: root.updateViewPanFromNav()
+                }
+                onXChanged: {
+                    root.updateViewPanFromNav()
+                }
+
+                onWidthChanged: {
+                    const maxX = Math.max(0, zoomPanTrack.width - width)
+                    if (x > maxX)
+                        x = maxX
+                    root.updateViewPanFromNav()
+                }
             }
         }
+
     }
 
     Zoom {
@@ -1811,8 +2193,12 @@ Item {
                         onWaterfallMinDbChanged: root.waterfallMinDb = waterfallMinDb
                         onWaterfallMaxDbChanged: root.waterfallMaxDb = waterfallMaxDb
                         onManualScaleEdited: {
+                            // Manual edit is authoritative: keep the new range
+                            // exactly where the operator put it.
+                            root.intensityScaleLocked = true
                             root.autoScaleEnabled = false
                             root.autoScaleInitialized = false
+                            if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
                         }
                     }
                 }
