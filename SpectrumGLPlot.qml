@@ -66,36 +66,19 @@ Item {
     readonly property real spectrumMinRatio: 0.25
     readonly property real spectrumMaxRatio: 0.72
     property real pendingSpectrumRatio: spectrumRatio
+    // DIVIDER-FINAL: direct manipulation only. The divider line itself is the
+    // interaction affordance, so there is no hold/unlock mode or button state.
     property bool spectrumDividerDragActive: false
-    // CUDA1.23: the Spectrum/Waterfall divider is safety-locked by default.
-    // The operator must hold the high-contrast handle continuously for three
-    // seconds before a single resize gesture is armed. Releasing locks it again.
-    property bool spectrumDividerHoldActive: false
-    property bool spectrumDividerUnlocked: false
-    property bool spectrumDividerHasDraggedAfterUnlock: false
-    property int spectrumDividerHoldElapsedMs: 0
-    property int spectrumDividerHoldDurationMs: 3000
-    property real spectrumDividerPressRootY: 0
-    property real spectrumDividerPressRootX: 0
-    readonly property real spectrumDividerHoldProgress: Math.min(1.0,
-                                                                  spectrumDividerHoldElapsedMs
-                                                                  / Math.max(1, spectrumDividerHoldDurationMs))
-    readonly property int spectrumDividerHoldSecondsRemaining: Math.max(0,
-                                                                         Math.ceil((spectrumDividerHoldDurationMs
-                                                                                    - spectrumDividerHoldElapsedMs)
-                                                                                   / 1000.0))
-    readonly property real spectrumDividerPreUnlockMoveTolerancePx: 24
     readonly property color analyzerBackground: "#081018"
     readonly property color analyzerPanel: "#0D1721"
     readonly property color analyzerBorder: "#263948"
     readonly property color analyzerAccent: "#35D5BD"
-    // CUDA1.24 control palette: keep the warm amber safety divider and move
-    // the zoom-pan navigator to the selected Ice Blue instrument palette.
-    readonly property color dividerIdleColor: "#7A3B00"
-    readonly property color dividerHoverColor: "#B85A00"
-    readonly property color dividerHoldColor: "#D97706"
-    readonly property color dividerUnlockedColor: "#FF8A00"
-    readonly property color dividerBorderColor: "#FFD166"
+    // DIVIDER-FINAL: the divider now shares the Ice Blue manipulation language
+    // used by PAN. This visually separates interaction controls from RF traces.
+    readonly property color dividerIdleColor: "#5FAFC4"
+    readonly property color dividerHoverColor: "#7DE3F3"
+    readonly property color dividerDragColor: "#D8FAFF"
+    readonly property color dividerBorderColor: "#8ED5E0"
     readonly property color panPanelColor: "#13262E"
     readonly property color panBorderColor: "#72B4C6"
     readonly property color panTrackColor: "#315E6B"
@@ -643,7 +626,7 @@ Item {
         console.log("[R20.4-SPECTRUM-CUDA1.14-FULL-CARD-LOCK-TOGGLE] fullMetricsMouseArea=1 lockBadgeVisualOnly=1")
         console.log("[R20.4-SPECTRUM-CUDA1.15-SELECTED-FREQUENCY-METRICS] selectedFrequencyLevel=1 localNoise=1 localSnr=1")
         console.log("[R20.4-SPECTRUM-CUDA1.20-MANUAL-LOCKED-INTENSITY-SCALE] manualIntensity=1 autoScale=0 spectrumSharesIntensity=1 sharedPlotTop=18 smeterCalibration=latched-median5")
-        console.log("[R20.4-SPECTRUM-CUDA1.25-TALL-ICE-BLUE-PAN] dividerHoldMs=3000 panPalette=ice-blue panHeight=44 panTrackHeight=30 panIdleOpacity=0.28 panHoverOpacity=0.96")
+        console.log("[R20.4-SPECTRUM-DIVIDER-FINAL2] fullWidthHit=1 immediateDrag=1 holdGate=0 noMaskArtifact=1 symbol=arrows-dots palette=ice-blue hitHeight=48")
         console.log("[R20.4-SPECTRUM-CUDA1.26-FPS90-LOCKSTEP] targetPresentFps=90 sharedClock=1 sourceLockstep=1 analyzerFrameMs=11 pairedQmlInvalidation=1")
 
         if (spectrumGridCanvas && runtimeActive) spectrumGridCanvas.invalidate()
@@ -1162,164 +1145,170 @@ Item {
         onHeightChanged: { if (spectrumGridCanvas) spectrumGridCanvas.invalidate() }
     }
 
-    // CUDA1.23: dedicated Spectrum/Waterfall divider with a deliberate
-    // three-second press-and-hold safety gate. A short tap or an immediate drag
-    // cannot resize the analyzer. After the hold completes, the current press
-    // becomes a single resize gesture; releasing/canceling re-locks it.
-    Rectangle {
-        id: spectrumWaterfallDividerLine
-        x: 0
-        y: Math.round(spectrumCanvas.height) - 1
-        width: root.width
-        height: 2
-        z: 124
-        color: root.dividerBorderColor
-        opacity: root.spectrumDividerUnlocked ? 0.96
-                                               : (root.spectrumDividerHoldActive ? 0.82
-                                                                                 : (dividerMouse.containsMouse ? 0.74 : 0.48))
-        visible: root.runtimeActive
-    }
-
-    Timer {
-        id: spectrumDividerHoldTimer
-        interval: 100
-        repeat: true
-        running: root.spectrumDividerHoldActive && dividerMouse.pressed && !root.spectrumDividerUnlocked
-        onTriggered: {
-            root.spectrumDividerHoldElapsedMs = Math.min(root.spectrumDividerHoldDurationMs,
-                                                         root.spectrumDividerHoldElapsedMs + interval)
-            if (root.spectrumDividerHoldElapsedMs >= root.spectrumDividerHoldDurationMs) {
-                stop()
-                root.spectrumDividerHoldActive = false
-                root.spectrumDividerUnlocked = true
-                root.spectrumDividerDragActive = true
-                root.spectrumDividerHasDraggedAfterUnlock = false
-                // Do not resize just because the hold completed. The first
-                // post-unlock pointer movement performs the resize.
-            }
-        }
-    }
-
+    // DIVIDER-FINAL2: full-width direct-drag Spectrum/Waterfall separator.
+    // Visual and interaction are deliberately separate: the two thin line
+    // segments + center glyph are presentation only, while a dedicated topmost
+    // 48 px hit strip owns the complete analyzer width. This guarantees that a
+    // press anywhere along the separator can start the vertical resize gesture.
     Item {
-        id: spectrumWaterfallDivider
-        width: 300
-        height: 66
-        x: Math.round((root.width - width) / 2)
+        id: spectrumWaterfallDividerVisual
+        x: 0
         y: Math.round(spectrumCanvas.height - height / 2)
-        z: 130
+        width: root.width
+        height: 56
+        z: 124
         visible: root.runtimeActive
+
+        readonly property real symbolGapWidth: 86
+        readonly property real symbolGapLeft: Math.max(0,
+                                                       Math.round((width - symbolGapWidth) / 2))
+        readonly property color currentLineColor: root.spectrumDividerDragActive
+                                                  ? root.dividerDragColor
+                                                  : (dividerMouse.containsMouse
+                                                     ? root.dividerHoverColor
+                                                     : root.dividerIdleColor)
+        readonly property real currentLineOpacity: root.spectrumDividerDragActive
+                                                   ? 1.0
+                                                   : (dividerMouse.containsMouse ? 0.94 : 0.76)
+
+        // Split the line around the center glyph. Unlike the previous mask this
+        // leaves no black/dark rectangle behind the symbol and cannot create a
+        // colored artifact at the left screen edge.
+        Rectangle {
+            id: dividerLineLeft
+            x: 0
+            y: Math.round((parent.height - height) / 2)
+            width: parent.symbolGapLeft
+            height: root.spectrumDividerDragActive ? 3 : 2
+            color: parent.currentLineColor
+            opacity: parent.currentLineOpacity
+        }
 
         Rectangle {
-            id: spectrumDividerPill
-            width: 126
-            height: 36
-            anchors.centerIn: parent
-            radius: 14
-            color: root.spectrumDividerUnlocked ? root.dividerUnlockedColor
-                                                   : (root.spectrumDividerHoldActive ? root.dividerHoldColor
-                                                                                    : (dividerMouse.containsMouse ? root.dividerHoverColor
-                                                                                                                  : root.dividerIdleColor))
-            border.width: root.spectrumDividerUnlocked || root.spectrumDividerHoldActive || dividerMouse.containsMouse ? 2 : 1
-            border.color: root.dividerBorderColor
-
-            // Hold-progress track. It is intentionally small and local to the
-            // handle so the safety gesture is self-explanatory without adding
-            // a modal dialog over live RF data.
-            Rectangle {
-                id: dividerHoldTrack
-                x: 13
-                y: parent.height - 8
-                width: parent.width - 26
-                height: 3
-                radius: 1.5
-                color: Qt.rgba(1.0, 0.82, 0.40, 0.24)
-                visible: root.spectrumDividerHoldActive && !root.spectrumDividerUnlocked
-
-                Rectangle {
-                    width: parent.width * root.spectrumDividerHoldProgress
-                    height: parent.height
-                    radius: parent.radius
-                    color: "#FFF0A8"
-                }
-            }
-
-            Text {
-                anchors.centerIn: parent
-                anchors.verticalCenterOffset: root.spectrumDividerHoldActive ? -3 : 0
-                text: root.spectrumDividerUnlocked
-                      ? "DRAG"
-                      : (root.spectrumDividerHoldActive
-                         ? ("HOLD " + root.spectrumDividerHoldSecondsRemaining + "s")
-                         : "HOLD 3s")
-                color: "#FFF8E7"
-                font.pixelSize: 11
-                font.bold: true
-                font.letterSpacing: 0.7
-            }
+            id: dividerLineRight
+            x: Math.min(parent.width, parent.symbolGapLeft + parent.symbolGapWidth)
+            y: dividerLineLeft.y
+            width: Math.max(0, parent.width - x)
+            height: dividerLineLeft.height
+            color: parent.currentLineColor
+            opacity: parent.currentLineOpacity
         }
 
-        MouseArea {
-            id: dividerMouse
-            anchors.fill: parent
-            acceptedButtons: Qt.LeftButton
-            hoverEnabled: true
-            preventStealing: true
-            cursorShape: root.spectrumDividerUnlocked ? Qt.SizeVerCursor : Qt.PointingHandCursor
+        // Reference symbol: down arrow + six dots + up arrow. No button, pill,
+        // black mask, or backing rectangle is used; the center gap stays fully
+        // transparent so the icon reads as part of the separator itself.
+        Canvas {
+            id: spectrumDividerGlyph
+            width: 64
+            height: 44
+            anchors.centerIn: parent
+            antialiasing: true
+            opacity: root.spectrumDividerDragActive ? 1.0
+                                                     : (dividerMouse.containsMouse ? 1.0 : 0.90)
+            property color glyphColor: root.spectrumDividerDragActive
+                                       ? root.dividerDragColor
+                                       : (dividerMouse.containsMouse ? root.dividerHoverColor
+                                                                    : root.dividerBorderColor)
 
-            function resetDividerGesture() {
-                spectrumDividerHoldTimer.stop()
+            onGlyphColorChanged: requestPaint()
+            onWidthChanged: requestPaint()
+            onHeightChanged: requestPaint()
+
+            Behavior on opacity { NumberAnimation { duration: 100 } }
+
+            onPaint: {
+                var ctx = getContext("2d")
+                ctx.clearRect(0, 0, width, height)
+                ctx.strokeStyle = glyphColor
+                ctx.fillStyle = glyphColor
+                ctx.lineWidth = 2.8
+                ctx.lineCap = "round"
+                ctx.lineJoin = "round"
+
+                var cx = width / 2
+                var cy = height / 2
+
+                // Down arrow above the dotted center row.
+                ctx.beginPath()
+                ctx.moveTo(cx, 2.0)
+                ctx.lineTo(cx, cy - 8.0)
+                ctx.moveTo(cx - 7.0, cy - 14.0)
+                ctx.lineTo(cx, cy - 8.0)
+                ctx.lineTo(cx + 7.0, cy - 14.0)
+                ctx.stroke()
+
+                // Six center dots.
+                var dotStartX = cx - 22.5
+                for (var i = 0; i < 6; ++i) {
+                    ctx.beginPath()
+                    ctx.arc(dotStartX + i * 9.0, cy, 1.7, 0, Math.PI * 2, false)
+                    ctx.fill()
+                }
+
+                // Up arrow below the dotted center row.
+                ctx.beginPath()
+                ctx.moveTo(cx, height - 2.0)
+                ctx.lineTo(cx, cy + 8.0)
+                ctx.moveTo(cx - 7.0, cy + 14.0)
+                ctx.lineTo(cx, cy + 8.0)
+                ctx.lineTo(cx + 7.0, cy + 14.0)
+                ctx.stroke()
+            }
+        }
+    }
+
+    // Dedicated full-width pointer owner. Keep it separate from the glyph so
+    // interaction does not depend on the visible symbol's geometry or z-order.
+    MouseArea {
+        id: dividerMouse
+        x: 0
+        // Bias the generous touch strip into the Spectrum side. This keeps the
+        // Waterfall PAUSE/CLEAR controls fully reachable while the complete
+        // horizontal separator remains draggable from edge to edge.
+        y: Math.round(spectrumCanvas.height - 40)
+        width: root.width
+        height: 48
+        z: 1000
+        visible: root.runtimeActive
+        enabled: root.runtimeActive
+        acceptedButtons: Qt.LeftButton
+        hoverEnabled: true
+        preventStealing: true
+        cursorShape: Qt.SizeVerCursor
+
+        onPressed: {
+            spectrumDividerApplyTimer.stop()
+            root.pendingSpectrumRatio = root.spectrumRatio
+            root.spectrumDividerDragActive = true
+
+            // Apply the press position immediately so the line itself behaves
+            // as the resize affordance even when the press starts far from center.
+            const p = mapToItem(root, mouse.x, mouse.y)
+            root.queueSpectrumRatioFromY(p.y)
+        }
+
+        onPositionChanged: {
+            if (!pressed || !root.spectrumDividerDragActive)
+                return
+            const p = mapToItem(root, mouse.x, mouse.y)
+            root.queueSpectrumRatioFromY(p.y)
+        }
+
+        onReleased: {
+            if (root.spectrumDividerDragActive) {
+                const p = mapToItem(root, mouse.x, mouse.y)
+                root.pendingSpectrumRatio = root.clampSpectrumRatio(
+                            p.y / Math.max(1.0, root.analyzerHeight))
                 spectrumDividerApplyTimer.stop()
-                root.spectrumDividerHoldActive = false
-                root.spectrumDividerUnlocked = false
-                root.spectrumDividerDragActive = false
-                root.spectrumDividerHasDraggedAfterUnlock = false
-                root.spectrumDividerHoldElapsedMs = 0
+                root.spectrumRatio = root.pendingSpectrumRatio
             }
+            root.spectrumDividerDragActive = false
+        }
 
-            onPressed: {
-                const p = mapToItem(root, mouse.x, mouse.y)
-                root.spectrumDividerPressRootX = p.x
-                root.spectrumDividerPressRootY = p.y
-                root.spectrumDividerHoldElapsedMs = 0
-                root.spectrumDividerHoldActive = true
-                root.spectrumDividerUnlocked = false
-                root.spectrumDividerDragActive = false
-                root.spectrumDividerHasDraggedAfterUnlock = false
-                spectrumDividerHoldTimer.restart()
-            }
-
-            onPositionChanged: {
-                if (!pressed)
-                    return
-
-                const p = mapToItem(root, mouse.x, mouse.y)
-
-                if (!root.spectrumDividerUnlocked) {
-                    // Treat a substantial early movement as an accidental swipe
-                    // rather than secretly arming the resize operation.
-                    const dx = p.x - root.spectrumDividerPressRootX
-                    const dy = p.y - root.spectrumDividerPressRootY
-                    if (Math.sqrt(dx * dx + dy * dy) > root.spectrumDividerPreUnlockMoveTolerancePx)
-                        resetDividerGesture()
-                    return
-                }
-
-                root.spectrumDividerHasDraggedAfterUnlock = true
-                root.queueSpectrumRatioFromY(p.y)
-            }
-
-            onReleased: {
-                if (root.spectrumDividerUnlocked && root.spectrumDividerHasDraggedAfterUnlock) {
-                    const p = mapToItem(root, mouse.x, mouse.y)
-                    root.pendingSpectrumRatio = root.clampSpectrumRatio(
-                                p.y / Math.max(1.0, root.analyzerHeight))
-                    spectrumDividerApplyTimer.stop()
-                    root.spectrumRatio = root.pendingSpectrumRatio
-                }
-                resetDividerGesture()
-            }
-
-            onCanceled: resetDividerGesture()
+        onCanceled: {
+            spectrumDividerApplyTimer.stop()
+            root.pendingSpectrumRatio = root.spectrumRatio
+            root.spectrumDividerDragActive = false
         }
     }
 
