@@ -144,16 +144,34 @@ void mainwindowsiRec::VerifyFolderAndText()
 void mainwindowsiRec::onVerifyUserDatabaseDone(bool ok, const QString& message)
 {
     qDebug() << "[VerifyUserDatabaseDone] ok=" << ok << "message=" << message;
-    if (!ok) {
+    if (!ok)
+        return;
+
+    // irec-recover is optional on some images. Avoid two duplicate systemctl
+    // starts and skip cleanly when no unit is installed.
+    const QStringList recoverUnits = {
+        QStringLiteral("/etc/systemd/system/irec-recover.service"),
+        QStringLiteral("/usr/lib/systemd/system/irec-recover.service"),
+        QStringLiteral("/lib/systemd/system/irec-recover.service")
+    };
+    bool recoverUnitPresent = false;
+    for (const QString &unitPath : recoverUnits) {
+        if (QFileInfo::exists(unitPath)) {
+            recoverUnitPresent = true;
+            break;
+        }
+    }
+
+    if (!recoverUnitPresent) {
+        qInfo() << "[VerifyUserDatabaseDone] optional irec-recover.service not installed; skip";
         return;
     }
+
     QProcess::execute("/bin/systemctl", {"daemon-reload"});
-    QProcess::startDetached("/bin/systemctl", {"start", "irec-recover.service"});
-    bool started = QProcess::startDetached(
+    const bool started = QProcess::startDetached(
         "/bin/systemctl",
         QStringList() << "start" << "irec-recover.service"
     );
-
     qDebug() << "[VerifyUserDatabaseDone] start irec-recover.service =" << started;
 }
 void mainwindowsiRec::RestartSystemServicesAfter30s(){
@@ -1647,17 +1665,11 @@ void mainwindowsiRec::onUnixSocketMessage(const QString &msg)
 {
     qDebug() << "mainwindows: Received message from socket:" << msg;
 
-    QJsonParseError err;
-    QJsonDocument doc = QJsonDocument::fromJson(msg.toUtf8(), &err);
-    if (err.error != QJsonParseError::NoError) {
-        qWarning() << "[UnixSocket] JSON parse error:" << err.errorString()
-        << "msg =" << msg;
-    }
-
-    //    recordDeviceLiveStream(msg, wClient);
+    // Recorder status uses the existing CSV contract (ip,freq,uri,ACTION).
+    // deviceStatus() is the authoritative parser; do not JSON-parse every CSV
+    // datagram first because that creates false warnings and log pressure.
     qDebug() << "onUnixSocketMessage_m_currentWClient:" << m_currentWClient << msg << wClient;
     deviceStatus(msg);
-
 }
 
 void mainwindowsiRec::handleRecordAction(const QString &ip,

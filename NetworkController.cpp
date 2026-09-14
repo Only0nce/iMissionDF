@@ -1504,9 +1504,16 @@ void NetworkController::applyNetworkConfig(const QString &iface,
         const QString dnsNorm = normalizeDnsForSave(dnsList);
 
         const QString modeLower = mode.trimmed().toLower();
+        // Accept both the modern Network Settings vocabulary and the proven
+        // legacy TopNetworkDrawer on/off contract. Unknown non-empty values
+        // retain the historical static fallback for backward compatibility.
         const bool isDhcp = (modeLower == "dhcp" ||
                              modeLower == "auto" ||
-                             modeLower == "automatic");
+                             modeLower == "automatic" ||
+                             modeLower == "on" ||
+                             modeLower == "1" ||
+                             modeLower == "true" ||
+                             modeLower == "enabled");
 
         // 1) Save JSON first so UI does not block on nmcli.
         bool jsonOk = true;

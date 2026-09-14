@@ -29,6 +29,15 @@ Item {
     property string activeGroupTitle: ""
     property var pendingDeleteIndex: null
 
+    // Runtime tune transaction snapshot. These names are written by the scan
+    // item click path; declaring them here prevents QML from treating them as
+    // invalid global-property writes. The delayed DSP apply consumes this
+    // click-time snapshot rather than mutable model state.
+    property var pendingDSP: ({})
+    property real pendingCenterFreq: 0
+    property var pendingUIParams: ({})
+    property bool startDSPAfter: false
+
     // ====== delete confirm target ======
     property string pendingDeleteGroupTimeKey: ""
 
@@ -892,24 +901,35 @@ Item {
         interval: 500
         repeat: false
         onTriggered: {
-            mainWindows.sendmessage(JSON.stringify(pendingDSP))
+            const dsp = pendingDSP
+            const ui = pendingUIParams
+            const center = pendingCenterFreq
+            const shouldStart = startDSPAfter
 
-            radioScanner.spectrumGLPlot.centerFreq = pendingCenterFreq || 0
-            radioScanner.spectrumGLPlot.low_cut = radioMemList.low_cut || 0
-            radioScanner.spectrumGLPlot.high_cut = radioMemList.high_cut || 0
-            radioScanner.spectrumGLPlot.offsetFrequency = radioMemList.offset_freq || 0
-            radioScanner.spectrumGLPlot.start_mod = radioMemList.mod || 0
-            scanSqlLevel = (radioMemList.squelch_level * 2) + 255
+            if (dsp && dsp.type)
+                mainWindows.sendmessage(JSON.stringify(dsp))
+
+            radioScanner.spectrumGLPlot.centerFreq = center || 0
+            radioScanner.spectrumGLPlot.low_cut = Number(ui.low_cut || 0)
+            radioScanner.spectrumGLPlot.high_cut = Number(ui.high_cut || 0)
+            radioScanner.spectrumGLPlot.offsetFrequency = Number(ui.offset_freq || 0)
+            radioScanner.spectrumGLPlot.start_mod = ui.mod || ""
+            scanSqlLevel = (Number(ui.squelch_level || 0) * 2) + 255
             stackView.pop(null)
             listView.currentIndex = 0
 
-            if (startDSPAfter) {
+            if (shouldStart) {
                 let dspcontrolStart = {
                     type: "dspcontrol",
                     action: "start"
                 }
                 mainWindows.sendmessage(JSON.stringify(dspcontrolStart))
             }
+
+            pendingDSP = ({})
+            pendingCenterFreq = 0
+            pendingUIParams = ({})
+            startDSPAfter = false
         }
     }
 

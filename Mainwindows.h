@@ -99,6 +99,7 @@
 #define QSPIFLASH       true
 #define JETSONSPI       false
 
+class iScreenDF;
 
 class Mainwindows : public QObject
 {
@@ -108,6 +109,7 @@ public:
 
     explicit Mainwindows(QObject *parent = nullptr);
     Mainwindows(NetworkController *networkController, QObject *parent);
+    Mainwindows(NetworkController *networkController, iScreenDF *lanIntegrationBackend, QObject *parent);
     ~Mainwindows() override;
     WebSocketClient wsClient;
 
@@ -200,6 +202,17 @@ public:
                                            const QString &ipWithCidr,
                                            const QString &gateway,
                                            const QString &dnsList);
+
+    // LAN Phase A compatibility bridge for the redesigned Setting.qml.
+    // Keeps NetworkController as the single JSON/system mutation path while
+    // restoring the proven Network2/RFSoC and LAN2 recorder side effects.
+    Q_INVOKABLE bool applyLanSettings(const int index,
+                                      const QString &mode,
+                                      const QString &ipWithCidr,
+                                      const QString &netmask,
+                                      const QString &gateway,
+                                      const QString &dns1,
+                                      const QString &dns2);
 
     OpenWebRxConfig openWebRxConfig;
     int gpioKeyProfile = 0;
@@ -438,7 +451,9 @@ private:
     RfdcNcoClient *rfdc = new RfdcNcoClient();
     ReceiverRecorderConfigManager *recConfig = new ReceiverRecorderConfigManager();
     NetworkController *netWorkController = nullptr;
+    iScreenDF *m_lanIntegrationBackend = nullptr;
     Wifi5GController *wifi5gController = nullptr;
+    void broadcastLanSnapshotAsync();
 #ifdef PLATFORM_JETSON
     void setRfSwitchBand(RFPort port)
     {

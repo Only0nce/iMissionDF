@@ -401,7 +401,7 @@ int main(int argc, char *argv[])
     iScreenDF *kraken = new iScreenDF(imageProviderDF);
     engine->rootContext()->setContextProperty("Krakenmapval", kraken);
 
-    Mainwindows mainWindows(netCtrl, nullptr);
+    Mainwindows mainWindows(netCtrl, kraken, nullptr);
     engine->rootContext()->setContextProperty("mainWindows", &mainWindows);
     engine->rootContext()->setContextProperty("wsClient",  &mainWindows.wsClient);
 

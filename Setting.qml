@@ -29,7 +29,10 @@ Item {
             loadLanInterfaces()
     }
 
-    // LAN backend contract: keep existing NetworkController function calls.
+    // LAN Phase A: the redesigned UI uses Mainwindows as the compatibility
+    // coordinator for mutations, while NetworkController remains the async
+    // read/status backend. Krakenmapval stays owned by C++ and is not mutated
+    // directly from this page.
     property string interfaceName: ""
     property bool useDhcp: true
     property string ipAddress: ""
@@ -314,17 +317,53 @@ Item {
         loadLanSetting()
     }
 
+    function lanIndexForInterface(iface) {
+        if (iface === "enP8p1s0") return 0
+        if (iface === "enP1p1s0") return 1
+        if (iface === "end0") return 2
+        if (iface === "end1") return 3
+        return -1
+    }
+
     function applyLanSetting() {
         if (!backendAvailable()) {
             statusMessage = "NetworkController is not available"
             return
         }
+
+        var index = lanIndexForInterface(interfaceName)
+        if (index < 0) {
+            statusMessage = "Unsupported LAN interface: " + interfaceName
+            return
+        }
+
         var cidr = netmaskToCidr(netmask)
         var ipWithCidr = ipAddress + "/" + cidr
+        var mode = useDhcp ? "dhcp" : "static"
+        statusMessage = "Saving and applying LAN configuration..."
+
+        // Production path: one compatibility coordinator restores the legacy
+        // Network2/RFSoC + LAN2 recorder side effects and invokes
+        // NetworkController exactly once for JSON/system mutation.
+        if (typeof mainWindows !== "undefined" &&
+                mainWindows &&
+                typeof mainWindows.applyLanSettings === "function") {
+            var accepted = mainWindows.applyLanSettings(index,
+                                                        mode,
+                                                        ipWithCidr,
+                                                        netmask,
+                                                        gateway,
+                                                        primaryDns,
+                                                        secondaryDns)
+            if (!accepted)
+                statusMessage = "LAN configuration was rejected"
+            return
+        }
+
+        // Design/compatibility fallback when Mainwindows is not exposed.
         var dns = primaryDns + (secondaryDns.length > 0 ? "," + secondaryDns : "")
-        statusMessage = "Saving network config..."
         NetworkController.applyNetworkConfig(interfaceName,
-                                             useDhcp ? "dhcp" : "static",
+                                             mode,
                                              ipWithCidr,
                                              gateway,
                                              dns)

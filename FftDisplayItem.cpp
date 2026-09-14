@@ -153,6 +153,12 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     setAntialiasing(false);
     setOpaquePainting(false);
 
+    // EDGEFIX1: make the backing-surface clear color explicit.  On Jetson's
+    // QQuickPaintedItem FBO path the item is composited as a texture; keeping
+    // the unused texels transparent-black avoids bright RGB leaking through
+    // alpha at texture boundaries.  This does not make the analyzer opaque.
+    setFillColor(QColor(0, 0, 0, 0));
+
 #ifdef PLATFORM_JETSON
     // Keep the QPainter-facing API/visual output unchanged, but let Qt Quick's
     // OpenGL backend paint into an FBO by default on Jetson. Can be disabled
@@ -212,6 +218,8 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
             << "requestedPresentFps=" << sharedAnalyzerPresentationClock().requestedFps()
             << "effectivePresentFps=" << sharedAnalyzerPresentationClock().effectiveFps()
             << "waterfallGpuBins=" << m_waterfallHistoryMaxBins
+            << "edgeSafeFill=transparent-black"
+            << "sceneTextureSmooth=0"
 #ifdef PLATFORM_JETSON
             << "paintTarget=" << (renderTarget() == QQuickPaintedItem::FramebufferObject ? "fbo" : "image")
 #else

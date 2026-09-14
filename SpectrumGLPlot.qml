@@ -619,6 +619,7 @@ Item {
     }
 
     Component.onCompleted: {
+        console.log("[R20.4-SPECTRUM-FBO-EDGEFIX1] sceneTextureSmooth=0 fill=transparent-black fboPreserved=1")
         runtimeInitialized = true
         console.log("[ASTRARX-COMPAT-QML] revision=20260817-bidirectional-span-stability-r10")
         console.log("[R20.4-SPECTRUM-CUDA1.8-READABILITY-PASS] spectrum42=1 waterfall58=1 stableContrastHud=1 highContrastText=1 darkRightRail=1")
@@ -1094,6 +1095,9 @@ Item {
     FftDisplayItem {
         id: spectrumCanvas
         z: 2
+        // EDGEFIX1: native analyzer content is already rasterized at the item
+        // size.  Nearest sampling avoids one-pixel FBO edge bleed at x=0/x=max.
+        smooth: false
         // Native Spectrum renderer. CUDA1.20 keeps the corrected shared top
         // inset and restores the operator Intensity Min/Max as the raw vertical
         // range shared with Waterfall. Manual edits are locked against auto drift.
@@ -1554,6 +1558,10 @@ Item {
     FftDisplayItem {
         id: waterfallCanvas
         z: 2
+        // Same edge-sampling contract as Spectrum so both native textures use
+        // identical scene-graph filtering.  Internal Waterfall scaling remains
+        // controlled by QPainter::SmoothPixmapTransform inside C++.
+        smooth: false
         y: spectrumCanvas.height
         x: 0
         width: root.width

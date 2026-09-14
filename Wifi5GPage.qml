@@ -537,6 +537,20 @@ Item {
             deactivateCellularPageRuntime()
     }
 
+    // Page-owned deferred call: unlike Qt.callLater(function-reference), this
+    // timer is destroyed with the StackView page and cannot invoke a function
+    // through an invalid QQml context after navigation.
+    Timer {
+        id: pageRuntimeSyncTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.syncPageRuntime()
+    }
+
+    function schedulePageRuntimeSync() {
+        pageRuntimeSyncTimer.restart()
+    }
+
     function sendBackendCommand(obj) {
         if (useBackendJson && mainWindowBackend && mainWindowBackend.cppSubmitTextFiled) {
             mainWindowBackend.cppSubmitTextFiled(JSON.stringify(obj))
@@ -1456,19 +1470,19 @@ Item {
     }
 
     onVisibleChanged: {
-        Qt.callLater(root.syncPageRuntime)
+        root.schedulePageRuntimeSync()
     }
 
     onWifiPageActiveChanged: {
-        Qt.callLater(root.syncPageRuntime)
+        root.schedulePageRuntimeSync()
     }
 
     onCellularPageActiveChanged: {
-        Qt.callLater(root.syncPageRuntime)
+        root.schedulePageRuntimeSync()
     }
 
     onPageScopeChanged: {
-        Qt.callLater(root.syncPageRuntime)
+        root.schedulePageRuntimeSync()
     }
 
     Component.onCompleted: {
@@ -1479,10 +1493,11 @@ Item {
 
         // Defer one event-loop turn so Wifi5GSetting.qml can apply pageScope first.
         // This prevents a 5G page from briefly starting the default WiFi scan path.
-        Qt.callLater(root.syncPageRuntime)
+        root.schedulePageRuntimeSync()
     }
 
     Component.onDestruction: {
+        pageRuntimeSyncTimer.stop()
         clearPendingWifiAdvancedSave()
         deactivateWifiPageRuntime()
         deactivateCellularPageRuntime()

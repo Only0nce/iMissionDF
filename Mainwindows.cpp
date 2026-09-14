@@ -3,6 +3,7 @@
 #include "logwatcher.h"
 #include "qthread.h"
 #include "InputEventReader.h"
+#include "iScreenDF/iScreenDF.h"
 #include <QProcess>
 #include <QNetworkInterface>
 #include <QJsonObject>
@@ -25,13 +26,21 @@ bool Mainwindows::getSqlActive() const
 }
 
 Mainwindows::Mainwindows(QObject *parent)
-    : Mainwindows(nullptr, parent)
+    : Mainwindows(nullptr, nullptr, parent)
 {
 }
 
 Mainwindows::Mainwindows(NetworkController *networkController, QObject *parent)
+    : Mainwindows(networkController, nullptr, parent)
+{
+}
+
+Mainwindows::Mainwindows(NetworkController *networkController,
+                         iScreenDF *lanIntegrationBackend,
+                         QObject *parent)
     : QObject(parent),
-      netWorkController(networkController ? networkController : new NetworkController(this))
+      netWorkController(networkController ? networkController : new NetworkController(this)),
+      m_lanIntegrationBackend(lanIntegrationBackend)
 {
     qInfo().noquote() << "[ASTRARX-COMPAT-BUILD] revision=20260817-bidirectional-span-stability-r10";
     qInfo().noquote() << "[R20 BACKEND HARDENING] revision=20260909-no-ui-backend-hardening";
@@ -70,6 +79,15 @@ Mainwindows::Mainwindows(NetworkController *networkController, QObject *parent)
     connect(wifi5gController, &Wifi5GController::responseReady,
             this, [this](const QString &jsonMessage) {
         emit cppCommand(jsonMessage);
+    });
+
+    // LAN Phase A: publish the authoritative LAN snapshot only after the
+    // background system-apply stage completes. This avoids the old synchronous
+    // loadAllLanConfig() call on the GUI/audio thread and avoids broadcasting a
+    // pre-apply snapshot.
+    connect(netWorkController, &NetworkController::applyNetworkConfigNmcliFinished,
+            this, [this](const QString &, bool, const QString &) {
+        broadcastLanSnapshotAsync();
     });
     // AstraRX Qt5 compatibility endpoint. One WebSocket connection is the
     // only receiver/source control path. Override ASTRARX_WS_URL per target.
@@ -627,9 +645,10 @@ Q_INVOKABLE void Mainwindows::refreshProfiles() {
 
 void Mainwindows::updateCurrentOffsetFreq(const int value, const double centerFreq)
 {
+    // Frequency bookkeeping is independent of squelch/GPIO state. Spectrum
+    // drag/scan can call this at high rate and must not replay SQL hardware IO.
     currentCenterFreq = centerFreq;
     currentOffsetFreq = value;
-    onSQLChanged(currentSQLValue);
 }
 
 void Mainwindows::onSQLChanged(bool sqlVal)
@@ -653,6 +672,11 @@ void Mainwindows::onSQLChanged(bool sqlVal)
         qDebug() << "[SQL UI] sqlActiveChanged =" << currentSQLValue;
         emit sqlActiveChanged(currentSQLValue);
     }
+
+    // Backend state replay frequently repeats the same SQL value. Avoid
+    // synchronous SHD_AMP/HS_MUTE/LED IO when no logical state changed.
+    if (!sqlChanged)
+        return;
 
 #ifdef PLATFORM_JETSON
     bool current = false;
@@ -1348,76 +1372,169 @@ void Mainwindows::setNetworkFormDisplay(const int index,
                                         const QString &gateway,
                                         const QString &dnsList)
 {
-    // =========================================================
-    // ✅ Only DNS: blank -> "0"
-    // =========================================================
-    const bool dnsWasBlank = dnsList.trimmed().isEmpty();
-    const QString dnsNorm  = dnsWasBlank ? QStringLiteral("0")
-                                        : dnsList.trimmed();
-
-    qDebug() << "setNetworkFormDisplay All::"
-             << "index=" << index
-             << "mode=" << mode
-             << "ip=" << ipWithCidr
-             << "gateway=" << gateway
-             << "dns(in)=" << dnsList
-             << "dns(norm)=" << dnsNorm;
-
-    // =========================================================
-    // ✅ Resolve interface
-    // =========================================================
     QString iface;
-    if      (index == 0) iface = "enP8p1s0";
-    else if (index == 1) iface = "enP1p1s0";
-    else if (index == 2) iface = "end0";
-    else if (index == 3) iface = "end1";
+    if      (index == 0) iface = QStringLiteral("enP8p1s0");
+    else if (index == 1) iface = QStringLiteral("enP1p1s0");
+    else if (index == 2) iface = QStringLiteral("end0");
+    else if (index == 3) iface = QStringLiteral("end1");
     else {
-        qWarning() << "Invalid network index:" << index;
+        qWarning() << "[LAN] Invalid network index:" << index;
         return;
     }
 
-    // =========================================================
-    // ✅ Apply network config
-    //    (applyNetworkConfig รองรับ dns = "0" แล้ว)
-    // =========================================================
-    netWorkController->applyNetworkConfig(
-        iface,
-        mode,
-        ipWithCidr,
-        gateway,
-        dnsNorm          // ✅ ส่ง "0" เฉพาะกรณี dns ว่าง
-        );
+    const QString modeLower = mode.trimmed().toLower();
+    const bool isDhcp = (modeLower == QStringLiteral("dhcp") ||
+                         modeLower == QStringLiteral("auto") ||
+                         modeLower == QStringLiteral("automatic") ||
+                         modeLower == QStringLiteral("on") ||
+                         modeLower == QStringLiteral("1") ||
+                         modeLower == QStringLiteral("true") ||
+                         modeLower == QStringLiteral("enabled"));
+    const QString normalizedMode = isDhcp ? QStringLiteral("dhcp")
+                                          : QStringLiteral("static");
 
-    // =========================================================
-    // ✅ Load + broadcast full LAN config
-    // =========================================================
-    QVariantMap result = netWorkController->loadAllLanConfig();
-    QJsonObject jsonObj = QJsonObject::fromVariantMap(result);
-    QJsonDocument jsonDoc(jsonObj);
-    QString jsonString =
-        QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
+    // Preserve the historical empty-DNS contract. NetworkController knows how
+    // to serialize "0" back into the legacy JSON representation.
+    const QString dnsNorm = dnsList.trimmed().isEmpty()
+                                ? QStringLiteral("0")
+                                : dnsList.trimmed();
 
-    // =========================================================
-    // ✅ Command payload (ไม่ยุ่ง dns)
-    // =========================================================
-    QJsonObject params;
-    params.insert("objectName", "Networks");
-    params.insert("ipaddress", ipWithCidr);
+    qInfo().noquote() << "[LAN][LEGACY-APPLY]"
+                      << "index=" << index
+                      << "iface=" << iface
+                      << "mode=" << normalizedMode
+                      << "ip=" << ipWithCidr;
 
-    const QString raw_data =
-        QJsonDocument(params).toJson(QJsonDocument::Compact);
+    // Single JSON/system mutation owner. LAN3/LAN4 intentionally retain the
+    // legacy NetworkController behaviour (JSON persistence, no local nmcli).
+    netWorkController->applyNetworkConfig(iface,
+                                          normalizedMode,
+                                          ipWithCidr,
+                                          gateway,
+                                          dnsNorm);
 
-    // =========================================================
-    // ✅ Send to REC only for index == 1
-    // =========================================================
+    // Historical recorder side effect belongs to LAN2 only.
     if (index == 1) {
-        emit commandMainCppToRecCpp(raw_data);
+        QJsonObject params;
+        params.insert(QStringLiteral("objectName"), QStringLiteral("Networks"));
+        params.insert(QStringLiteral("ipaddress"), ipWithCidr);
+        emit commandMainCppToRecCpp(
+            QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact)));
+    }
+}
+
+bool Mainwindows::applyLanSettings(const int index,
+                                   const QString &mode,
+                                   const QString &ipWithCidr,
+                                   const QString &netmask,
+                                   const QString &gateway,
+                                   const QString &dns1,
+                                   const QString &dns2)
+{
+    QString iface;
+    if      (index == 0) iface = QStringLiteral("enP8p1s0");
+    else if (index == 1) iface = QStringLiteral("enP1p1s0");
+    else if (index == 2) iface = QStringLiteral("end0");
+    else if (index == 3) iface = QStringLiteral("end1");
+    else {
+        qWarning() << "[LAN][APPLY] Invalid network index:" << index;
+        return false;
     }
 
-    // =========================================================
-    // ✅ Broadcast to WebSocket clients
-    // =========================================================
-    wsServer->broadcastMessage(jsonString);
+    const QString modeLower = mode.trimmed().toLower();
+    const bool isDhcp = (modeLower == QStringLiteral("dhcp") ||
+                         modeLower == QStringLiteral("auto") ||
+                         modeLower == QStringLiteral("automatic") ||
+                         modeLower == QStringLiteral("on") ||
+                         modeLower == QStringLiteral("1") ||
+                         modeLower == QStringLiteral("true") ||
+                         modeLower == QStringLiteral("enabled"));
+    const bool isStatic = (modeLower == QStringLiteral("static") ||
+                           modeLower == QStringLiteral("manual") ||
+                           modeLower == QStringLiteral("off") ||
+                           modeLower == QStringLiteral("0") ||
+                           modeLower == QStringLiteral("false") ||
+                           modeLower == QStringLiteral("disabled"));
+    if (!isDhcp && !isStatic) {
+        qWarning().noquote() << "[LAN][APPLY] Unsupported mode:" << mode;
+        return false;
+    }
+
+    const QString normalizedMode = isDhcp ? QStringLiteral("dhcp")
+                                          : QStringLiteral("static");
+    const QString legacyDhcp = isDhcp ? QStringLiteral("on")
+                                      : QStringLiteral("off");
+    const QString ipOnly = ipWithCidr.section('/', 0, 0).trimmed();
+
+    QStringList dnsParts;
+    if (!dns1.trimmed().isEmpty())
+        dnsParts << dns1.trimmed();
+    if (!dns2.trimmed().isEmpty())
+        dnsParts << dns2.trimmed();
+    const QString dnsList = dnsParts.join(',');
+
+    qInfo().noquote() << "[LAN][APPLY]"
+                      << "index=" << index
+                      << "iface=" << iface
+                      << "mode=" << normalizedMode
+                      << "ip=" << ipWithCidr;
+
+    // Restore the proven Network2 integration first. For LAN3/LAN4 this path
+    // emits updateNetworkDfDevice(end0/end1) and the existing setIpConfig JSON
+    // to the external equipment. LAN1/LAN2 keep their historical DB snapshot.
+    if (m_lanIntegrationBackend) {
+        m_lanIntegrationBackend->updateNetworkfromDisplayIndex(index,
+                                                               legacyDhcp,
+                                                               ipOnly,
+                                                               netmask.trimmed(),
+                                                               gateway.trimmed(),
+                                                               dns1.trimmed(),
+                                                               dns2.trimmed());
+    } else {
+        qWarning() << "[LAN][APPLY] Network2/RFSoC integration backend is unavailable";
+    }
+
+    // Preserve JSON + local system behaviour in exactly one place.
+    netWorkController->applyNetworkConfig(iface,
+                                          normalizedMode,
+                                          ipWithCidr,
+                                          gateway,
+                                          dnsList);
+
+    // Preserve the LAN2 recorder notification from the legacy UI workflow.
+    if (index == 1) {
+        QJsonObject params;
+        params.insert(QStringLiteral("objectName"), QStringLiteral("Networks"));
+        params.insert(QStringLiteral("ipaddress"), ipWithCidr);
+        emit commandMainCppToRecCpp(
+            QString::fromUtf8(QJsonDocument(params).toJson(QJsonDocument::Compact)));
+    }
+
+    return true;
+}
+
+void Mainwindows::broadcastLanSnapshotAsync()
+{
+    QPointer<Mainwindows> self(this);
+    QThread *thread = QThread::create([self]() {
+        NetworkController worker;
+        const QVariantMap result = worker.loadAllLanConfig();
+        const QString jsonString = QString::fromUtf8(
+            QJsonDocument(QJsonObject::fromVariantMap(result))
+                .toJson(QJsonDocument::Compact));
+
+        if (!self)
+            return;
+
+        QMetaObject::invokeMethod(self, [self, jsonString]() {
+            if (!self)
+                return;
+            self->wsServer->broadcastMessage(jsonString);
+        }, Qt::QueuedConnection);
+    });
+
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
 }
 
 
@@ -1530,12 +1647,7 @@ void Mainwindows::newCommandProcess(const QJsonObject command, QWebSocket *pSend
             emit commandMainCppToRecCpp(raw_data);
         }
 
-        QVariantMap result = netWorkController->loadAllLanConfig();
-        QJsonObject jsonObj = QJsonObject::fromVariantMap(result);
-        QJsonDocument jsonDoc(jsonObj);
-        QString jsonString = QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
-
-        wsServer->broadcastMessage(jsonString);
+        // LAN snapshot is broadcast asynchronously after the background apply completes.
     }
     else if (getCommand == "rebootSystem")
     {
