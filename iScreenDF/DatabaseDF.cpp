@@ -2511,7 +2511,10 @@ void DatabaseDF::GetIPDFServerFromDB()
         qWarning() << "[GetIPServer] No rows found";
         return;
     }
-    QString ip        = qry.value("ipdfserver").toString();
+    const QString ip = qry.value("ipdfserver").toString().trimmed();
+    qInfo() << "[LAN][RFSoC-TCP] Parameter.ipdfserver from DB =" << ip;
+    if (ip.isEmpty())
+        qWarning() << "[LAN][RFSoC-TCP] Parameter.ipdfserver is empty in Parameter.id=1";
     emit GetIPDFServer(ip);
 
 }

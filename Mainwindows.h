@@ -203,6 +203,16 @@ public:
                                            const QString &gateway,
                                            const QString &dnsList);
 
+    // R-LAN2 preflight validation. QML may call this for immediate feedback,
+    // but applyLanSettings() validates again before any DB/JSON/system/external side effect.
+    Q_INVOKABLE QVariantMap validateLanSettings(const int index,
+                                                const QString &mode,
+                                                const QString &ipWithCidr,
+                                                const QString &netmask,
+                                                const QString &gateway,
+                                                const QString &dns1,
+                                                const QString &dns2) const;
+
     // LAN Phase A compatibility bridge for the redesigned Setting.qml.
     // Keeps NetworkController as the single JSON/system mutation path while
     // restoring the proven Network2/RFSoC and LAN2 recorder side effects.
@@ -213,6 +223,10 @@ public:
                                       const QString &gateway,
                                       const QString &dns1,
                                       const QString &dns2);
+
+    // R-LAN4A: status of the shared RFSoC TCP control channel used by LAN3/end0
+    // and LAN4/end1. It does not claim to be physical end0/end1 link state.
+    Q_INVOKABLE QVariantMap externalLanStatus(const int index) const;
 
     OpenWebRxConfig openWebRxConfig;
     int gpioKeyProfile = 0;
@@ -301,6 +315,14 @@ public:
     bool setSystemFromHwclock();
 
 signals:
+    // R-LAN4A: notify QML when the RFSoC TCP control channel changes state.
+    void externalLanControlStatusChanged(bool connected, const QString &host, int port);
+    // Result of dispatching the proven legacy RFSoC setIpConfig packet.
+    void remoteLanIpConfigDispatch(const QString &iface,
+                                   const QString &ip,
+                                   const QString &state,
+                                   const QString &detail);
+
     ////DISPLAY
     void updateNetworkToDisplay(QString);
     void frequencyChangedToQml(qint64 freqHz, double freqMHz);

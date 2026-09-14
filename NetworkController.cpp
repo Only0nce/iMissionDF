@@ -3,6 +3,7 @@
 #include <QPointer>
 #include <QProcess>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -19,6 +20,8 @@
 #include <QDir>
 #include <QMutex>
 #include <QMutexLocker>
+
+#include <functional>
 
 #include <algorithm>
 #include <sys/stat.h>
@@ -88,9 +91,78 @@ static QString ifaceToLanKey(const QString &iface)
     return iface;
 }
 
-static QJsonObject readNetworkConfigRoot()
+static bool isExternalRfsocLan(const QString &iface)
 {
-    QFile file("/etc/network_config.json");
+    return iface == QStringLiteral("end0") || iface == QStringLiteral("end1");
+}
+
+// R-LAN4A.2: model LAN function (role) independently from where the port is
+// executed (scope). LAN1/LAN3 are device-facing peers; LAN2/LAN4 are
+// network-facing peers. Only the execution scope differs between the local
+// iScan/Jetson interfaces and the remote RFSoC interfaces.
+static QString lanPortRole(const QString &lanKey, const int displayIndex)
+{
+    // Prefer the stable persisted key so a missing/reordered LAN entry cannot
+    // accidentally change the product role just because its list index moved.
+    if (lanKey == QStringLiteral("lan1") || lanKey == QStringLiteral("rfsoc1"))
+        return QStringLiteral("device");
+    if (lanKey == QStringLiteral("lan2") || lanKey == QStringLiteral("rfsoc2"))
+        return QStringLiteral("network");
+
+    if (displayIndex == 0 || displayIndex == 2)
+        return QStringLiteral("device");
+    if (displayIndex == 1 || displayIndex == 3)
+        return QStringLiteral("network");
+    return QStringLiteral("unknown");
+}
+
+static QString lanPortRoleLabel(const QString &lanKey, const int displayIndex)
+{
+    const QString role = lanPortRole(lanKey, displayIndex);
+    if (role == QStringLiteral("device"))
+        return QStringLiteral("External Device");
+    if (role == QStringLiteral("network"))
+        return QStringLiteral("Network");
+    return QStringLiteral("Unknown");
+}
+
+static QString lanExecutionScope(const QString &lanKey,
+                                 const int displayIndex,
+                                 const QString &iface)
+{
+    if (lanKey == QStringLiteral("rfsoc1") || lanKey == QStringLiteral("rfsoc2") ||
+        displayIndex == 2 || displayIndex == 3 || isExternalRfsocLan(iface))
+        return QStringLiteral("remote");
+    return QStringLiteral("local");
+}
+
+static QString lanExecutionScopeLabel(const QString &lanKey,
+                                      const int displayIndex,
+                                      const QString &iface)
+{
+    return lanExecutionScope(lanKey, displayIndex, iface) == QStringLiteral("remote")
+        ? QStringLiteral("Remote RFSoC")
+        : QStringLiteral("Local Device");
+}
+
+static QString networkConfigPath()
+{
+    return QStringLiteral("/etc/network_config.json");
+}
+
+// R-LAN3: all in-process readers/writers of network_config.json share one lock.
+// The important part is that read-modify-write updates hold this lock across
+// the complete transaction so concurrent LAN/WiFi/5G workers cannot overwrite
+// each other's sections with stale snapshots.
+static QMutex &networkConfigMutex()
+{
+    static QMutex mutex;
+    return mutex;
+}
+
+static QJsonObject readNetworkConfigRootUnlocked()
+{
+    QFile file(networkConfigPath());
     if (!file.open(QIODevice::ReadOnly))
         return QJsonObject();
 
@@ -104,17 +176,116 @@ static QJsonObject readNetworkConfigRoot()
     return doc.object();
 }
 
-static bool writeNetworkConfigRoot(const QJsonObject &root, QString *outMsg = nullptr)
+static bool readNetworkConfigRootForUpdateUnlocked(QJsonObject *root,
+                                                    QString *outMsg = nullptr)
 {
-    QFile file("/etc/network_config.json");
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        if (outMsg) *outMsg = QStringLiteral("Failed to write /etc/network_config.json");
+    if (!root) {
+        if (outMsg) *outMsg = QStringLiteral("Internal error: null network config root");
         return false;
     }
 
-    file.write(QJsonDocument(root).toJson(QJsonDocument::Indented));
+    const QString path = networkConfigPath();
+    QFileInfo info(path);
+
+    // Preserve first-boot compatibility: a missing file starts from an empty root.
+    if (!info.exists()) {
+        *root = QJsonObject();
+        return true;
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (outMsg)
+            *outMsg = QStringLiteral("Failed to read %1: %2")
+                          .arg(path, file.errorString());
+        return false;
+    }
+
+    QJsonParseError err;
+    const QByteArray data = file.readAll();
     file.close();
+
+    // An empty/whitespace-only file is treated like first boot for backward
+    // compatibility. A non-empty malformed JSON file is protected from being
+    // silently replaced so recovery evidence is not destroyed.
+    if (data.trimmed().isEmpty()) {
+        *root = QJsonObject();
+        return true;
+    }
+
+    const QJsonDocument doc = QJsonDocument::fromJson(data, &err);
+    if (err.error != QJsonParseError::NoError || !doc.isObject()) {
+        if (outMsg) {
+            *outMsg = QStringLiteral("Refusing to overwrite invalid %1: %2")
+                          .arg(path, err.errorString());
+        }
+        return false;
+    }
+
+    *root = doc.object();
     return true;
+}
+
+static bool writeNetworkConfigRootUnlocked(const QJsonObject &root,
+                                            QString *outMsg = nullptr)
+{
+    const QString path = networkConfigPath();
+    QSaveFile file(path);
+
+    // Never fall back to direct truncate/write: if atomic replacement cannot be
+    // guaranteed, fail the save and leave the previous known-good file intact.
+    file.setDirectWriteFallback(false);
+
+    if (!file.open(QIODevice::WriteOnly)) {
+        if (outMsg)
+            *outMsg = QStringLiteral("Failed to open %1 for atomic save: %2")
+                          .arg(path, file.errorString());
+        return false;
+    }
+
+    const QByteArray payload = QJsonDocument(root).toJson(QJsonDocument::Indented);
+    const qint64 written = file.write(payload);
+    if (written != payload.size()) {
+        if (outMsg)
+            *outMsg = QStringLiteral("Failed to write complete %1: %2")
+                          .arg(path, file.errorString());
+        file.cancelWriting();
+        return false;
+    }
+
+    if (!file.commit()) {
+        if (outMsg)
+            *outMsg = QStringLiteral("Failed to atomically commit %1: %2")
+                          .arg(path, file.errorString());
+        return false;
+    }
+
+    return true;
+}
+
+static QJsonObject readNetworkConfigRoot()
+{
+    QMutexLocker locker(&networkConfigMutex());
+    return readNetworkConfigRootUnlocked();
+}
+
+static bool writeNetworkConfigRoot(const QJsonObject &root, QString *outMsg = nullptr)
+{
+    QMutexLocker locker(&networkConfigMutex());
+    return writeNetworkConfigRootUnlocked(root, outMsg);
+}
+
+static bool updateNetworkConfigRoot(const std::function<void(QJsonObject &)> &mutator,
+                                    QString *outMsg = nullptr)
+{
+    QMutexLocker locker(&networkConfigMutex());
+
+    QJsonObject root;
+    if (!readNetworkConfigRootForUpdateUnlocked(&root, outMsg))
+        return false;
+
+    mutator(root);
+    return writeNetworkConfigRootUnlocked(root, outMsg);
 }
 
 static bool runProcessBlocking(const QString &program,
@@ -1515,37 +1686,40 @@ void NetworkController::applyNetworkConfig(const QString &iface,
                              modeLower == "true" ||
                              modeLower == "enabled");
 
-        // 1) Save JSON first so UI does not block on nmcli.
+        // 1) Persist desired state first. R-LAN3 keeps the historical JSON
+        // contract, but the complete read-modify-write is now serialized and
+        // atomically committed so LAN/WiFi/5G workers cannot clobber sections.
         bool jsonOk = true;
         QString jsonMsg;
+        QString newGw;
+        QString newDns;
 
-        QJsonObject rootObj = readNetworkConfigRoot();
-        QJsonObject lanObj = rootObj.value("lan").toObject();
+        jsonOk = updateNetworkConfigRoot([&](QJsonObject &rootObj) {
+            QJsonObject lanObj = rootObj.value("lan").toObject();
 
-        const QString lanKey = ifaceToLanKey(iface);
-        QJsonObject oldLan = lanObj.value(lanKey).toObject();
+            const QString lanKey = ifaceToLanKey(iface);
+            const QJsonObject oldLan = lanObj.value(lanKey).toObject();
 
-        const QString oldMode = oldLan.value("mode").toString();
-        const QString oldIp   = oldLan.value("ip").toString();
-        const QString oldGw   = oldLan.value("gateway").toString();
-        const QString oldDns  = oldLan.value("dns").toString();
+            const QString oldMode = oldLan.value("mode").toString();
+            const QString oldIp   = oldLan.value("ip").toString();
+            const QString oldGw   = oldLan.value("gateway").toString();
+            const QString oldDns  = oldLan.value("dns").toString();
 
-        const QString newMode = isBlank(mode) ? oldMode : (isDhcp ? "dhcp" : "static");
-        const QString newIp   = pick(ipNorm, oldIp);
-        const QString newGw   = isBlank(gateway) ? normalizeGatewayForSave(oldGw) : gwNorm;
-        const QString newDns  = isBlank(dnsList) ? normalizeDnsForSave(oldDns)    : dnsNorm;
+            const QString newMode = isBlank(mode) ? oldMode : (isDhcp ? "dhcp" : "static");
+            const QString newIp   = pick(ipNorm, oldIp);
+            newGw  = isBlank(gateway) ? normalizeGatewayForSave(oldGw) : gwNorm;
+            newDns = isBlank(dnsList) ? normalizeDnsForSave(oldDns)    : dnsNorm;
 
-        QJsonObject oneLan;
-        oneLan["interface"] = iface;
-        oneLan["mode"]      = newMode;
-        oneLan["ip"]        = newIp;
-        oneLan["gateway"]   = newGw;
-        oneLan["dns"]       = newDns;
+            QJsonObject oneLan;
+            oneLan["interface"] = iface;
+            oneLan["mode"]      = newMode;
+            oneLan["ip"]        = newIp;
+            oneLan["gateway"]   = newGw;
+            oneLan["dns"]       = newDns;
 
-        lanObj[lanKey] = oneLan;
-        rootObj["lan"] = lanObj;
-
-        jsonOk = writeNetworkConfigRoot(rootObj, &jsonMsg);
+            lanObj[lanKey] = oneLan;
+            rootObj["lan"] = lanObj;
+        }, &jsonMsg);
 
         if (self) {
             QMetaObject::invokeMethod(self, [self, iface, jsonOk, jsonMsg, newGw, newDns]() {
@@ -1555,6 +1729,21 @@ void NetworkController::applyNetworkConfig(const QString &iface,
                                         : (jsonMsg.isEmpty() ? QStringLiteral("Failed to save JSON") : jsonMsg);
                 emit self->applyNetworkConfigFinished(iface, jsonOk, msg, newGw, newDns);
             }, Qt::QueuedConnection);
+        }
+
+        // Do not mutate the local runtime network when persistence failed.
+        // This keeps LAN1/LAN2 from ending up with a new NetworkManager state
+        // while /etc/network_config.json still contains the old desired state.
+        if (!jsonOk) {
+            if (self) {
+                const QString skipMsg = QStringLiteral(
+                    "System apply skipped because network_config.json was not saved atomically");
+                QMetaObject::invokeMethod(self, [self, iface, skipMsg]() {
+                    if (!self) return;
+                    emit self->applyNetworkConfigNmcliFinished(iface, false, skipMsg);
+                }, Qt::QueuedConnection);
+            }
+            return;
         }
 
         // 2) Apply nmcli in background.
@@ -1724,6 +1913,43 @@ static QVariantMap lanObjectToMap(const QString &lanKey,
     oneLan[QStringLiteral("dns2")] = dnsParts.value(1);
     oneLan[QStringLiteral("dnsList")] = dnsParts.join(',');
 
+    const QString portRole = lanPortRole(lanKey, displayIndex);
+    const QString executionScope = lanExecutionScope(lanKey, displayIndex, iface);
+    const bool externalRfsoc = (executionScope == QStringLiteral("remote"));
+
+    // R-LAN4A.2 authoritative semantic model. Role describes what the port is
+    // used for; executionScope describes where configuration is applied.
+    oneLan[QStringLiteral("portRole")] = portRole;
+    oneLan[QStringLiteral("portRoleLabel")] = lanPortRoleLabel(lanKey, displayIndex);
+    oneLan[QStringLiteral("executionScope")] = executionScope;
+    oneLan[QStringLiteral("executionScopeLabel")] = lanExecutionScopeLabel(lanKey, displayIndex, iface);
+
+    // Compatibility fields retained for existing QML/backends. Do not use
+    // portType as the product role: remote RFSoC is an execution scope.
+    oneLan[QStringLiteral("external")] = externalRfsoc;
+    oneLan[QStringLiteral("portType")] = externalRfsoc
+        ? QStringLiteral("external-rfsoc")
+        : QStringLiteral("local");
+    oneLan[QStringLiteral("controlTransport")] = externalRfsoc
+        ? QStringLiteral("tcp")
+        : QStringLiteral("networkmanager");
+    oneLan[QStringLiteral("controlScope")] = executionScope;
+
+    // R-LAN4A: end0/end1 belong to the remote RFSoC. Never probe those names
+    // through local nmcli/sysfs. Their saved configuration remains visible;
+    // physical-link telemetry must come from the RFSoC protocol explicitly.
+    if (externalRfsoc) {
+        oneLan[QStringLiteral("remoteInterface")] = iface;
+        oneLan[QStringLiteral("status")] = configuredIp.isEmpty()
+            ? QStringLiteral("Not Configured")
+            : QStringLiteral("Configured");
+        oneLan[QStringLiteral("linkStatus")] = QStringLiteral("Remote");
+        oneLan[QStringLiteral("speed")] = QStringLiteral("-");
+        oneLan[QStringLiteral("duplex")] = QStringLiteral("-");
+        oneLan[QStringLiteral("mac")] = QString();
+        return oneLan;
+    }
+
     if (includeLive && !iface.isEmpty()) {
         const QVariantMap live = parseDeviceShow(iface);
         oneLan[QStringLiteral("liveIp")] = live.value(QStringLiteral("ip")).toString();
@@ -1886,7 +2112,18 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
         return result;
     }
 
-    // Last fallback: requested iface exists in the OS but has no saved JSON entry.
+    // Remote RFSoC interfaces are product-defined even when a saved JSON entry
+    // is missing. Never fall through to a local OS probe for end0/end1.
+    if (isExternalRfsocLan(iface)) {
+        QJsonObject remoteLan;
+        remoteLan[QStringLiteral("interface")] = iface;
+        remoteLan[QStringLiteral("mode")] = QStringLiteral("static");
+        result = lanObjectToMap(lanKey, remoteLan, lanKeyOrder(lanKey), true);
+        result[QStringLiteral("menuID")] = QStringLiteral("network");
+        return result;
+    }
+
+    // Last fallback: requested local iface exists in the OS but has no saved JSON entry.
     const QVariantMap live = parseDeviceShow(iface);
     if (!live.isEmpty()) {
         result = live;
@@ -1903,6 +2140,11 @@ QVariantMap NetworkController::loadConfig(const QString &iface)
 
 QVariantMap NetworkController::queryDhcpInfo(const QString &iface)
 {
+    // end0/end1 are remote RFSoC interfaces; local DHCP/nmcli information is
+    // not authoritative for them. Return the saved remote configuration model.
+    if (isExternalRfsocLan(iface))
+        return loadConfig(iface);
+
     return parseDeviceShow(iface);
 }
 
@@ -2504,17 +2746,20 @@ void NetworkController::connectWifi(const QString &iface,
                 if (profileName.isEmpty())
                     profileName = findWifiConnectionNameBySsid(trimmedSsid);
 
-                // Save safe WiFi config. Do not save password here.
-                QJsonObject root = readNetworkConfigRoot();
-                QJsonObject wifi;
-                wifi["enabled"] = true;
-                wifi["interface"] = wifiIface;
-                wifi["ssid"] = trimmedSsid;
-                wifi["mode"] = "dhcp";
-                wifi["autoConnect"] = autoConnect;
-                root["wifi"] = wifi;
+                // Save safe WiFi config. Do not save password here. R-LAN3
+                // serializes the complete read-modify-write with LAN/5G.
                 QString saveMsg;
-                writeNetworkConfigRoot(root, &saveMsg);
+                const bool saved = updateNetworkConfigRoot([&](QJsonObject &root) {
+                    QJsonObject wifi;
+                    wifi["enabled"] = true;
+                    wifi["interface"] = wifiIface;
+                    wifi["ssid"] = trimmedSsid;
+                    wifi["mode"] = "dhcp";
+                    wifi["autoConnect"] = autoConnect;
+                    root["wifi"] = wifi;
+                }, &saveMsg);
+                if (!saved)
+                    qWarning().noquote() << "[NETWORK-CONFIG][WIFI] save failed:" << saveMsg;
 
                 // Make active connection autoconnect setting best effort.
                 const QString conToModify = profileName.isEmpty() ? trimmedSsid : profileName;
@@ -3341,14 +3586,21 @@ void NetworkController::connectCellular(const QString &apn,
         }
 
         if (ok) {
-            QJsonObject root = readNetworkConfigRoot();
-            QJsonObject cellular;
-            cellular["enabled"] = true;
-            cellular["interface"] = ifName;
-            cellular["apn"] = apnValue;
-            cellular["autoConnect"] = autoConnect;
-            root["cellular"] = cellular;
-            writeNetworkConfigRoot(root);
+            QString saveMsg;
+            const bool saved = updateNetworkConfigRoot([&](QJsonObject &root) {
+                QJsonObject cellular;
+                cellular["enabled"] = true;
+                cellular["interface"] = ifName;
+                cellular["apn"] = apnValue;
+                cellular["autoConnect"] = autoConnect;
+                root["cellular"] = cellular;
+            }, &saveMsg);
+            if (!saved) {
+                qWarning().noquote() << "[NETWORK-CONFIG][5G] save failed:" << saveMsg;
+                ok = false;
+                if (err.isEmpty())
+                    err = saveMsg;
+            }
         }
 
         msg = ok ? QStringLiteral("Cellular connected")

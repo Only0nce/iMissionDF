@@ -12,9 +12,10 @@ import QtQuick.Layouts 1.0
 import App1 1.0
 Item {
     id: homeDisplay
-    // width: 1920
-    // height: 1080
-    anchors.fill: parent
+    // This item is owned by MainPage's StackView. Do not anchor the page root:
+    // StackView controls x/y/width/height during push/pop transitions.
+    // Root anchors would fight that geometry and produce:
+    //   "StackView has detected conflicting anchors".
     property int currentMemIdEdit: -1
 
 

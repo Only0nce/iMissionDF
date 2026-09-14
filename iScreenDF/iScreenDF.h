@@ -102,6 +102,13 @@ public:
     TcpClientDF *localDFclient;
     TcpServerDF *tcpServerDF;
     NetworkMng *networking;
+
+    // R-LAN4A: external LAN3/LAN4 are configured over the RFSoC TCP control
+    // channel. Expose only that control-channel state; do not pretend it is the
+    // physical carrier state of remote end0/end1.
+    bool isRfsocControlConnected() const;
+    QString rfsocControlHost() const;
+    quint16 rfsocControlPort() const;
     // ImageProvider *capture;
     QString controllerName = "MainController";
     QString Serialnumber = "156952";
@@ -160,7 +167,7 @@ public:
 
     void onDoAResultReceived(const QJsonObject &obj);
     void applyRfsocParameterToServer(bool needAck);
-    void sendRfsocJsonLine(const QJsonObject &obj, bool addNewline);
+    bool sendRfsocJsonLine(const QJsonObject &obj, bool addNewline);
     void emitNetworkRowsSnapshot(int selectedId = 0);
 
     void updateReceiverParametersFreqOffsetBw(qint64 rfHz, double offsetHz, double bwHz);
@@ -177,6 +184,16 @@ public:
 
 
 signals:
+    // R-LAN4A: RFSoC TCP control-channel connectivity for external LAN3/LAN4.
+    void rfsocControlConnectionChanged(bool connected);
+    // Legacy RFSoC IP-config dispatch telemetry. State is DISPATCHED, QUEUED,
+    // QUEUED_NO_TARGET, REJECTED, or ERROR. DISPATCHED means the JSON was
+    // accepted by QTcpSocket for transmission; it is not a remote apply ACK.
+    void rfsocIpConfigDispatchResult(const QString &iface,
+                                     const QString &ip,
+                                     const QString &state,
+                                     const QString &detail);
+
     // EMIT  FROM cpp to /MainPage.qml
     void openPopupSettingRequested(const QString &msg);
     void setremoteGroupsJson(const QString &json);

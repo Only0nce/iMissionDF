@@ -24,15 +24,15 @@ void iScreenDF::sendParameterToServer()
     applyRfsocParameterToServer(true);
 }
 
-void iScreenDF::sendRfsocJsonLine(const QJsonObject &obj, bool addNewline)
+bool iScreenDF::sendRfsocJsonLine(const QJsonObject &obj, bool addNewline)
 {
     if (!localDFclient) {
         qWarning() << "[iScreenDF][RFSoC] localDFclient is null, drop:" << obj;
-        return;
+        return false;
     }
 
     const QByteArray payload = QJsonDocument(obj).toJson(QJsonDocument::Compact);
-    localDFclient->sendLine(payload, addNewline);
+    return localDFclient->sendLine(payload, addNewline);
 }
 
 static int maskToPrefix(const QString &mask)
@@ -115,8 +115,22 @@ void iScreenDF::onUpdateNetworkDfDevice(const QString &iface,
                                         const QString &dns1,
                                         const QString &dns2)
 {
+    Q_UNUSED(dhcp);
+
+    // Keep the proven legacy RFSoC contract exact. Only the two remote RFSoC
+    // Ethernet interfaces are valid on this path. The management/control TCP
+    // address is intentionally independent from the end0/end1 IP being changed.
+    if (iface != QStringLiteral("end0") && iface != QStringLiteral("end1")) {
+        const QString detail = QStringLiteral("unsupported RFSoC interface: %1").arg(iface);
+        qWarning().noquote() << "[LAN][RFSoC][setIpConfig] REJECTED" << detail;
+        emit rfsocIpConfigDispatchResult(iface, ip, QStringLiteral("REJECTED"), detail);
+        return;
+    }
+
     QJsonObject obj;
 
+    // IMPORTANT: do not add/rename fields without changing the RFSoC server.
+    // This is the same packet used by the reconciled legacy source.
     obj["menuID"]  = "setIpConfig";
     obj["ifname"]  = iface;
     obj["ip"]      = ip;
@@ -130,7 +144,51 @@ void iScreenDF::onUpdateNetworkDfDevice(const QString &iface,
         << "[iScreenDF][setIpConfig][JSON] ="
         << doc.toJson(QJsonDocument::Compact);
 
-    sendRfsocJsonLine(obj, true);
+    if (!localDFclient) {
+        const QString detail = QStringLiteral("RFSoC TCP client is unavailable");
+        qWarning().noquote() << "[LAN][RFSoC][setIpConfig] ERROR" << detail;
+        emit rfsocIpConfigDispatchResult(iface, ip, QStringLiteral("ERROR"), detail);
+        return;
+    }
+
+    const bool connectedBefore = localDFclient->isConnected();
+    const bool targetKnown = localDFclient->hasTarget();
+    const QString controlHost = localDFclient->targetHost();
+    const int controlPort = static_cast<int>(localDFclient->targetPort());
+    const int pendingBefore = localDFclient->pendingWriteCount();
+
+    // sendLine() preserves the legacy reconnect queue. If the management TCP
+    // link is down, this exact setIpConfig packet is queued and flushed after
+    // the existing reconnect path restores the RFSoC control channel.
+    const bool dispatchedNow = sendRfsocJsonLine(obj, true);
+
+    QString state;
+    if (dispatchedNow) {
+        state = QStringLiteral("DISPATCHED");
+    } else if (!connectedBefore && targetKnown) {
+        state = QStringLiteral("QUEUED");
+    } else if (!connectedBefore && !targetKnown) {
+        state = QStringLiteral("QUEUED_NO_TARGET");
+    } else {
+        state = QStringLiteral("ERROR");
+    }
+
+    const int pendingAfter = localDFclient->pendingWriteCount();
+    const QString controlTarget = targetKnown
+        ? QStringLiteral("%1:%2").arg(controlHost).arg(controlPort)
+        : QStringLiteral("not-configured");
+    const QString detail = QStringLiteral("control=%1 pending=%2->%3 target-ip=%4")
+                               .arg(controlTarget)
+                               .arg(pendingBefore)
+                               .arg(pendingAfter)
+                               .arg(ip);
+
+    qInfo().noquote() << "[LAN][RFSoC][setIpConfig]"
+                      << state
+                      << "iface=" << iface
+                      << detail;
+
+    emit rfsocIpConfigDispatchResult(iface, ip, state, detail);
 }
 
 void iScreenDF::GetrfsocParameter(bool setDoaEnable,
@@ -276,19 +334,32 @@ void iScreenDF::setCompassOffset(double offset)
 
 void iScreenDF::GetIPDFServer(const QString &ip)
 {
-    if (m_parameter.isEmpty() || !m_parameter.first()) {
-        qWarning() << "[iScreenDF] GetIPDFServer: no parameter";
+    // R-LAN4B.1: the RFSoC TCP control target comes from Parameter.ipdfserver.
+    // Establishing the control socket must not depend on the timing of the
+    // separate Getrfsocparameter startup signal.
+    const QString host = ip.trimmed();
+    if (host.isEmpty()) {
+        qWarning() << "[LAN][RFSoC-TCP] Parameter.ipdfserver is empty; control connection not started";
         return;
     }
 
-    Parameter *p = m_parameter.first();
-    p->m_ipdfServer = ip;
+    if (!localDFclient) {
+        qWarning() << "[LAN][RFSoC-TCP] TCP client unavailable; target=" << host << 5555;
+        return;
+    }
 
-    localDFclient->connectToServer(p->m_ipdfServer, 5555);
-    emit updateServeripDfserver(p->m_ipdfServer);
+    if (!m_parameter.isEmpty() && m_parameter.first()) {
+        m_parameter.first()->m_ipdfServer = host;
+    } else {
+        qWarning() << "[LAN][RFSoC-TCP] RF parameter object not ready; applying TCP target independently";
+    }
+
+    qInfo() << "[LAN][RFSoC-TCP] control target from DB =" << host << 5555;
+    localDFclient->connectToServer(host, 5555);
+    emit updateServeripDfserver(host);
 
     if (gpsReader) {
-        gpsReader->setGpsdEndpoint(p->m_ipdfServer, 2947);
+        gpsReader->setGpsdEndpoint(host, 2947);
         gpsReader->start();
     }
 }

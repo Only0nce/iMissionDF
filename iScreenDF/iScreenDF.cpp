@@ -3,6 +3,22 @@
 #define SET_AND_EMIT(var, val, signal) \
 if ((var) != (val)) { (var) = (val); emit signal(); }
 
+
+bool iScreenDF::isRfsocControlConnected() const
+{
+    return localDFclient && localDFclient->isConnected();
+}
+
+QString iScreenDF::rfsocControlHost() const
+{
+    return localDFclient ? localDFclient->targetHost() : QString();
+}
+
+quint16 iScreenDF::rfsocControlPort() const
+{
+    return localDFclient ? localDFclient->targetPort() : 0;
+}
+
 iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     : QObject(parent)
 {
@@ -68,8 +84,10 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
             dbThread->wait();
         }
     });
-    // start db thread
-    dbThread->start();
+    // R-LAN4B.1: do NOT start the DB worker yet. DatabaseDF::init() emits
+    // startup state (including Getrfsocparameter/GetIPDFServer). All DB ->
+    // iScreenDF and TcpClientDF signal wiring must be installed first or those
+    // one-shot startup signals can be lost.
 
     // ====== TCP Server (QTcpServer) ======
     tcpServerDF = new TcpServerDF(9000, this);
@@ -154,9 +172,19 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     connect(localDFclient, &TcpClientDF::connected,
             this, &iScreenDF::sendParameterToServer);
 
+    connect(localDFclient, &TcpClientDF::connected,
+            this, [this]() {
+                qInfo() << "[LAN][RFSoC-TCP] control channel connected"
+                        << rfsocControlHost() << rfsocControlPort();
+                emit rfsocControlConnectionChanged(true);
+            });
+
     connect(localDFclient, &TcpClientDF::disconnected,
-            this, [](){
+            this, [this](){
                 qDebug() << "DOA TCP Disconnected";
+                qInfo() << "[LAN][RFSoC-TCP] control channel disconnected"
+                        << rfsocControlHost() << rfsocControlPort();
+                emit rfsocControlConnectionChanged(false);
             });
 
     connect(localDFclient, &TcpClientDF::errorOccurred,
@@ -191,6 +219,13 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     // });
     connect(localDFclient, &TcpClientDF::updateFromTcpServer,
             this, &iScreenDF::updateFromTcpServer);
+
+    // R-LAN4B.1: DatabaseDF::init() may emit the RFSoC control target
+    // immediately. Start the DB worker only after every startup consumer and
+    // every TcpClientDF state handler above is connected.
+    qInfo() << "[LAN][RFSoC-TCP] startup wiring complete; starting DB thread";
+    dbThread->start();
+
     // ====== pthread ======
     int ret = pthread_create(&idThread, nullptr, ThreadFunc, this);
     if (ret == 0) {

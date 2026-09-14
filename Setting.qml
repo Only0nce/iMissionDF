@@ -50,6 +50,13 @@ Item {
     property string lanSpeed: "-"
     property string lanDuplex: "-"
 
+    // R-LAN4A: LAN3/LAN4 are remote RFSoC ports. This is the state of the
+    // shared TCP control channel used to configure end0/end1; it is not remote
+    // physical-carrier telemetry.
+    property bool externalLanControlConnected: false
+    property string externalLanControlHost: ""
+    property int externalLanControlPort: 0
+
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? true : HardwareHasWireless
     property bool hardwareHasWifi: (typeof HardwareHasWifi === "undefined") ? true : HardwareHasWifi
     property bool hardwareHas5G: (typeof HardwareHas5G === "undefined") ? true : HardwareHas5G
@@ -96,22 +103,27 @@ Item {
     }
 
     function netmaskToCidr(mask) {
-        var parts = String(mask).split(".")
+        var parts = String(mask).trim().split(".")
         if (parts.length !== 4)
-            return 24
+            return -1
+
         var binary = ""
         for (var i = 0; i < 4; ++i) {
-            var n = parseInt(parts[i])
-            if (isNaN(n) || n < 0 || n > 255)
-                return 24
+            if (!/^\d+$/.test(parts[i]))
+                return -1
+            var n = Number(parts[i])
+            if (!isFinite(n) || n < 0 || n > 255 || Math.floor(n) !== n)
+                return -1
             binary += ("00000000" + n.toString(2)).slice(-8)
         }
-        var count = 0
-        for (var j = 0; j < binary.length; ++j) {
-            if (binary.charAt(j) === "1")
-                count++
-        }
-        return count
+
+        // A valid IPv4 netmask must contain one contiguous run of 1 bits
+        // followed only by 0 bits. Do not silently turn 255.0.255.0 into /16.
+        if (!/^1*0*$/.test(binary))
+            return -1
+
+        var firstZero = binary.indexOf("0")
+        return firstZero < 0 ? 32 : firstZero
     }
 
     function readLanValue(info, keys, fallback) {
@@ -143,6 +155,115 @@ Item {
         return null
     }
 
+    // R-LAN4A.2: role and execution scope are independent concepts.
+    // LAN1/LAN3 are device-facing peers; LAN2/LAN4 are network-facing peers.
+    // The local/remote distinction only selects the executor/status source.
+    function lanPortRole(info) {
+        var role = readLanValue(info, ["portRole"], "").toLowerCase()
+        if (role === "device" || role === "network")
+            return role
+
+        var iface = readLanValue(info, ["iface", "interface"], interfaceName)
+        var index = lanIndexForInterface(iface)
+        if (index === 0 || index === 2)
+            return "device"
+        if (index === 1 || index === 3)
+            return "network"
+        return "unknown"
+    }
+
+    function lanPortRoleLabel(info) {
+        var explicitLabel = readLanValue(info, ["portRoleLabel"], "")
+        if (explicitLabel.length > 0)
+            return explicitLabel
+        var role = lanPortRole(info)
+        if (role === "device")
+            return "External Device"
+        if (role === "network")
+            return "Network"
+        return "Unknown"
+    }
+
+    function lanPortRoleShortLabel(info) {
+        var role = lanPortRole(info)
+        if (role === "device")
+            return "Device"
+        if (role === "network")
+            return "Network"
+        return "LAN"
+    }
+
+    function lanExecutionScope(info) {
+        var scope = readLanValue(info, ["executionScope", "controlScope"], "").toLowerCase()
+        if (scope === "local" || scope === "remote")
+            return scope
+
+        var iface = readLanValue(info, ["iface", "interface"], interfaceName)
+        return (iface === "end0" || iface === "end1") ? "remote" : "local"
+    }
+
+    function lanExecutionScopeLabel(info) {
+        var explicitLabel = readLanValue(info, ["executionScopeLabel"], "")
+        if (explicitLabel.length > 0)
+            return explicitLabel
+        return lanExecutionScope(info) === "remote" ? "Remote RFSoC" : "Local Device"
+    }
+
+    function lanRoleScopeText(info) {
+        return lanPortRoleLabel(info) + " · " + lanExecutionScopeLabel(info)
+    }
+
+    function isRemoteLanInfo(info) {
+        if (!info)
+            return false
+        return lanExecutionScope(info) === "remote"
+    }
+
+    // Compatibility helper name retained for the existing page logic.
+    function isExternalLanInfo(info) {
+        return isRemoteLanInfo(info)
+    }
+
+    function isExternalLanCurrent() {
+        return isRemoteLanInfo(currentLanInfo()) || interfaceName === "end0" || interfaceName === "end1"
+    }
+
+    function externalLanControlText() {
+        return externalLanControlConnected ? "Connected" : "Disconnected"
+    }
+
+    // R-LAN4A.1: the LAN page represents the remote RFSoC interface being
+    // configured (end0/end1), not the management/control socket used to reach
+    // the RFSoC. Keep the TCP host/port internally for connectivity telemetry,
+    // but present the configured interface IPv4 as the user-facing address.
+    function externalLanConfiguredIpText() {
+        var configured = String(ipAddress).trim()
+        return configured.length > 0 ? configured : "No configured IP"
+    }
+
+    function externalLanTargetText() {
+        var iface = String(interfaceName).trim()
+        var ip = externalLanConfiguredIpText()
+        return iface.length > 0 ? (iface + " · " + ip) : ip
+    }
+
+    function refreshExternalLanStatus() {
+        if (typeof mainWindows === "undefined" || !mainWindows ||
+                typeof mainWindows.externalLanStatus !== "function")
+            return
+
+        // LAN3/end0 and LAN4/end1 share the same RFSoC TCP control channel.
+        // Query it even while LAN1/LAN2 is selected so the external rows are
+        // already truthful before the user opens them.
+        var index = isExternalLanCurrent() ? lanIndexForInterface(interfaceName) : 2
+        var state = mainWindows.externalLanStatus(index)
+        if (!state)
+            return
+        externalLanControlConnected = !!state.connected
+        externalLanControlHost = state.host !== undefined && state.host !== null ? String(state.host) : ""
+        externalLanControlPort = state.port !== undefined && state.port !== null ? Number(state.port) : 0
+    }
+
     function normalizeLanIndex(index) {
         if (lanInterfaces.length > index)
             return lanInterfaces[index].iface
@@ -155,6 +276,9 @@ Item {
     }
 
     function lanInfoStatusText(info) {
+        if (isExternalLanInfo(info))
+            return externalLanControlConnected ? "TCP Connected" : "TCP Disconnected"
+
         var st = readLanValue(info, ["status", "linkStatus", "link", "state", "operstate"], "")
         if (st.length > 0 && st !== "Unknown")
             return st
@@ -237,6 +361,9 @@ Item {
         lanLinkStatus = readLanValue(info, ["status", "linkStatus", "link", "state", "operstate"], "Unknown")
         lanSpeed = readLanValue(info, ["speed", "linkSpeed"], "-")
         lanDuplex = readLanValue(info, ["duplex"], "-")
+
+        if (isExternalLanInfo(info))
+            refreshExternalLanStatus()
     }
 
     function loadLanInterfaces() {
@@ -288,6 +415,7 @@ Item {
             interfaceName = list[0].iface
 
         applyLanInfo(lanByIface[interfaceName])
+        refreshExternalLanStatus()
     }
 
     function refreshDhcpInfo() {
@@ -315,6 +443,7 @@ Item {
     function selectLan(iface) {
         interfaceName = iface
         loadLanSetting()
+        refreshExternalLanStatus()
     }
 
     function lanIndexForInterface(iface) {
@@ -337,27 +466,55 @@ Item {
             return
         }
 
-        var cidr = netmaskToCidr(netmask)
-        var ipWithCidr = ipAddress + "/" + cidr
         var mode = useDhcp ? "dhcp" : "static"
-        statusMessage = "Saving and applying LAN configuration..."
+        var cidr = netmaskToCidr(netmask)
+        var ipWithCidr = ""
+
+        if (!useDhcp) {
+            if (cidr < 0) {
+                statusMessage = "Invalid subnet mask"
+                return
+            }
+            ipWithCidr = String(ipAddress).trim() + "/" + cidr
+        } else if (String(ipAddress).trim().length > 0 && cidr >= 0) {
+            // Preserve the currently displayed DHCP lease for compatibility,
+            // but DHCP does not depend on it for local NetworkManager apply.
+            ipWithCidr = String(ipAddress).trim() + "/" + cidr
+        }
 
         // Production path: one compatibility coordinator restores the legacy
         // Network2/RFSoC + LAN2 recorder side effects and invokes
         // NetworkController exactly once for JSON/system mutation.
-        if (typeof mainWindows !== "undefined" &&
-                mainWindows &&
-                typeof mainWindows.applyLanSettings === "function") {
-            var accepted = mainWindows.applyLanSettings(index,
-                                                        mode,
-                                                        ipWithCidr,
-                                                        netmask,
-                                                        gateway,
-                                                        primaryDns,
-                                                        secondaryDns)
-            if (!accepted)
-                statusMessage = "LAN configuration was rejected"
-            return
+        if (typeof mainWindows !== "undefined" && mainWindows) {
+            if (typeof mainWindows.validateLanSettings === "function") {
+                var validation = mainWindows.validateLanSettings(index,
+                                                                 mode,
+                                                                 ipWithCidr,
+                                                                 netmask,
+                                                                 gateway,
+                                                                 primaryDns,
+                                                                 secondaryDns)
+                if (!validation || !validation.ok) {
+                    statusMessage = validation && validation.message
+                            ? validation.message
+                            : "Invalid LAN configuration"
+                    return
+                }
+            }
+
+            if (typeof mainWindows.applyLanSettings === "function") {
+                statusMessage = "Saving and applying LAN configuration..."
+                var accepted = mainWindows.applyLanSettings(index,
+                                                            mode,
+                                                            ipWithCidr,
+                                                            netmask,
+                                                            gateway,
+                                                            primaryDns,
+                                                            secondaryDns)
+                if (!accepted)
+                    statusMessage = "LAN configuration was rejected"
+                return
+            }
         }
 
         // Design/compatibility fallback when Mainwindows is not exposed.
@@ -387,6 +544,34 @@ Item {
         fieldFocusColor: "#16283d"
 
         onAuthorized: networkManager.applyLanSetting()
+    }
+
+    Connections {
+        target: (typeof mainWindows !== "undefined") ? mainWindows : null
+        ignoreUnknownSignals: true
+
+        function onExternalLanControlStatusChanged(connected, host, port) {
+            externalLanControlConnected = connected
+            externalLanControlHost = host ? String(host) : ""
+            externalLanControlPort = Number(port)
+        }
+
+
+        function onRemoteLanIpConfigDispatch(iface, ip, state, detail) {
+            if (String(iface) !== String(interfaceName))
+                return
+
+            var portName = iface === "end0" ? "LAN3" : (iface === "end1" ? "LAN4" : iface)
+            if (state === "DISPATCHED") {
+                statusMessage = portName + ": RFSoC IP command dispatched for " + ip
+            } else if (state === "QUEUED") {
+                statusMessage = portName + ": RFSoC offline; IP command queued for reconnect"
+            } else if (state === "QUEUED_NO_TARGET") {
+                statusMessage = portName + ": IP command queued, but RFSoC control server is not configured"
+            } else {
+                statusMessage = portName + ": RFSoC IP command failed - " + detail
+            }
+        }
     }
 
     Connections {
@@ -591,7 +776,11 @@ Item {
                         MouseArea { anchors.fill: parent; onClicked: selectLan(modelData.iface) }
                         Rectangle { x: 24; y: 24; width: 14; height: 14; radius: 7; color: lanInfoStatusColor(modelData) }
                         Text { x: 52; y: 16; text: safeText(modelData.name, modelData.iface); color: ui.text; font.pixelSize: 22; font.bold: true }
-                        Text { x: 52; y: 46; text: modelData.iface + " · " + lanInfoStatusText(modelData); color: ui.subText; font.pixelSize: 14 }
+                        Text {
+                            x: 52; y: 46; width: parent.width - 70
+                            text: modelData.iface + " · " + lanPortRoleShortLabel(modelData) + " · " + lanInfoStatusText(modelData)
+                            color: ui.subText; font.pixelSize: 14; elide: Text.ElideRight
+                        }
                         Text { x: 52; y: 70; text: safeText(modelData.ip || modelData.liveIp || modelData.current_ip || modelData.dev_ip4_plain, "--"); color: ui.text; font.pixelSize: 16; font.bold: true }
                     }
                 }
@@ -607,6 +796,13 @@ Item {
                 border.color: ui.border
 
                 Text { x: 30; y: 28; text: "Selected Interface: " + lanDisplayName() + " / " + interfaceName; color: ui.text; font.pixelSize: 28; font.bold: true }
+                Text {
+                    x: 30; y: 66
+                    text: lanRoleScopeText(currentLanInfo())
+                    color: ui.subText
+                    font.pixelSize: 14
+                    font.bold: true
+                }
 
                 Rectangle {
                     x: parent.width - 170
@@ -626,7 +822,9 @@ Item {
 
                     Repeater {
                         model: [
-                            { label: "Link", value: safeText(lanSpeed, "-"), sub: safeText(lanDuplex, "Full duplex") },
+                            { label: isExternalLanCurrent() ? "RFSoC TCP" : "Link",
+                              value: isExternalLanCurrent() ? externalLanControlText() : safeText(lanSpeed, "-"),
+                              sub: isExternalLanCurrent() ? externalLanTargetText() : safeText(lanDuplex, "Full duplex") },
                             { label: "Mode", value: useDhcp ? "DHCP" : "Static", sub: useDhcp ? "Automatic IPv4" : "Manual IPv4" },
                             { label: "IPv4", value: safeText(ipAddress, "No IP"), sub: safeText(gateway, "No gateway") }
                         ]
@@ -931,9 +1129,14 @@ Item {
                         Repeater {
                             model: [
                                 { label: "Interface", value: interfaceName },
-                                { label: "MAC Address", value: safeText(lanMacAddress, "-") },
-                                { label: "DNS", value: primaryDns + (secondaryDns.length > 0 ? ", " + secondaryDns : "") },
-                                { label: "Status", value: statusMessage.length > 0 ? statusMessage : lanStatusText() }
+                                { label: isExternalLanCurrent() ? "Port Role" : "MAC Address",
+                                  value: isExternalLanCurrent() ? lanPortRoleLabel(currentLanInfo()) : safeText(lanMacAddress, "-") },
+                                { label: isExternalLanCurrent() ? "Configured IPv4" : "DNS",
+                                  value: isExternalLanCurrent() ? externalLanConfiguredIpText()
+                                                                : primaryDns + (secondaryDns.length > 0 ? ", " + secondaryDns : "") },
+                                { label: "Status",
+                                  value: isExternalLanCurrent() ? (lanExecutionScopeLabel(currentLanInfo()) + " · TCP " + externalLanControlText())
+                                                                : (statusMessage.length > 0 ? statusMessage : lanStatusText()) }
                             ]
 
                             ColumnLayout {
@@ -973,9 +1176,14 @@ Item {
                     Button { width: 220; height: 48; text: "Refresh"; onClicked: loadLanInterfaces()
                         contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
                         background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
-                    Button { width: 220; height: 48; text: "DHCP Info"; onClicked: refreshDhcpInfo()
+                    Button {
+                        width: 220
+                        height: 48
+                        text: isExternalLanCurrent() ? "RFSoC Status" : "DHCP Info"
+                        onClicked: isExternalLanCurrent() ? refreshExternalLanStatus() : refreshDhcpInfo()
                         contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
+                        background: Rectangle { radius: 10; color: ui.field; border.color: ui.border }
+                    }
                 }
             }
         }

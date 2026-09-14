@@ -29,6 +29,15 @@ public:
     bool sendJson(const QJsonObject &obj, bool addNewline = true);
     bool sendLine(const QByteArray &line, bool addNewline = true);
 
+    // R-LAN4A: read-only state used by the Network Settings page for the
+    // external RFSoC LAN control channel. This is the TCP control-link state,
+    // not the physical end0/end1 carrier state on the remote RFSoC.
+    bool isConnected() const { return m_socket.state() == QAbstractSocket::ConnectedState; }
+    QString targetHost() const { return m_lastHost; }
+    quint16 targetPort() const { return m_lastPort; }
+    bool hasTarget() const { return !m_lastHost.trimmed().isEmpty() && m_lastPort != 0; }
+    int pendingWriteCount() const { return m_pendingWrites.size(); }
+
 signals:
     void logMessage(const QString &msg);
     void connected();

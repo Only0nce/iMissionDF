@@ -89,6 +89,27 @@ Mainwindows::Mainwindows(NetworkController *networkController,
             this, [this](const QString &, bool, const QString &) {
         broadcastLanSnapshotAsync();
     });
+
+    // R-LAN4A: LAN3/LAN4 are remote RFSoC interfaces. Their meaningful local
+    // connectivity indicator is the shared TCP control channel, not a local
+    // nmcli carrier check for end0/end1.
+    if (m_lanIntegrationBackend) {
+        connect(m_lanIntegrationBackend, &iScreenDF::rfsocControlConnectionChanged,
+                this, [this](bool connected) {
+            emit externalLanControlStatusChanged(
+                connected,
+                m_lanIntegrationBackend->rfsocControlHost(),
+                static_cast<int>(m_lanIntegrationBackend->rfsocControlPort()));
+        });
+
+        connect(m_lanIntegrationBackend, &iScreenDF::rfsocIpConfigDispatchResult,
+                this, [this](const QString &iface,
+                             const QString &ip,
+                             const QString &state,
+                             const QString &detail) {
+            emit remoteLanIpConfigDispatch(iface, ip, state, detail);
+        });
+    }
     // AstraRX Qt5 compatibility endpoint. One WebSocket connection is the
     // only receiver/source control path. Override ASTRARX_WS_URL per target.
     const QString astraRxWsUrl = qEnvironmentVariable(
@@ -345,6 +366,175 @@ Mainwindows::~Mainwindows()
     qInfo().noquote() << "[Mainwindows] shutdown complete: no raw SQL watcher/SetFreqWorker threads";
 }
 
+
+static bool isStrictIpv4Text(const QString &text, bool allowZero = true)
+{
+    const QString value = text.trimmed();
+    if (value.isEmpty())
+        return false;
+
+    const QStringList parts = value.split('.');
+    if (parts.size() != 4)
+        return false;
+
+    quint32 address = 0;
+    for (const QString &part : parts) {
+        if (part.isEmpty())
+            return false;
+        for (const QChar ch : part) {
+            if (!ch.isDigit())
+                return false;
+        }
+        bool ok = false;
+        const int octet = part.toInt(&ok, 10);
+        if (!ok || octet < 0 || octet > 255)
+            return false;
+        address = (address << 8) | static_cast<quint32>(octet);
+    }
+
+    if (!allowZero && address == 0u)
+        return false;
+
+    return true;
+}
+
+static int strictNetmaskPrefixV4(const QString &mask)
+{
+    const QString value = mask.trimmed();
+    const QStringList parts = value.split('.');
+    if (parts.size() != 4)
+        return -1;
+
+    quint32 rawMask = 0;
+    for (const QString &part : parts) {
+        if (part.isEmpty())
+            return -1;
+        for (const QChar ch : part) {
+            if (!ch.isDigit())
+                return -1;
+        }
+        bool ok = false;
+        const int octet = part.toInt(&ok, 10);
+        if (!ok || octet < 0 || octet > 255)
+            return -1;
+        rawMask = (rawMask << 8) | static_cast<quint32>(octet);
+    }
+
+    bool seenZero = false;
+    int prefix = 0;
+    for (int bit = 31; bit >= 0; --bit) {
+        const bool one = (rawMask & (quint32(1) << bit)) != 0;
+        if (one) {
+            if (seenZero)
+                return -1; // non-contiguous mask, e.g. 255.0.255.0
+            ++prefix;
+        } else {
+            seenZero = true;
+        }
+    }
+    return prefix;
+}
+
+static bool isOptionalIpv4FieldValid(const QString &value)
+{
+    const QString v = value.trimmed();
+    return v.isEmpty() || v == QStringLiteral("0") ||
+           isStrictIpv4Text(v, true);
+}
+
+static bool normalizeLanMode(const QString &mode, bool &isDhcp)
+{
+    const QString modeLower = mode.trimmed().toLower();
+    const bool dhcp = (modeLower == QStringLiteral("dhcp") ||
+                       modeLower == QStringLiteral("auto") ||
+                       modeLower == QStringLiteral("automatic") ||
+                       modeLower == QStringLiteral("on") ||
+                       modeLower == QStringLiteral("1") ||
+                       modeLower == QStringLiteral("true") ||
+                       modeLower == QStringLiteral("enabled"));
+    const bool stat = (modeLower == QStringLiteral("static") ||
+                       modeLower == QStringLiteral("manual") ||
+                       modeLower == QStringLiteral("off") ||
+                       modeLower == QStringLiteral("0") ||
+                       modeLower == QStringLiteral("false") ||
+                       modeLower == QStringLiteral("disabled"));
+    if (!dhcp && !stat)
+        return false;
+
+    isDhcp = dhcp;
+    return true;
+}
+
+static bool splitIpCidrV4(const QString &cidr, QString &ip, QString &netmask, int &prefix);
+
+static QVariantMap validateLanRequest(const int index,
+                                      const QString &mode,
+                                      const QString &ipWithCidr,
+                                      const QString &netmask,
+                                      const QString &gateway,
+                                      const QString &dns1,
+                                      const QString &dns2)
+{
+    QVariantMap result;
+    result.insert(QStringLiteral("ok"), false);
+
+    QString iface;
+    if      (index == 0) iface = QStringLiteral("enP8p1s0");
+    else if (index == 1) iface = QStringLiteral("enP1p1s0");
+    else if (index == 2) iface = QStringLiteral("end0");
+    else if (index == 3) iface = QStringLiteral("end1");
+    else {
+        result.insert(QStringLiteral("message"), QStringLiteral("Unsupported LAN index"));
+        return result;
+    }
+
+    bool isDhcp = false;
+    if (!normalizeLanMode(mode, isDhcp)) {
+        result.insert(QStringLiteral("message"), QStringLiteral("Unsupported LAN mode"));
+        return result;
+    }
+
+    if (!isOptionalIpv4FieldValid(gateway)) {
+        result.insert(QStringLiteral("message"), QStringLiteral("Invalid IPv4 gateway"));
+        return result;
+    }
+    if (!isOptionalIpv4FieldValid(dns1)) {
+        result.insert(QStringLiteral("message"), QStringLiteral("Invalid primary DNS address"));
+        return result;
+    }
+    if (!isOptionalIpv4FieldValid(dns2)) {
+        result.insert(QStringLiteral("message"), QStringLiteral("Invalid secondary DNS address"));
+        return result;
+    }
+
+    if (!isDhcp) {
+        QString parsedIp;
+        QString cidrMask;
+        int prefix = -1;
+        if (!splitIpCidrV4(ipWithCidr.trimmed(), parsedIp, cidrMask, prefix) ||
+            !isStrictIpv4Text(parsedIp, false)) {
+            result.insert(QStringLiteral("message"), QStringLiteral("Invalid static IPv4 address or CIDR prefix"));
+            return result;
+        }
+
+        const int maskPrefix = strictNetmaskPrefixV4(netmask);
+        if (maskPrefix < 0) {
+            result.insert(QStringLiteral("message"), QStringLiteral("Invalid subnet mask (mask must be contiguous)"));
+            return result;
+        }
+        if (maskPrefix != prefix) {
+            result.insert(QStringLiteral("message"),
+                          QStringLiteral("Subnet mask does not match the IPv4 CIDR prefix"));
+            return result;
+        }
+    }
+
+    result.insert(QStringLiteral("ok"), true);
+    result.insert(QStringLiteral("message"), QStringLiteral("LAN configuration is valid"));
+    result.insert(QStringLiteral("iface"), iface);
+    result.insert(QStringLiteral("mode"), isDhcp ? QStringLiteral("dhcp") : QStringLiteral("static"));
+    return result;
+}
 
 static bool splitIpCidrV4(const QString &cidr, QString &ip, QString &netmask, int &prefix)
 {
@@ -1423,6 +1613,17 @@ void Mainwindows::setNetworkFormDisplay(const int index,
     }
 }
 
+QVariantMap Mainwindows::validateLanSettings(const int index,
+                                                const QString &mode,
+                                                const QString &ipWithCidr,
+                                                const QString &netmask,
+                                                const QString &gateway,
+                                                const QString &dns1,
+                                                const QString &dns2) const
+{
+    return validateLanRequest(index, mode, ipWithCidr, netmask, gateway, dns1, dns2);
+}
+
 bool Mainwindows::applyLanSettings(const int index,
                                    const QString &mode,
                                    const QString &ipWithCidr,
@@ -1431,37 +1632,22 @@ bool Mainwindows::applyLanSettings(const int index,
                                    const QString &dns1,
                                    const QString &dns2)
 {
-    QString iface;
-    if      (index == 0) iface = QStringLiteral("enP8p1s0");
-    else if (index == 1) iface = QStringLiteral("enP1p1s0");
-    else if (index == 2) iface = QStringLiteral("end0");
-    else if (index == 3) iface = QStringLiteral("end1");
-    else {
-        qWarning() << "[LAN][APPLY] Invalid network index:" << index;
+    const QVariantMap validation = validateLanRequest(index,
+                                                      mode,
+                                                      ipWithCidr,
+                                                      netmask,
+                                                      gateway,
+                                                      dns1,
+                                                      dns2);
+    if (!validation.value(QStringLiteral("ok")).toBool()) {
+        qWarning().noquote() << "[LAN][VALIDATE] rejected:"
+                             << validation.value(QStringLiteral("message")).toString();
         return false;
     }
 
-    const QString modeLower = mode.trimmed().toLower();
-    const bool isDhcp = (modeLower == QStringLiteral("dhcp") ||
-                         modeLower == QStringLiteral("auto") ||
-                         modeLower == QStringLiteral("automatic") ||
-                         modeLower == QStringLiteral("on") ||
-                         modeLower == QStringLiteral("1") ||
-                         modeLower == QStringLiteral("true") ||
-                         modeLower == QStringLiteral("enabled"));
-    const bool isStatic = (modeLower == QStringLiteral("static") ||
-                           modeLower == QStringLiteral("manual") ||
-                           modeLower == QStringLiteral("off") ||
-                           modeLower == QStringLiteral("0") ||
-                           modeLower == QStringLiteral("false") ||
-                           modeLower == QStringLiteral("disabled"));
-    if (!isDhcp && !isStatic) {
-        qWarning().noquote() << "[LAN][APPLY] Unsupported mode:" << mode;
-        return false;
-    }
-
-    const QString normalizedMode = isDhcp ? QStringLiteral("dhcp")
-                                          : QStringLiteral("static");
+    const QString iface = validation.value(QStringLiteral("iface")).toString();
+    const QString normalizedMode = validation.value(QStringLiteral("mode")).toString();
+    const bool isDhcp = (normalizedMode == QStringLiteral("dhcp"));
     const QString legacyDhcp = isDhcp ? QStringLiteral("on")
                                       : QStringLiteral("off");
     const QString ipOnly = ipWithCidr.section('/', 0, 0).trimmed();
@@ -1479,10 +1665,34 @@ bool Mainwindows::applyLanSettings(const int index,
                       << "mode=" << normalizedMode
                       << "ip=" << ipWithCidr;
 
-    // Restore the proven Network2 integration first. For LAN3/LAN4 this path
-    // emits updateNetworkDfDevice(end0/end1) and the existing setIpConfig JSON
-    // to the external equipment. LAN1/LAN2 keep their historical DB snapshot.
+    // LAN3/LAN4 are the remote peers of LAN1/LAN2. Their proven transport contract
+    // is intentionally kept unchanged:
+    //   LAN3(index 2) -> Network2 row 3 -> end0 -> setIpConfig -> TCP
+    //   LAN4(index 3) -> Network2 row 4 -> end1 -> setIpConfig -> TCP
+    // Do not silently accept an external-port Apply if that integration path is
+    // unavailable, otherwise JSON could be saved while no TCP command is sent.
+    const bool remoteLan = (index == 2 || index == 3);
+    if (remoteLan && !m_lanIntegrationBackend) {
+        qWarning().noquote() << "[LAN][APPLY] rejected: external TCP backend is unavailable"
+                             << "index=" << index
+                             << "iface=" << iface;
+        return false;
+    }
+
+    // Restore the proven Network2 integration first. DatabaseDF emits
+    // updateNetworkDfDevice(end0/end1), and iScreenDF::onUpdateNetworkDfDevice()
+    // sends the existing TCP JSON:
+    // {menuID:setIpConfig, ifname:end0/end1, ip, netmask, gateway, dns1, dns2}
+    // LAN1/LAN2 keep their historical Network2 DB snapshot without TCP send.
     if (m_lanIntegrationBackend) {
+        if (remoteLan) {
+            qInfo().noquote() << "[LAN][EXTERNAL-TCP] dispatch"
+                              << "port=" << (index == 2 ? QStringLiteral("LAN3")
+                                                       : QStringLiteral("LAN4"))
+                              << "iface=" << iface
+                              << "ip=" << ipOnly;
+        }
+
         m_lanIntegrationBackend->updateNetworkfromDisplayIndex(index,
                                                                legacyDhcp,
                                                                ipOnly,
@@ -1491,7 +1701,7 @@ bool Mainwindows::applyLanSettings(const int index,
                                                                dns1.trimmed(),
                                                                dns2.trimmed());
     } else {
-        qWarning() << "[LAN][APPLY] Network2/RFSoC integration backend is unavailable";
+        qWarning() << "[LAN][APPLY] Network2 integration backend is unavailable";
     }
 
     // Preserve JSON + local system behaviour in exactly one place.
@@ -1511,6 +1721,59 @@ bool Mainwindows::applyLanSettings(const int index,
     }
 
     return true;
+}
+
+QVariantMap Mainwindows::externalLanStatus(const int index) const
+{
+    QVariantMap result;
+    const bool supported = (index == 2 || index == 3);
+    result[QStringLiteral("supported")] = supported;
+    result[QStringLiteral("external")] = supported;
+    result[QStringLiteral("portType")] = supported
+        ? QStringLiteral("external-rfsoc")
+        : QStringLiteral("local");
+
+    // R-LAN4A.2: LAN3 mirrors LAN1's device-facing role and LAN4 mirrors
+    // LAN2's network-facing role. The RFSoC distinction is execution scope,
+    // not the functional role of the Ethernet port.
+    result[QStringLiteral("portRole")] = (index == 2)
+        ? QStringLiteral("device")
+        : (index == 3 ? QStringLiteral("network") : QStringLiteral("unknown"));
+    result[QStringLiteral("portRoleLabel")] = (index == 2)
+        ? QStringLiteral("External Device")
+        : (index == 3 ? QStringLiteral("Network") : QStringLiteral("Unknown"));
+    result[QStringLiteral("executionScope")] = supported
+        ? QStringLiteral("remote")
+        : QStringLiteral("local");
+    result[QStringLiteral("executionScopeLabel")] = supported
+        ? QStringLiteral("Remote RFSoC")
+        : QStringLiteral("Local Device");
+
+    if (!supported) {
+        result[QStringLiteral("connected")] = false;
+        result[QStringLiteral("status")] = QStringLiteral("Local NetworkManager");
+        return result;
+    }
+
+    result[QStringLiteral("iface")] = (index == 2)
+        ? QStringLiteral("end0")
+        : QStringLiteral("end1");
+    result[QStringLiteral("controlTransport")] = QStringLiteral("tcp");
+
+    const bool backendReady = (m_lanIntegrationBackend != nullptr);
+    const bool connected = backendReady && m_lanIntegrationBackend->isRfsocControlConnected();
+    result[QStringLiteral("backendReady")] = backendReady;
+    result[QStringLiteral("connected")] = connected;
+    result[QStringLiteral("host")] = backendReady
+        ? m_lanIntegrationBackend->rfsocControlHost()
+        : QString();
+    result[QStringLiteral("port")] = backendReady
+        ? static_cast<int>(m_lanIntegrationBackend->rfsocControlPort())
+        : 0;
+    result[QStringLiteral("status")] = connected
+        ? QStringLiteral("TCP Connected")
+        : QStringLiteral("TCP Disconnected");
+    return result;
 }
 
 void Mainwindows::broadcastLanSnapshotAsync()

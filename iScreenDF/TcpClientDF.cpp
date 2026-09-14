@@ -71,6 +71,8 @@ void TcpClientDF::connectToServer(const QString &host, quint16 port)
     m_lastPort = port;
 
     emit logMessage(QString("Connecting to %1:%2").arg(host).arg(port));
+    qInfo().noquote() << "[LAN][RFSoC-TCP] connectToHost"
+                      << QStringLiteral("%1:%2").arg(host).arg(port);
 
     // reset any stale buffers
     m_buffer.clear();
@@ -98,6 +100,8 @@ void TcpClientDF::disconnectFromServer()
 void TcpClientDF::onConnected()
 {
     emit logMessage("Connected to DoA server");
+    qInfo().noquote() << "[LAN][RFSoC-TCP] connected"
+                      << QStringLiteral("%1:%2").arg(m_lastHost).arg(m_lastPort);
     emit connected();
 
     // stop reconnect attempts while connected
@@ -115,6 +119,8 @@ void TcpClientDF::onConnected()
 void TcpClientDF::onDisconnected()
 {
     emit logMessage("Disconnected from DoA server");
+    qWarning().noquote() << "[LAN][RFSoC-TCP] disconnected"
+                         << QStringLiteral("%1:%2").arg(m_lastHost).arg(m_lastPort);
     emit disconnected();
 
     // stop heartbeat
@@ -152,6 +158,9 @@ void TcpClientDF::onError(QAbstractSocket::SocketError socketError)
     const QString err = m_socket.errorString();
     emit errorOccurred(err);
     emit logMessage(QString("Socket error: %1").arg(err));
+    qWarning().noquote() << "[LAN][RFSoC-TCP] socket error"
+                         << QStringLiteral("%1:%2").arg(m_lastHost).arg(m_lastPort)
+                         << err;
 
     // stop heartbeat
     if (m_heartbeatTimer.isActive())
