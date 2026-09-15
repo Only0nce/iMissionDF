@@ -2251,6 +2251,8 @@ QVariantMap NetworkController::wifiState(const QString &iface)
 QVariantMap NetworkController::scanWifiPage(const QString &iface)
 {
     const QString wifiIface = resolveWifiInterface(iface);
+    qInfo().noquote() << "[WiFi][SCAN] requested=" << (iface.trimmed().isEmpty() ? QStringLiteral("<auto>") : iface.trimmed())
+                      << "resolved=" << wifiIface;
     QVariantMap result;
     result[QStringLiteral("enabled")] = wifiRadioEnabled();
     result[QStringLiteral("device")] = wifiIface;
@@ -2291,6 +2293,10 @@ QVariantMap NetworkController::scanWifiPage(const QString &iface)
     if (!ok) {
         result[QStringLiteral("error")] =
             err.isEmpty() ? QStringLiteral("WiFi scan failed") : err;
+        qWarning().noquote() << "[WiFi][SCAN] failed requested="
+                             << (iface.trimmed().isEmpty() ? QStringLiteral("<auto>") : iface.trimmed())
+                             << "resolved=" << wifiIface
+                             << "error=" << result.value(QStringLiteral("error")).toString();
         return result;
     }
 

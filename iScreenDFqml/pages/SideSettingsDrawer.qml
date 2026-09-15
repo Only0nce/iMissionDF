@@ -26,6 +26,7 @@ import QtQuick.VirtualKeyboard 2.4
 import Qt.labs.settings 1.1
 
 import "../i18n" as I18n
+import "../.." as SharedComponents
 import "./"
 
 Item {
@@ -208,6 +209,122 @@ Item {
     property string sideLogsSourceUrl: "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
     property string wifi5gSourceUrl: "qrc:/Setting.qml"
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
+
+    // NET-AUTH1: Network Settings is protected at page entry, not per Apply.
+    // Keep the pending navigation local to this drawer so Cancel/wrong password
+    // never changes the current page or toolbar selection.
+    property int pendingProtectedNavigationIndex: -1
+    property string pendingProtectedNavigationTitle: ""
+    property string pendingProtectedNavigationSource: ""
+
+    // NET-AUTH2: Access level is chosen once when entering Network Settings.
+    // Viewer may edit LAN1 + LAN2 + WiFi + 5G; Admin gets full LAN1-LAN4 access.
+    property string networkAccessRole: "viewer"
+
+    function clearPendingProtectedNavigation() {
+        pendingProtectedNavigationIndex = -1
+        pendingProtectedNavigationTitle = ""
+        pendingProtectedNavigationSource = ""
+    }
+
+    function performToolbarNavigation(index, title, source) {
+        if (index < 0 || index >= toolbar.pages.length)
+            return
+
+        var oldSource = toolbar.pages[toolbar.currentIndex].source
+        var newSource = source
+
+        if (oldSource === "qrc:/DoaViewer/ViewerPage.qml"
+                && newSource !== oldSource) {
+            if (typeof doaClient !== "undefined"
+                    && doaClient
+                    && doaClient.connected) {
+                doaClient.disconnectFromServer()
+            }
+        }
+
+        toolbar.currentIndex = index
+        toolbar.hoveredIndex = index
+        settingsPanel.navigate(title, source, index)
+
+        if (newSource === "qrc:/DoaViewer/ViewerPage.qml") {
+            if (typeof doaClient !== "undefined"
+                    && doaClient
+                    && !doaClient.connected) {
+                doaClient.connectToServer()
+            }
+        }
+
+        var enteringMap = (newSource === settingsPanel.mapSourceUrl)
+        var km = (typeof krakenmapval !== "undefined" && krakenmapval)
+                 ? krakenmapval
+                 : ((typeof Krakenmapval !== "undefined" && Krakenmapval)
+                    ? Krakenmapval
+                    : null)
+
+        if (km && enteringMap) {
+            if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
+                Krakenmapval.sendSetSpectrumEnable(false)
+
+            if (typeof Krakenmapval.requestRfFrequency === "function")
+                Krakenmapval.requestRfFrequency()
+
+            // Do not auto-reload SideLogsFile when returning to QMLMap.qml.
+        }
+    }
+
+    function completeProtectedNetworkNavigation(role) {
+        var index = settingsPanel.pendingProtectedNavigationIndex
+        var title = settingsPanel.pendingProtectedNavigationTitle
+        var source = settingsPanel.pendingProtectedNavigationSource
+
+        settingsPanel.networkAccessRole = (role === "admin") ? "admin" : "viewer"
+        settingsPanel.clearPendingProtectedNavigation()
+        settingsPanel.performToolbarNavigation(index, title, source)
+    }
+
+    function requestToolbarNavigation(index, title, source) {
+        if (source !== settingsPanel.wifi5gSourceUrl) {
+            // Do not carry an administrator session across page exits.
+            if (toolbar.currentIndex >= 0
+                    && toolbar.currentIndex < toolbar.pages.length
+                    && toolbar.pages[toolbar.currentIndex].source === settingsPanel.wifi5gSourceUrl) {
+                settingsPanel.networkAccessRole = "viewer"
+            }
+            performToolbarNavigation(index, title, source)
+            return
+        }
+
+        // Already on the Network Settings page: do not reopen the access selector.
+        if (toolbar.currentIndex === index)
+            return
+
+        pendingProtectedNavigationIndex = index
+        pendingProtectedNavigationTitle = title
+        pendingProtectedNavigationSource = source
+        networkAccessModePopup.requestSelection()
+    }
+
+    SharedComponents.NetworkAccessModePopup {
+        id: networkAccessModePopup
+
+        onViewerSelected: settingsPanel.completeProtectedNetworkNavigation("viewer")
+
+        onAdminSelected: networkEntryPasswordPopup.requestUnlock()
+
+        onCancelled: settingsPanel.clearPendingProtectedNavigation()
+    }
+
+    SharedComponents.NetworkPasswordPopup {
+        id: networkEntryPasswordPopup
+        titleText: "Administrator Access"
+        messageText: "Enter the administrator password for full Network Settings access"
+        unlockButtonText: "Enter as Admin"
+
+        onAuthorized: settingsPanel.completeProtectedNetworkNavigation("admin")
+
+        onCancelled: settingsPanel.clearPendingProtectedNavigation()
+    }
 
     function toolbarPages() {
         var pages = [
@@ -771,52 +888,9 @@ Item {
                             onClicked: {
                                 if (index < 0 || index >= toolbar.pages.length)
                                     return
-
-                                var oldSource = toolbar.pages[toolbar.currentIndex].source
-                                var newSource = modelData.source
-
-                                if (oldSource === "qrc:/DoaViewer/ViewerPage.qml"
-                                    && newSource !== oldSource) {
-
-                                    if (typeof doaClient !== "undefined"
-                                        && doaClient
-                                        && doaClient.connected) {
-
-                                        doaClient.disconnectFromServer()
-                                    }
-                                }
-
-                                toolbar.currentIndex = index
-                                toolbar.hoveredIndex = index
-
-                                settingsPanel.navigate(modelData.title, modelData.source, index)
-
-                                if (newSource === "qrc:/DoaViewer/ViewerPage.qml") {
-                                    if (typeof doaClient !== "undefined"
-                                        && doaClient
-                                        && !doaClient.connected) {
-
-                                        doaClient.connectToServer()
-                                    }
-                                }
-
-                                var enteringMap = (newSource === settingsPanel.mapSourceUrl)
-
-                                var km = (typeof krakenmapval !== "undefined" && krakenmapval)
-                                         ? krakenmapval
-                                         : ((typeof Krakenmapval !== "undefined" && Krakenmapval)
-                                            ? Krakenmapval
-                                            : null)
-
-                                if (km && enteringMap) {
-                                    if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
-                                        Krakenmapval.sendSetSpectrumEnable(false)
-
-                                    if (typeof Krakenmapval.requestRfFrequency === "function")
-                                        Krakenmapval.requestRfFrequency()
-
-                                    // ไม่ reload SideLogsFile อัตโนมัติ ตอนกลับเข้า QMLMap.qml
-                                }
+                                settingsPanel.requestToolbarNavigation(index,
+                                                                       modelData.title,
+                                                                       modelData.source)
                             }
                         }
                     }

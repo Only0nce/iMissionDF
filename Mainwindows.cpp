@@ -349,6 +349,7 @@ Mainwindows::Mainwindows(NetworkController *networkController,
     setTimeHWClock->start(1000 * 60 * 5);
     #endif
 
+    system("systemctl restart astrarx");
 }
 
 

@@ -153,6 +153,8 @@ Popup {
                 text: "Cancel"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 42
+                scale: pressed ? 0.96 : 1.0
+                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
 
                 background: Rectangle {
                     radius: 10
@@ -182,6 +184,8 @@ Popup {
                 text: root.unlockButtonText
                 Layout.fillWidth: true
                 Layout.preferredHeight: 42
+                scale: pressed ? 0.96 : 1.0
+                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
 
                 background: Rectangle {
                     radius: 10

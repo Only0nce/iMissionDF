@@ -48,9 +48,12 @@ Item {
     property bool wifiRuntimeStarted: false
     property bool cellularRuntimeStarted: false
 
-    // KP-6JUL2026 : Hold only the pending non-secret IPv4 settings while auth is open.
-    // The password is owned and immediately cleared by NetworkPasswordPopup.
-    property var pendingWifiAdvancedSettings: null
+    // UX-KB2.1: WiFi interface discovery is asynchronous through Mainwindows.
+    // Do not issue status/scan requests using a placeholder interface before
+    // wifi_config has resolved the actual NetworkManager device.
+    property bool wifiConfigReady: false
+    property bool wifiConfigRequestPending: false
+    property bool wifiRefreshAfterConfig: false
 
     property alias wifiEnabled: pageView.wifiEnabled
     property alias wifiIface: pageView.wifiIface
@@ -460,6 +463,9 @@ Item {
         wifiAdvancedBusy = false
         pendingWifiAction = ""
         wifiPassword = ""
+        wifiConfigResolveTimeoutTimer.stop()
+        wifiConfigRequestPending = false
+        wifiRefreshAfterConfig = false
 
         if (wifiAdvancedVisible)
             pageView.closeWifiAdvancedPanel()
@@ -475,12 +481,12 @@ Item {
         console.log("[WiFiPageScope] START page-only WiFi runtime")
 
         if (!designMode) {
-            refreshWifiConfig()
-            refreshWifiStatus()
-            refreshWifiNow()
+            wifiRefreshAfterConfig = true
+            if (refreshWifiConfig())
+                completeWifiRefreshAfterConfig()
+        } else {
+            startWifiAutoRescan()
         }
-
-        startWifiAutoRescan()
     }
 
     function deactivateCellularPageRuntime() {
@@ -511,9 +517,9 @@ Item {
         }
 
         if (root.wifiPageActive) {
-            refreshWifiConfig()
-            refreshWifiStatus()
-            refreshWifiNow()
+            wifiRefreshAfterConfig = true
+            if (refreshWifiConfig())
+                completeWifiRefreshAfterConfig()
             return
         }
 
@@ -597,18 +603,27 @@ Item {
 
     function refreshWifiConfig() {
         if (!root.wifiPageActive)
-            return
+            return false
 
-        // R20.2: resolve WiFi interface/config in a backend worker.
-        // loadWifiConfig() may invoke nmcli, so never call it from the GUI thread.
-        if (sendBackendCommand({"menuID": "wifi_config"}))
-            return
+        if (wifiConfigRequestPending)
+            return false
+
+        // R20.2 + UX-KB2.1: resolve the real WiFi interface before status/scan.
+        // loadWifiConfig() may invoke nmcli, so never call it from the GUI thread
+        // when the Mainwindows JSON worker path is available.
+        if (sendBackendCommand({"menuID": "wifi_config"})) {
+            wifiConfigReady = false
+            wifiConfigRequestPending = true
+            wifiConfigResolveTimeoutTimer.restart()
+            return false
+        }
 
         if (!networkBackend) {
             wifiIface = safeText(wifiIface, "wlP9p1s0")
             wifiSsid = safeText(wifiSsid, "")
             wifiAutoConnect = true
-            return
+            wifiConfigReady = true
+            return true
         }
 
         // Compatibility fallback for environments without Mainwindows JSON routing.
@@ -616,6 +631,19 @@ Item {
         wifiIface = safeText(cfg.interface, "wlP9p1s0")
         wifiSsid = safeText(cfg.ssid, "")
         wifiAutoConnect = cfg.autoConnect === undefined ? true : cfg.autoConnect
+        wifiConfigReady = true
+        return true
+    }
+
+    function completeWifiRefreshAfterConfig() {
+        if (!root.wifiPageActive || !wifiConfigReady)
+            return
+
+        wifiRefreshAfterConfig = false
+        console.log("[WiFiStartup] interface resolved:", wifiIface)
+        refreshWifiStatus()
+        refreshWifiNow()
+        startWifiAutoRescan()
     }
 
     function refreshWifiStatus() {
@@ -649,9 +677,19 @@ Item {
 
         var data = scanData || {}
         var source = envelope || {}
+        var scanError = safeText(data.error || source.error || source.message, "")
+        var scanFailed = source.ok === false || safeText(data.error, "").length > 0
+        var incomingRows = data.rows || source.rows || source.networks || []
+
         wifiEnabled = data.enabled === undefined ? wifiEnabled : data.enabled
         wifiIface = safeText(data.device || data.interface || source.device || source.iface, wifiIface)
-        wifiList = normalizeWifiRows(data.rows || source.rows || source.networks || [])
+
+        // UX-KB2.1: a transient nmcli/interface error must not erase the last good
+        // scan result. Replace the model only on a successful scan.
+        if (!scanFailed)
+            wifiList = normalizeWifiRows(incomingRows)
+        else
+            console.warn("[WiFiScan] preserving", wifiList.length, "last-good row(s):", scanError)
 
         var nextWifiState = copyObject(wifiState)
         if (data.active_ssid !== undefined)
@@ -678,9 +716,15 @@ Item {
                         "active:", logRow.active === true)
         }
 
-        wifiMessage = wifiList.length > 0
-                ? ("Found " + wifiList.length + " network(s)")
-                : safeText(source.message || data.message || data.error, "No WiFi networks found")
+        if (scanFailed) {
+            wifiMessage = scanError.length > 0
+                    ? (scanError + (wifiList.length > 0 ? " · showing previous scan results" : ""))
+                    : "WiFi scan failed"
+        } else {
+            wifiMessage = wifiList.length > 0
+                    ? ("Found " + wifiList.length + " network(s)")
+                    : "No WiFi networks found"
+        }
     }
 
     function updateSelectedWifiKnownFromList() {
@@ -719,6 +763,13 @@ Item {
     function scanWifi() {
         if (!root.wifiPageActive) {
             stopWifiAutoRescan()
+            return
+        }
+
+        if (!wifiConfigReady) {
+            wifiRefreshAfterConfig = true
+            refreshWifiConfig()
+            wifiMessage = "Detecting WiFi interface..."
             return
         }
 
@@ -1106,30 +1157,6 @@ Item {
         }
     }
 
-    function requestProtectedWifiAdvancedSave(settings) {
-        if (!root.wifiPageActive)
-            return
-
-        // Snapshot the values at the exact Apply click. The backend is not called yet.
-        pendingWifiAdvancedSettings = copyObject(settings || {})
-        wifiApplyPasswordPopup.requestUnlock()
-    }
-
-    function clearPendingWifiAdvancedSave() {
-        pendingWifiAdvancedSettings = null
-    }
-
-    function commitProtectedWifiAdvancedSave() {
-        if (!root.wifiPageActive) {
-            clearPendingWifiAdvancedSave()
-            return
-        }
-
-        var payload = copyObject(pendingWifiAdvancedSettings || {})
-        clearPendingWifiAdvancedSave()
-        saveWifiAdvanced(payload)
-    }
-
     function saveWifiAdvanced(settings) {
         if (!root.wifiPageActive)
             return
@@ -1361,10 +1388,21 @@ Item {
         }
 
         if (obj.menuID === "wifi_config") {
+            wifiConfigResolveTimeoutTimer.stop()
+            wifiConfigRequestPending = false
             var wifiCfg = obj.data || obj.config || {}
+            var previousIface = wifiIface
             wifiIface = safeText(wifiCfg.interface, "wlP9p1s0")
             wifiSsid = safeText(wifiCfg.ssid, "")
             wifiAutoConnect = wifiCfg.autoConnect === undefined ? true : wifiCfg.autoConnect
+            wifiConfigReady = true
+            console.log("[WiFiStartup] wifi_config resolved interface:", wifiIface)
+            // A late config response after timeout may resolve a different device.
+            // Refresh once more so state/list match the authoritative interface.
+            if (wifiRefreshAfterConfig || previousIface !== wifiIface) {
+                wifiRefreshAfterConfig = true
+                completeWifiRefreshAfterConfig()
+            }
             return
         }
 
@@ -1504,6 +1542,28 @@ Item {
     }
 
     Timer {
+        id: wifiConfigResolveTimeoutTimer
+        interval: 3000
+        repeat: false
+
+        onTriggered: {
+            if (!root.wifiPageActive || !wifiConfigRequestPending)
+                return
+
+            // Fail open into backend auto-detection rather than scanning a stale
+            // hard-coded interface. An empty iface lets NetworkController choose
+            // the actual NetworkManager WiFi device.
+            wifiConfigRequestPending = false
+            wifiConfigReady = true
+            wifiIface = ""
+            wifiMessage = "WiFi interface detection timed out; using automatic detection"
+            console.warn("[WiFiStartup] wifi_config timeout; falling back to backend auto-detection")
+            if (wifiRefreshAfterConfig)
+                completeWifiRefreshAfterConfig()
+        }
+    }
+
+    Timer {
         id: wifiAutoRescanTimer
         interval: 10000
         repeat: true
@@ -1636,15 +1696,6 @@ Item {
         }
     }
 
-    NetworkPasswordPopup {
-        id: wifiApplyPasswordPopup
-        titleText: "Network Settings"
-        messageText: "Enter password to apply WiFi IPv4 configuration"
-
-        onAuthorized: root.commitProtectedWifiAdvancedSave()
-        onCancelled: root.clearPendingWifiAdvancedSave()
-    }
-
     Wifi5GView {
         id: pageView
         selectedNetworkPage: root.initialNetworkPage
@@ -1674,7 +1725,9 @@ Item {
             root.openWifiAdvanced(iface, ssid, bssid, profileName)
         }
         onWifiAdvancedSaveRequested: function(settings) {
-            root.requestProtectedWifiAdvancedSave(settings)
+            if (!root.wifiPageActive)
+                return
+            root.saveWifiAdvanced(root.copyObject(settings || {}))
         }
         onCellularRefreshRequested: root.refreshCellularStatus()
         onCellularConnectRequested: function(apn, iface, autoConnect) {

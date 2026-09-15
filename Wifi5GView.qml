@@ -17,7 +17,8 @@ Item {
     property bool hideInternalNetworkTabs: false
 
     property bool wifiEnabled: true
-    property string wifiIface: "wlan0"
+    // UX-KB2.1: leave the interface unresolved until the backend returns the real WiFi device.
+    property string wifiIface: ""
     property string wifiSsid: ""
     property string wifiBssid: ""
     property string wifiProfileName: ""
@@ -828,7 +829,7 @@ Item {
                         color: ui.card
                         border.color: ui.border
                         Text { x: 24; y: 20; text: wifiSsidText(); color: ui.text; font.pixelSize: 22; font.bold: true; width: parent.width - 48; elide: Text.ElideRight }
-                        Text { x: 24; y: 55; text: "Interface " + safeText(wifiIface, "wlan0") + " · " + wifiSecurityText(null); color: ui.subText; font.pixelSize: 15; width: parent.width - 48; elide: Text.ElideRight }
+                        Text { x: 24; y: 55; text: "Interface " + safeText(wifiIface, "Detecting...") + " · " + wifiSecurityText(null); color: ui.subText; font.pixelSize: 15; width: parent.width - 48; elide: Text.ElideRight }
                         Rectangle { x: 24; y: 91; width: 150; height: 8; radius: 4; color: "#263449"
                             Rectangle { height: parent.height; radius: parent.radius; color: wifiSignalColor(wifiSignalValue()); width: parent.width * wifiSignalLevel(wifiSignalValue()) / 5 }
                         }
@@ -1004,9 +1005,10 @@ Item {
 
                     ListView {
                         x: 30
-                        y: 88
+                        // UX-KB2.1: keep other WiFi connections visible while IPv4 editing is open.
+                        y: wifiAdvancedVisible ? 392 : 88
                         width: parent.width - 60
-                        height: parent.height - 118
+                        height: wifiAdvancedVisible ? Math.max(120, parent.height - 422) : parent.height - 118
                         clip: true
                         spacing: 14
                         model: wifiList
@@ -1079,10 +1081,12 @@ Item {
                     id: wifiAdvancedOverlay
                     visible: wifiAdvancedVisible
                     z: 50
-                    x: Math.max(30, (parent.width - width) / 2)
-                    y: Math.max(30, (parent.height - height) / 2)
-                    width: Math.min(960, parent.width - 80)
-                    height: 370
+                    // UX-KB2.1: keep the editor inside the Available Networks pane so the
+                    // current WiFi card remains visible and other connections stay accessible below.
+                    x: 560
+                    y: 88
+                    width: Math.max(640, parent.width - 590)
+                    height: 282
                     radius: 18
                     color: ui.panel
                     border.color: ui.accent
@@ -1090,41 +1094,154 @@ Item {
 
                     Rectangle { anchors.fill: parent; anchors.margins: 1; radius: 17; color: "transparent"; border.color: ui.borderSoft }
 
-                    Text { x: 30; y: 24; width: parent.width - 240; text: "WiFi IPv4 Configuration · " + wifiSsidText(); color: ui.text; font.pixelSize: 24; font.bold: true; elide: Text.ElideRight }
-                    Text { x: 30; y: 58; width: parent.width - 240; text: safeText(wifiSsid, "-") + " · " + safeText(wifiProfileName, "profile pending"); color: ui.subText; font.pixelSize: 14; elide: Text.ElideRight }
-                    Button { x: parent.width - 74; y: 22; width: 44; height: 36; text: "X"; onClicked: root.closeWifiAdvancedPanel()
-                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14 }
-                        background: Rectangle { radius: 9; color: ui.field; border.color: ui.border } }
+                    Text {
+                        x: 24
+                        y: 16
+                        width: parent.width - (Qt.inputMethod.visible ? 250 : 150)
+                        text: "WiFi IPv4 Configuration · " + wifiSsidText()
+                        color: ui.text
+                        font.pixelSize: 22
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
 
-                    Row { x: 30; y: 92; spacing: 12
-                        Button { width: 180; height: 46; text: "Using DHCP"; onClicked: wifiAdvancedIpv4Mode = "dhcp"
-                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "dhcp" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
-                            background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.border } }
-                        Button { width: 180; height: 46; text: "Static Manual"; onClicked: wifiAdvancedIpv4Mode = "manual"
-                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "manual" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
-                            background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.border } }
-                        Text { width: parent.parent.width - 450; height: 46; text: wifiAdvancedBusy ? "Loading / saving IPv4 settings..." : safeText(wifiAdvancedMessage, "Current: " + wifiIpText() + " via " + wifiGatewayText()); color: ui.subText; font.pixelSize: 14; verticalAlignment: Text.AlignVCenter; elide: Text.ElideRight }
+                    Text {
+                        x: 24
+                        y: 47
+                        width: parent.width - 160
+                        text: safeText(wifiSsid, "-") + " · " + safeText(wifiProfileName, "profile pending") +
+                              " · " + (wifiAdvancedBusy ? "Loading / saving IPv4 settings..." : safeText(wifiAdvancedMessage, "Current: " + wifiIpText() + " via " + wifiGatewayText()))
+                        color: ui.subText
+                        font.pixelSize: 13
+                        elide: Text.ElideRight
+                    }
+
+                    Button {
+                        x: parent.width - 170
+                        y: 14
+                        width: 88
+                        height: 36
+                        text: "Done"
+                        visible: Qt.inputMethod.visible
+                        enabled: visible
+                        onClicked: {
+                            Qt.inputMethod.commit()
+                            Qt.inputMethod.hide()
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#001412"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                            font.pixelSize: 13
+                        }
+                        background: Rectangle { radius: 9; color: ui.accent; border.color: ui.accent }
+                    }
+
+                    Button {
+                        x: parent.width - 68
+                        y: 14
+                        width: 44
+                        height: 36
+                        text: "X"
+                        onClicked: {
+                            Qt.inputMethod.commit()
+                            Qt.inputMethod.hide()
+                            root.closeWifiAdvancedPanel()
+                        }
+                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14 }
+                        background: Rectangle { radius: 9; color: ui.field; border.color: ui.border }
+                    }
+
+                    Row {
+                        id: wifiIpv4ModeRow
+                        x: 24
+                        y: 76
+                        spacing: 10
+
+                        Button {
+                            width: 168
+                            height: 40
+                            text: "Using DHCP"
+                            onClicked: wifiAdvancedIpv4Mode = "dhcp"
+                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "dhcp" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.border }
+                        }
+
+                        Button {
+                            width: 168
+                            height: 40
+                            text: "Static Manual"
+                            onClicked: wifiAdvancedIpv4Mode = "manual"
+                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "manual" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.border }
+                        }
+                    }
+
+                    Row {
+                        id: wifiIpv4ActionRow
+                        x: parent.width - width - 24
+                        y: 76
+                        width: 430
+                        height: 40
+                        spacing: 10
+
+                        Button {
+                            width: 140
+                            height: 40
+                            text: wifiAdvancedDnsAutomatic ? "DNS Auto" : "DNS Manual"
+                            onClicked: wifiAdvancedDnsAutomatic = !wifiAdvancedDnsAutomatic
+                            contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            background: Rectangle { radius: 10; color: ui.field; border.color: ui.border }
+                        }
+
+                        Button {
+                            width: 120
+                            height: 40
+                            text: "Cancel"
+                            onClicked: {
+                                Qt.inputMethod.commit()
+                                Qt.inputMethod.hide()
+                                root.closeWifiAdvancedPanel()
+                            }
+                            contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            background: Rectangle { radius: 10; color: ui.field; border.color: ui.border }
+                        }
+
+                        Button {
+                            width: 150
+                            height: 40
+                            text: wifiAdvancedBusy ? "Saving" : "Apply"
+                            enabled: !wifiAdvancedBusy
+                            onClicked: {
+                                Qt.inputMethod.commit()
+                                root.applyWifiConfigFromPanel()
+                            }
+                            contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            background: Rectangle { radius: 10; color: enabled ? ui.accent : ui.disabled; border.color: enabled ? ui.accent : ui.disabled }
+                        }
                     }
 
                     GridLayout {
-                        x: 30
-                        y: 156
-                        width: wifiAdvancedOverlay.width - 60
-                        columns: 2
-                        rowSpacing: 16
-                        columnSpacing: 24
+                        x: 24
+                        y: 130
+                        width: wifiAdvancedOverlay.width - 48
+                        columns: 3
+                        rowSpacing: 8
+                        columnSpacing: 18
 
                         ColumnLayout {
-                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 2
-                            spacing: 6
-                            Text { text: "IPv4 Address"; color: ui.subText; font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            spacing: 4
+                            Text { text: "IPv4 Address"; color: ui.subText; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true }
                             TextField {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
                                 text: wifiAdvancedIpAddress
                                 enabled: wifiAdvancedIpv4Mode === "manual"
                                 color: enabled ? ui.text : "#a9b4c2"
-                                font.pixelSize: 15
+                                font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
                                 leftPadding: 12
@@ -1139,17 +1256,18 @@ Item {
                                 }
                             }
                         }
+
                         ColumnLayout {
-                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 2
-                            spacing: 6
-                            Text { text: "Subnet Mask"; color: ui.subText; font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            spacing: 4
+                            Text { text: "Subnet Mask"; color: ui.subText; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true }
                             TextField {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
                                 text: wifiAdvancedSubnetMask
                                 enabled: wifiAdvancedIpv4Mode === "manual"
                                 color: enabled ? ui.text : "#a9b4c2"
-                                font.pixelSize: 15
+                                font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
                                 leftPadding: 12
@@ -1164,17 +1282,18 @@ Item {
                                 }
                             }
                         }
+
                         ColumnLayout {
-                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 2
-                            spacing: 6
-                            Text { text: "Gateway"; color: ui.subText; font.pixelSize: 13; font.bold: true; Layout.fillWidth: true }
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            spacing: 4
+                            Text { text: "Gateway"; color: ui.subText; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true }
                             TextField {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: 44
+                                Layout.preferredHeight: 40
                                 text: wifiAdvancedGateway
                                 enabled: wifiAdvancedIpv4Mode === "manual"
                                 color: enabled ? ui.text : "#a9b4c2"
-                                font.pixelSize: 15
+                                font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
                                 leftPadding: 12
@@ -1189,98 +1308,96 @@ Item {
                                 }
                             }
                         }
-                        RowLayout {
-                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 2
-                            spacing: 10
 
-                            ColumnLayout {
+                        ColumnLayout {
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            spacing: 4
+                            Text { text: "Primary DNS"; color: ui.subText; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+                            TextField {
                                 Layout.fillWidth: true
-                                spacing: 6
-                                Text {
-                                    text: "Primary DNS"
-                                    color: ui.subText
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
+                                Layout.preferredHeight: 40
+                                text: wifiAdvancedPrimaryDns
+                                enabled: !wifiAdvancedDnsAutomatic
+                                color: enabled ? ui.text : "#a9b4c2"
+                                font.pixelSize: 14
+                                selectByMouse: true
+                                verticalAlignment: TextInput.AlignVCenter
+                                leftPadding: 12
+                                rightPadding: 12
+                                topPadding: 0
+                                bottomPadding: 0
+                                onTextChanged: {
+                                    if (wifiAdvancedDnsSplitSyncing)
+                                        return
+                                    wifiAdvancedPrimaryDns = text
+                                    rebuildCombinedDnsServers()
                                 }
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 44
-                                    text: wifiAdvancedPrimaryDns
-                                    enabled: !wifiAdvancedDnsAutomatic
-                                    color: enabled ? ui.text : "#a9b4c2"
-                                    font.pixelSize: 15
-                                    selectByMouse: true
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    leftPadding: 12
-                                    rightPadding: 12
-                                    topPadding: 0
-                                    bottomPadding: 0
-                                    onTextChanged: {
-                                        if (wifiAdvancedDnsSplitSyncing)
-                                            return
-                                        wifiAdvancedPrimaryDns = text
-                                        rebuildCombinedDnsServers()
-                                    }
-                                    background: Rectangle {
-                                        radius: 9
-                                        color: parent.enabled ? ui.field : "#263241"
-                                        border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                Layout.fillWidth: true
-                                spacing: 6
-                                Text {
-                                    text: "Secondary DNS"
-                                    color: ui.subText
-                                    font.pixelSize: 13
-                                    font.bold: true
-                                    Layout.fillWidth: true
-                                    elide: Text.ElideRight
-                                }
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 44
-                                    text: wifiAdvancedSecondaryDns
-                                    enabled: !wifiAdvancedDnsAutomatic
-                                    color: enabled ? ui.text : "#a9b4c2"
-                                    font.pixelSize: 15
-                                    selectByMouse: true
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    leftPadding: 12
-                                    rightPadding: 12
-                                    topPadding: 0
-                                    bottomPadding: 0
-                                    onTextChanged: {
-                                        if (wifiAdvancedDnsSplitSyncing)
-                                            return
-                                        wifiAdvancedSecondaryDns = text
-                                        rebuildCombinedDnsServers()
-                                    }
-                                    background: Rectangle {
-                                        radius: 9
-                                        color: parent.enabled ? ui.field : "#263241"
-                                        border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
-                                    }
+                                background: Rectangle {
+                                    radius: 9
+                                    color: parent.enabled ? ui.field : "#263241"
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
                                 }
                             }
                         }
-                    }
 
-                    Row { x: parent.width - 430; y: parent.height - 66; spacing: 12
-                        Button { width: 150; height: 44; text: wifiAdvancedDnsAutomatic ? "DNS Auto" : "DNS Manual"; onClicked: wifiAdvancedDnsAutomatic = !wifiAdvancedDnsAutomatic
-                            contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
-                            background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
-                        Button { width: 120; height: 44; text: "Cancel"; onClicked: root.closeWifiAdvancedPanel()
-                            contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
-                            background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
-                        Button { width: 130; height: 44; text: wifiAdvancedBusy ? "Saving" : "Apply"; enabled: !wifiAdvancedBusy; onClicked: root.applyWifiConfigFromPanel()
-                            contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 14; elide: Text.ElideRight }
-                            background: Rectangle { radius: 10; color: enabled ? ui.accent : ui.disabled; border.color: enabled ? ui.accent : ui.disabled } }
+                        ColumnLayout {
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            spacing: 4
+                            Text { text: "Secondary DNS"; color: ui.subText; font.pixelSize: 12; font.bold: true; Layout.fillWidth: true; elide: Text.ElideRight }
+                            TextField {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 40
+                                text: wifiAdvancedSecondaryDns
+                                enabled: !wifiAdvancedDnsAutomatic
+                                color: enabled ? ui.text : "#a9b4c2"
+                                font.pixelSize: 14
+                                selectByMouse: true
+                                verticalAlignment: TextInput.AlignVCenter
+                                leftPadding: 12
+                                rightPadding: 12
+                                topPadding: 0
+                                bottomPadding: 0
+                                onTextChanged: {
+                                    if (wifiAdvancedDnsSplitSyncing)
+                                        return
+                                    wifiAdvancedSecondaryDns = text
+                                    rebuildCombinedDnsServers()
+                                }
+                                background: Rectangle {
+                                    radius: 9
+                                    color: parent.enabled ? ui.field : "#263241"
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.preferredWidth: (wifiAdvancedOverlay.width - 84) / 3
+                            Layout.preferredHeight: 58
+                            radius: 9
+                            color: ui.field
+                            border.color: ui.border
+
+                            Text {
+                                x: 12
+                                y: 8
+                                width: parent.width - 24
+                                text: "Current"
+                                color: ui.subText
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                x: 12
+                                y: 28
+                                width: parent.width - 24
+                                text: safeText(wifiAdvancedMessage, wifiIpText() + " via " + wifiGatewayText())
+                                color: ui.text
+                                font.pixelSize: 13
+                                elide: Text.ElideRight
+                            }
+                        }
                     }
                 }
             }

@@ -16,6 +16,70 @@ Item {
         ? false
         : FeatureTopNetworkDrawer
 
+    // NET-AUTH2: transient access level supplied by MainPage when this page is pushed.
+    // Direct/fallback loads default to Viewer, which is the least-privileged mode.
+    property string networkAccessRole: "viewer"
+    readonly property bool networkAdminMode: String(networkAccessRole).toLowerCase() === "admin"
+
+    function canEditLanByIndex(index) {
+        // NET-AUTH2.2: Viewer may edit/apply the two local Jetson LAN ports.
+        // Remote RFSoC ports (LAN3/end0, LAN4/end1) remain Admin-only.
+        return networkAdminMode || index === 0 || index === 1
+    }
+
+    function canEditCurrentLan() {
+        return canEditLanByIndex(lanIndexForInterface(interfaceName))
+    }
+
+    function networkAccessLabel() {
+        return networkAdminMode ? "ADMIN ACCESS" : "VIEWER ACCESS"
+    }
+
+    // NET-AUTH2.1: the access badge is also the in-page role switcher.
+    // Downgrading from Admin never needs a password. Upgrading from Viewer
+    // always goes through the existing NetworkSecurityController-backed popup.
+    function setNetworkAccessRole(role) {
+        var normalized = String(role).toLowerCase() === "admin" ? "admin" : "viewer"
+        if (normalized === String(networkAccessRole).toLowerCase())
+            return
+
+        closeVirtualKeyboard()
+        lanModeDirty = false
+        networkAccessRole = normalized
+
+        // If Admin had unsaved edits open on LAN3-LAN4, discard those protected
+        // drafts immediately on downgrade and reload persisted/runtime state.
+        if (!networkAdminMode && !canEditCurrentLan())
+            loadLanSetting()
+
+        statusMessage = networkAdminMode
+                ? "Admin access enabled: LAN1-LAN4 are editable"
+                : "Viewer access enabled: LAN1-LAN2, WiFi and 5G are editable; LAN3-LAN4 are read-only"
+    }
+
+    function requestNetworkAccessToggle() {
+        if (networkAdminMode) {
+            setNetworkAccessRole("viewer")
+            return
+        }
+
+        networkModePasswordPopup.requestUnlock()
+    }
+
+    // NET-UX1: Apply/Save is intentionally a two-step action. The first tap
+    // provides immediate visual feedback and opens a confirmation dialog; only
+    // the explicit confirmation invokes the existing applyLanSetting() path.
+    function requestLanApplyConfirmation() {
+        closeVirtualKeyboard()
+
+        if (!canEditCurrentLan()) {
+            statusMessage = "Viewer access: " + lanDisplayName() + " is read-only. Use Admin access to modify LAN3-LAN4."
+            return
+        }
+
+        lanApplyConfirmPopup.open()
+    }
+
     // Runtime proof: this must appear when the real Network page is loaded.
     // Keep it during integration; remove after the device test is accepted.
     Component.onCompleted: {
@@ -35,6 +99,10 @@ Item {
     // directly from this page.
     property string interfaceName: ""
     property bool useDhcp: true
+    // DHCP-UX1: user-selected DHCP/Static mode is an edit draft. Async status/readback
+    // responses may still update IP/link fields, but must not overwrite this mode until
+    // the user changes interface, explicitly refreshes, or the Apply persistence step completes.
+    property bool lanModeDirty: false
     property string ipAddress: ""
     property string netmask: ""
     property string gateway: ""
@@ -56,6 +124,17 @@ Item {
     property bool externalLanControlConnected: false
     property string externalLanControlHost: ""
     property int externalLanControlPort: 0
+
+    // UX-KB1.1: Enter the compact LAN editing layout only while the
+    // virtual keyboard is actually visible. keyboardRectangle can retain
+    // its last non-zero size after the keyboard is hidden on Qt 5, so it
+    // must not be used as a visibility latch.
+    readonly property bool lanKeyboardMode: selectedTab === "lan" && Qt.inputMethod.visible
+
+    function closeVirtualKeyboard() {
+        networkManager.forceActiveFocus()
+        Qt.inputMethod.hide()
+    }
 
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? true : HardwareHasWireless
     property bool hardwareHasWifi: (typeof HardwareHasWifi === "undefined") ? true : HardwareHasWifi
@@ -342,7 +421,15 @@ Item {
         if (iface.length > 0)
             interfaceName = iface
 
-        useDhcp = readLanValue(info, ["mode", "ipv4_method"], "dhcp").toLowerCase() !== "static"
+        if (!lanModeDirty) {
+            var modeText = readLanValue(info, ["mode", "ipv4_method"], "dhcp").toLowerCase()
+            // NetworkManager reports "manual" while the JSON contract uses "static".
+            // Treat all proven static aliases as Static Manual; everything else remains DHCP.
+            var staticMode = modeText === "static" || modeText === "manual" ||
+                             modeText === "off" || modeText === "0" ||
+                             modeText === "false" || modeText === "disabled"
+            useDhcp = !staticMode
+        }
 
         var ipRaw = readLanValue(info, ["ip", "liveIp", "current_ip", "dev_ip4_plain", "configuredIp"], "")
         if (ipRaw.length > 0 && ipRaw.indexOf("/") >= 0) {
@@ -441,6 +528,13 @@ Item {
     }
 
     function selectLan(iface) {
+        var targetIndex = lanIndexForInterface(iface)
+        if (!canEditLanByIndex(targetIndex) && lanKeyboardMode)
+            closeVirtualKeyboard()
+
+        // A mode draft belongs to one interface only. Switching LAN means the
+        // newly selected interface must load its persisted/runtime mode.
+        lanModeDirty = false
         interfaceName = iface
         loadLanSetting()
         refreshExternalLanStatus()
@@ -463,6 +557,13 @@ Item {
         var index = lanIndexForInterface(interfaceName)
         if (index < 0) {
             statusMessage = "Unsupported LAN interface: " + interfaceName
+            return
+        }
+
+        // NET-AUTH2: permission check is repeated here so Viewer restrictions
+        // are not only visual. LAN3-LAN4 are read-only in Viewer mode.
+        if (!canEditLanByIndex(index)) {
+            statusMessage = "Viewer access: " + lanDisplayName() + " is read-only. Use Admin access to modify LAN3-LAN4."
             return
         }
 
@@ -526,26 +627,6 @@ Item {
                                              dns)
     }
 
-    function requestProtectedLanApply() {
-        // KP-6JUL2026 : Do not call the mutating backend until password verification succeeds.
-        lanApplyPasswordPopup.requestUnlock()
-    }
-
-    NetworkPasswordPopup {
-        id: lanApplyPasswordPopup
-        titleText: "Network Settings"
-        messageText: "Enter password to apply LAN configuration"
-        accentColor: ui.accent
-        backgroundColor: ui.card
-        borderColor: ui.border
-        textColor: ui.text
-        subTextColor: ui.subText
-        fieldColor: ui.field
-        fieldFocusColor: "#16283d"
-
-        onAuthorized: networkManager.applyLanSetting()
-    }
-
     Connections {
         target: (typeof mainWindows !== "undefined") ? mainWindows : null
         ignoreUnknownSignals: true
@@ -578,8 +659,13 @@ Item {
         target: NetworkController
         function onApplyNetworkConfigFinished(iface, ok, message, gatewayValue, dnsValue) {
             statusMessage = message
-            if (iface === interfaceName)
+            if (iface === interfaceName) {
+                // JSON persistence is the desired-state commit point. Once it succeeds,
+                // readback is allowed to own the mode again. Keep the user's draft on failure.
+                if (ok)
+                    lanModeDirty = false
                 loadLanSetting()
+            }
         }
         function onApplyNetworkConfigNmcliFinished(iface, ok, message) {
             statusMessage = message
@@ -673,6 +759,180 @@ Item {
         }
     }
 
+    // NET-AUTH2.1: in-page Viewer -> Admin elevation uses the same centralized
+    // password verification/lockout service as the entry gate.
+    NetworkPasswordPopup {
+        id: networkModePasswordPopup
+        titleText: "Switch to Admin"
+        messageText: "Enter the administrator password to enable full LAN access"
+        unlockButtonText: "Switch to Admin"
+
+        onAuthorized: networkManager.setNetworkAccessRole("admin")
+        onCancelled: {
+            // Remain in Viewer mode. No page reload and no privilege change.
+        }
+    }
+
+
+    // NET-UX1: explicit confirmation makes Apply/Save unambiguous and prevents
+    // accidental live network changes. This popup does not claim success; the
+    // existing backend/status path remains authoritative after confirmation.
+    Popup {
+        id: lanApplyConfirmPopup
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        width: 560
+        height: 360
+        x: Math.max(24, (networkManager.width - width) / 2)
+        y: Math.max(24, (networkManager.height - height) / 2 - 20)
+
+        enter: Transition {
+            NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic }
+        }
+        exit: Transition {
+            NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 100; easing.type: Easing.InCubic }
+        }
+
+        background: Rectangle {
+            radius: 18
+            color: "#132235"
+            border.color: ui.accent
+            border.width: 1
+        }
+
+        contentItem: Item {
+            Text {
+                x: 28
+                y: 24
+                width: parent.width - 56
+                text: "Confirm Apply / Save"
+                color: ui.text
+                font.pixelSize: 24
+                font.bold: true
+            }
+
+            Text {
+                x: 28
+                y: 64
+                width: parent.width - 56
+                text: "Review the network change before it is sent to the device."
+                color: ui.subText
+                font.pixelSize: 14
+                wrapMode: Text.WordWrap
+            }
+
+            Rectangle {
+                x: 28
+                y: 104
+                width: parent.width - 56
+                height: 148
+                radius: 12
+                color: "#0d1723"
+                border.color: ui.border
+
+                Text {
+                    x: 18
+                    y: 16
+                    width: parent.width - 36
+                    text: lanDisplayName() + " / " + interfaceName
+                    color: ui.text
+                    font.pixelSize: 18
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
+
+                Text {
+                    x: 18
+                    y: 52
+                    width: parent.width - 36
+                    text: "Mode: " + (useDhcp ? "Using DHCP" : "Static Manual")
+                    color: useDhcp ? ui.accent : "#63a4ff"
+                    font.pixelSize: 14
+                    font.bold: true
+                }
+
+                Text {
+                    x: 18
+                    y: 82
+                    width: parent.width - 36
+                    text: useDhcp
+                          ? "The device will request IPv4 settings automatically."
+                          : ("IPv4: " + safeText(ipAddress, "--") + "    Mask: " + safeText(netmask, "--") +
+                             "\nGateway: " + safeText(gateway, "--"))
+                    color: ui.subText
+                    font.pixelSize: 13
+                    wrapMode: Text.WordWrap
+                }
+            }
+
+            Text {
+                x: 28
+                y: 266
+                width: parent.width - 56
+                text: "This can temporarily interrupt network connectivity."
+                color: ui.warning
+                font.pixelSize: 13
+                font.bold: true
+            }
+
+            Row {
+                x: 28
+                y: 302
+                spacing: 16
+
+                Button {
+                    id: cancelLanApplyButton
+                    width: 238
+                    height: 44
+                    text: "Cancel"
+                    scale: pressed ? 0.96 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                    onClicked: lanApplyConfirmPopup.close()
+                    contentItem: Text {
+                        text: parent.text
+                        color: ui.text
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                    background: Rectangle {
+                        radius: 10
+                        color: cancelLanApplyButton.pressed ? "#17283b" : ui.field
+                        border.color: ui.border
+                    }
+                }
+
+                Button {
+                    id: confirmLanApplyButton
+                    width: 250
+                    height: 44
+                    text: "Confirm Apply"
+                    scale: pressed ? 0.96 : 1.0
+                    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                    onClicked: {
+                        lanApplyConfirmPopup.close()
+                        networkManager.applyLanSetting()
+                    }
+                    contentItem: Text {
+                        text: parent.text
+                        color: "#001412"
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 14
+                        font.bold: true
+                    }
+                    background: Rectangle {
+                        radius: 10
+                        color: confirmLanApplyButton.pressed ? Qt.darker(ui.accent, 1.15) : ui.accent
+                        border.color: ui.accent
+                    }
+                }
+            }
+        }
+    }
+
     Text {
         x: 36
         y: 94
@@ -699,10 +959,71 @@ Item {
         font.bold: true
     }
 
+    Button {
+        id: networkAccessSwitchButton
+        x: 1030
+        y: 96
+        width: 220
+        height: 48
+        text: networkManager.networkAccessLabel()
+        scale: pressed ? 0.96 : 1.0
+        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+        onClicked: networkManager.requestNetworkAccessToggle()
+
+        contentItem: Row {
+            anchors.centerIn: parent
+            spacing: 10
+
+            Text {
+                text: networkAccessSwitchButton.text
+                color: networkManager.networkAdminMode ? ui.accent : "#63a4ff"
+                font.pixelSize: 13
+                font.bold: true
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                text: networkManager.networkAdminMode ? "VIEWER" : "ADMIN"
+                color: ui.subText
+                font.pixelSize: 11
+                font.bold: true
+                anchors.verticalCenter: parent.verticalCenter
+            }
+
+            Text {
+                text: "↔"
+                color: networkManager.networkAdminMode ? ui.accent : "#63a4ff"
+                font.pixelSize: 14
+                font.bold: true
+                anchors.verticalCenter: parent.verticalCenter
+            }
+        }
+
+        background: Rectangle {
+            radius: 24
+            color: networkAccessSwitchButton.pressed
+                   ? (networkManager.networkAdminMode ? "#12413e" : "#15365f")
+                   : (networkManager.networkAdminMode ? "#0d302e" : "#10294a")
+            border.color: networkManager.networkAdminMode ? ui.accent : "#2f80ed"
+            border.width: 1
+        }
+    }
+
+    Text {
+        x: 1266
+        y: 112
+        text: networkManager.networkAdminMode
+              ? "Full LAN access · tap to switch Viewer"
+              : "LAN1 + LAN2 + WiFi + 5G editable · tap for Admin"
+        color: ui.subText
+        font.pixelSize: 13
+    }
+
     Row {
+        id: networkTabRow
         x: 1240
         y: 176
-        spacing: 14
+        spacing: 16
 
         Repeater {
             model: [
@@ -715,6 +1036,8 @@ Item {
                 height: 48
                 enabled: modelData.enabled
                 text: modelData.label
+                scale: pressed ? 0.96 : 1.0
+                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                 onClicked: selectedTab = modelData.key
                 contentItem: Text {
                     text: parent.text
@@ -737,9 +1060,13 @@ Item {
     Rectangle {
         id: mainPanel
         x: 36
-        y: 270
+        // NET-UX2: keep a deliberate visual gutter below the LAN/WiFi/5G
+        // navigation tabs.  The previous y=220 overlapped the 48 px tabs
+        // starting at y=176 by 4 px, which made the header feel cramped.
+        // 248 gives a 24 px breathing space after the tab row.
+        y: 248
         width: parent.width - 72
-        height: parent.height - 330
+        height: parent.height - y - 60
         radius: 18
         color: ui.mainPanel
         border.color: ui.border
@@ -751,46 +1078,93 @@ Item {
             visible: selectedTab === "lan"
 
             Rectangle {
+                id: lanListPanel
                 x: 34
-                y: 45
-                width: 420
-                height: parent.height - 90
+                y: 20
+                width: 330
+                height: parent.height - 40
+                visible: true
+                enabled: true
                 radius: 18
                 color: ui.panel
                 border.color: ui.border
 
-                Text { x: 28; y: 28; text: "LAN Interfaces"; color: ui.text; font.pixelSize: 28; font.bold: true }
+                Text {
+                    x: 18
+                    y: 18
+                    text: "LAN Interfaces"
+                    color: ui.text
+                    font.pixelSize: 22
+                    font.bold: true
+                }
 
                 Repeater {
                     model: lanInterfaces
                     Rectangle {
-                        x: 28
-                        y: 88 + index * 116
-                        width: 364
-                        height: 96
+                        id: lanInterfaceCard
+                        x: 18
+                        y: 62 + index * 90
+                        width: 294
+                        height: 76
                         radius: 14
+                        scale: lanInterfaceMouse.pressed ? 0.985 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutCubic } }
                         color: interfaceName === modelData.iface ? "#16283d" : "#0d1723"
                         border.color: interfaceName === modelData.iface ? ui.accent : ui.border
                         border.width: interfaceName === modelData.iface ? 2 : 1
 
-                        MouseArea { anchors.fill: parent; onClicked: selectLan(modelData.iface) }
-                        Rectangle { x: 24; y: 24; width: 14; height: 14; radius: 7; color: lanInfoStatusColor(modelData) }
-                        Text { x: 52; y: 16; text: safeText(modelData.name, modelData.iface); color: ui.text; font.pixelSize: 22; font.bold: true }
-                        Text {
-                            x: 52; y: 46; width: parent.width - 70
-                            text: modelData.iface + " · " + lanPortRoleShortLabel(modelData) + " · " + lanInfoStatusText(modelData)
-                            color: ui.subText; font.pixelSize: 14; elide: Text.ElideRight
+                        MouseArea { id: lanInterfaceMouse; anchors.fill: parent; onClicked: selectLan(modelData.iface) }
+                        Rectangle {
+                            x: 16
+                            y: 18
+                            width: 14; height: 14; radius: 7
+                            color: lanInfoStatusColor(modelData)
                         }
-                        Text { x: 52; y: 70; text: safeText(modelData.ip || modelData.liveIp || modelData.current_ip || modelData.dev_ip4_plain, "--"); color: ui.text; font.pixelSize: 16; font.bold: true }
+                        Text {
+                            x: 42
+                            y: 9
+                            text: safeText(modelData.name, modelData.iface)
+                            color: ui.text
+                            font.pixelSize: 18
+                            font.bold: true
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 12
+                            y: 11
+                            text: "VIEW ONLY"
+                            visible: !networkManager.canEditLanByIndex(networkManager.lanIndexForInterface(modelData.iface))
+                            color: ui.warning
+                            font.pixelSize: 10
+                            font.bold: true
+                        }
+                        Text {
+                            x: 42
+                            y: 34
+                            width: parent.width - 54
+                            text: modelData.iface + " · " + lanPortRoleShortLabel(modelData) + " · " + lanInfoStatusText(modelData)
+                            color: ui.subText
+                            font.pixelSize: 12
+                            elide: Text.ElideRight
+                        }
+                        Text {
+                            x: 42
+                            y: 54
+                            text: safeText(modelData.ip || modelData.liveIp || modelData.current_ip || modelData.dev_ip4_plain, "--")
+                            color: ui.text
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
                     }
                 }
             }
 
             Rectangle {
-                x: 484
-                y: 45
-                width: parent.width - 518
-                height: parent.height - 90
+                id: lanDetailPanel
+                x: 382
+                y: 20
+                width: parent.width - 416
+                height: parent.height - 40
                 radius: 18
                 color: ui.panel
                 border.color: ui.border
@@ -819,6 +1193,7 @@ Item {
                     x: 30
                     y: 100
                     spacing: 24
+                    visible: false
 
                     Repeater {
                         model: [
@@ -887,13 +1262,16 @@ Item {
                 }
 
                 Rectangle {
+                    id: ipv4ConfigCard
                     x: 30
-                    y: 250
+                    y: 95
                     width: 590
                     height: 260
                     radius: 16
                     color: ui.card
                     border.color: ui.borderSoft
+                    enabled: networkManager.canEditCurrentLan()
+                    opacity: enabled ? 1.0 : 0.58
 
                     Text {
                         x: 26
@@ -904,18 +1282,44 @@ Item {
                         font.bold: true
                     }
 
+                    Rectangle {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 22
+                        y: 18
+                        width: 104
+                        height: 28
+                        radius: 14
+                        visible: !networkManager.canEditCurrentLan()
+                        color: "#3a2a0b"
+                        border.color: ui.warning
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "READ ONLY"
+                            color: ui.warning
+                            font.pixelSize: 11
+                            font.bold: true
+                        }
+                    }
+
                     Row {
                         x: 26
                         y: 62
                         spacing: 10
 
                         Button {
+                            id: lanDhcpModeButton
                             width: 260
                             height: 44
                             text: "Using DHCP"
+                            scale: pressed ? 0.96 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                             onClicked: {
+                                // Selecting a desired mode must not immediately query/reload the
+                                // old saved mode; that caused the button to "bounce" back.
                                 useDhcp = true
-                                refreshDhcpInfo()
+                                lanModeDirty = true
+                                statusMessage = "DHCP selected. Press Apply / Save to apply this mode."
                             }
 
                             contentItem: Text {
@@ -935,10 +1339,17 @@ Item {
                         }
 
                         Button {
+                            id: lanStaticModeButton
                             width: 260
                             height: 44
                             text: "Static Manual"
-                            onClicked: useDhcp = false
+                            scale: pressed ? 0.96 : 1.0
+                            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                            onClicked: {
+                                useDhcp = false
+                                lanModeDirty = true
+                                statusMessage = "Static Manual selected. Press Apply / Save to apply this mode."
+                            }
 
                             contentItem: Text {
                                 text: parent.text
@@ -982,7 +1393,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: modelData.label
-                                    color: ui.subText
+                                    color: useDhcp ? ui.muted : ui.subText
                                     font.pixelSize: 13
                                     font.bold: true
                                     elide: Text.ElideRight
@@ -994,7 +1405,8 @@ Item {
                                     text: modelData.value
                                     placeholderText: modelData.placeholder
                                     enabled: !useDhcp
-                                    color: ui.text
+                                    color: useDhcp ? ui.disabled : ui.text
+                                    placeholderTextColor: useDhcp ? ui.muted : ui.disabled
                                     font.pixelSize: 14
                                     verticalAlignment: TextInput.AlignVCenter
                                     leftPadding: 12
@@ -1010,8 +1422,8 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: ui.field
-                                        border.color: parent.activeFocus ? ui.accent : ui.border
+                                        color: useDhcp ? "#303740" : ui.field
+                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
@@ -1029,7 +1441,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: "Primary DNS"
-                                    color: ui.subText
+                                    color: useDhcp ? ui.muted : ui.subText
                                     font.pixelSize: 12
                                     font.bold: true
                                     elide: Text.ElideRight
@@ -1040,7 +1452,9 @@ Item {
                                     Layout.preferredHeight: 42
                                     text: primaryDns
                                     placeholderText: "8.8.8.8"
-                                    color: ui.text
+                                    enabled: !useDhcp
+                                    color: useDhcp ? ui.disabled : ui.text
+                                    placeholderTextColor: useDhcp ? ui.muted : ui.disabled
                                     font.pixelSize: 13
                                     verticalAlignment: TextInput.AlignVCenter
                                     leftPadding: 10
@@ -1052,8 +1466,8 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: ui.field
-                                        border.color: parent.activeFocus ? ui.accent : ui.border
+                                        color: useDhcp ? "#303740" : ui.field
+                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
@@ -1065,7 +1479,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: "Secondary DNS"
-                                    color: ui.subText
+                                    color: useDhcp ? ui.muted : ui.subText
                                     font.pixelSize: 12
                                     font.bold: true
                                     elide: Text.ElideRight
@@ -1076,7 +1490,9 @@ Item {
                                     Layout.preferredHeight: 42
                                     text: secondaryDns
                                     placeholderText: "8.8.4.4"
-                                    color: ui.text
+                                    enabled: !useDhcp
+                                    color: useDhcp ? ui.disabled : ui.text
+                                    placeholderTextColor: useDhcp ? ui.muted : ui.disabled
                                     font.pixelSize: 13
                                     verticalAlignment: TextInput.AlignVCenter
                                     leftPadding: 10
@@ -1088,8 +1504,8 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: ui.field
-                                        border.color: parent.activeFocus ? ui.accent : ui.border
+                                        color: useDhcp ? "#303740" : ui.field
+                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
@@ -1106,6 +1522,8 @@ Item {
                     radius: 16
                     color: ui.card
                     border.color: ui.borderSoft
+
+                    visible: false
 
                     readonly property real infoColumnWidth: Math.max(220, (width - 52 - 48) / 2)
 
@@ -1166,23 +1584,118 @@ Item {
                     }
                 }
 
-                Row {
-                    x: 30
-                    y: parent.height - 92
-                    spacing: 20
-                    Button { width: 220; height: 48; text: "Apply / Save"; onClicked: requestProtectedLanApply()
-                        contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: ui.accent; border.color: ui.accent } }
-                    Button { width: 220; height: 48; text: "Refresh"; onClicked: loadLanInterfaces()
-                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
+                Rectangle {
+                    id: keyboardEditSummary
+                    x: 650
+                    y: 95
+                    width: parent.width - 700
+                    height: 105
+                    radius: 16
+                    color: ui.card
+                    border.color: ui.accent
+                    border.width: 1
+                    visible: true
+
+                    Text {
+                        x: 24
+                        y: 18
+                        width: parent.width - 190
+                        text: "Editing " + lanDisplayName() + " / " + interfaceName
+                        color: ui.text
+                        font.pixelSize: 21
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        x: 24
+                        y: 52
+                        width: parent.width - 190
+                        text: "Configured IPv4: " + safeText(ipAddress, "-") +
+                              "  ·  " + (useDhcp ? "DHCP" : "Static Manual") +
+                              (networkManager.canEditCurrentLan() ? "" : "  ·  VIEW ONLY")
+                        color: ui.subText
+                        font.pixelSize: 14
+                        elide: Text.ElideRight
+                    }
+
                     Button {
+                        anchors.right: parent.right
+                        anchors.rightMargin: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 130
+                        height: 46
+                        text: "Done"
+                        visible: networkManager.lanKeyboardMode
+                        enabled: visible
+                        scale: pressed ? 0.96 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                        onClicked: closeVirtualKeyboard()
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#001412"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+                        background: Rectangle {
+                            radius: 10
+                            color: ui.accent
+                            border.color: ui.accent
+                        }
+                    }
+                }
+
+                Row {
+                    id: lanActionRow
+                    x: 650
+                    y: 220
+                    spacing: 20
+                    Button {
+                        id: lanApplyButton
+                        width: 220
+                        height: 48
+                        text: networkManager.canEditCurrentLan() ? "Apply / Save" : "View Only"
+                        enabled: networkManager.canEditCurrentLan()
+                        scale: pressed ? 0.95 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                        onClicked: networkManager.requestLanApplyConfirmation()
+                        contentItem: Text {
+                            text: parent.text
+                            color: parent.enabled ? "#001412" : ui.subText
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                            font.pixelSize: 15
+                        }
+                        background: Rectangle {
+                            radius: 10
+                            color: !lanApplyButton.enabled ? ui.field : lanApplyButton.pressed ? Qt.darker(ui.accent, 1.15) : ui.accent
+                            border.color: parent.enabled ? ui.accent : ui.border
+                        }
+                    }
+                    Button {
+                        id: lanRefreshButton
+                        width: 220
+                        height: 48
+                        text: "Refresh"
+                        scale: pressed ? 0.96 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                        onClicked: { lanModeDirty = false; loadLanInterfaces() }
+                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
+                        background: Rectangle { radius: 10; color: lanRefreshButton.pressed ? "#17283b" : ui.field; border.color: ui.border }
+                    }
+                    Button {
+                        id: lanStatusButton
                         width: 220
                         height: 48
                         text: isExternalLanCurrent() ? "RFSoC Status" : "DHCP Info"
+                        scale: pressed ? 0.96 : 1.0
+                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: isExternalLanCurrent() ? refreshExternalLanStatus() : refreshDhcpInfo()
                         contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: ui.field; border.color: ui.border }
+                        background: Rectangle { radius: 10; color: lanStatusButton.pressed ? "#17283b" : ui.field; border.color: ui.border }
                     }
                 }
             }
