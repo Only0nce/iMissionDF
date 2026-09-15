@@ -1535,8 +1535,11 @@ Item {
     }
 
     Component.onDestruction: {
+        // NET-WIFI-RUNTIME1: the per-Apply WiFi auth transaction was removed in
+        // NET-AUTH1, so clearPendingWifiAdvancedSave() no longer exists. Keep
+        // destruction cleanup limited to live runtime resources; an undefined
+        // stale call here would abort the handler before WiFi/5G shutdown runs.
         pageRuntimeSyncTimer.stop()
-        clearPendingWifiAdvancedSave()
         deactivateWifiPageRuntime()
         deactivateCellularPageRuntime()
     }
