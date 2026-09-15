@@ -46,6 +46,8 @@ Item {
         closeVirtualKeyboard()
         lanModeDirty = false
         networkAccessRole = normalized
+        if (vpnLoader.item)
+            vpnLoader.item.adminMode = networkAdminMode
 
         // If Admin had unsaved edits open on LAN3-LAN4, discard those protected
         // drafts immediately on downgrade and reload persisted/runtime state.
@@ -54,7 +56,7 @@ Item {
 
         statusMessage = networkAdminMode
                 ? "Admin access enabled: LAN1-LAN4 are editable"
-                : "Viewer access enabled: LAN1-LAN2, WiFi and 5G are editable; LAN3-LAN4 are read-only"
+                : "Viewer access enabled: LAN1-LAN2, WiFi and 5G are editable; LAN3-LAN4 and VPN control are read-only"
     }
 
     function requestNetworkAccessToggle() {
@@ -88,6 +90,11 @@ Item {
     }
 
     property string selectedTab: "lan"
+    // NET-VPN2.3: refresh VPN automatically only on the first VPN entry for
+    // this Network Settings page session. VpnPage itself is loader-owned and
+    // recreated on every tab switch, so this guard must live in Setting.qml.
+    property bool vpnInitialRefreshDone: false
+
     onSelectedTabChanged: {
         if (selectedTab === "lan")
             loadLanInterfaces()
@@ -945,7 +952,7 @@ Item {
     Text {
         x: 36
         y: 136
-        text: "Unified LAN, WiFi, and 5G settings. Runtime proof target: qrc:/Setting.qml"
+        text: "Unified LAN, WiFi, 5G, and VPN settings. Runtime proof target: qrc:/Setting.qml"
         color: ui.subText
         font.pixelSize: 15
     }
@@ -953,7 +960,7 @@ Item {
     Text {
         x: 36
         y: 176
-        text: selectedTab === "lan" ? "LAN Interface Settings" : selectedTab === "wifi" ? "WiFi Settings" : "5G Modem Settings"
+        text: selectedTab === "lan" ? "LAN Interface Settings" : selectedTab === "wifi" ? "WiFi Settings" : selectedTab === "cellular" ? "5G Modem Settings" : "VPN Settings"
         color: ui.text
         font.pixelSize: 40
         font.bold: true
@@ -1014,7 +1021,7 @@ Item {
         y: 112
         text: networkManager.networkAdminMode
               ? "Full LAN access · tap to switch Viewer"
-              : "LAN1 + LAN2 + WiFi + 5G editable · tap for Admin"
+              : "LAN1 + LAN2 + WiFi + 5G editable · VPN status only · tap for Admin"
         color: ui.subText
         font.pixelSize: 13
     }
@@ -1029,7 +1036,8 @@ Item {
             model: [
                 { key: "lan", label: "LAN", enabled: true },
                 { key: "wifi", label: "WiFi", enabled: networkManager.hardwareHasWireless && networkManager.hardwareHasWifi },
-                { key: "cellular", label: "5G", enabled: networkManager.hardwareHasWireless && networkManager.hardwareHas5G }
+                { key: "cellular", label: "5G", enabled: networkManager.hardwareHasWireless && networkManager.hardwareHas5G },
+                { key: "vpn", label: "VPN", enabled: true }
             ]
             Button {
                 width: 130
@@ -1743,6 +1751,29 @@ Item {
             function onRequestToast(text) { statusMessage = text }
         }
 
+        Loader {
+            id: vpnLoader
+            anchors.fill: parent
+            active: selectedTab === "vpn"
+            visible: selectedTab === "vpn"
+            source: active ? "qrc:/VpnPage.qml" : ""
+            onLoaded: {
+                item.adminMode = networkManager.networkAdminMode
+
+                // NET-VPN2.3: one automatic refresh per Network Settings
+                // page session. Re-entering VPN later is manual-refresh only.
+                if (!networkManager.vpnInitialRefreshDone) {
+                    networkManager.vpnInitialRefreshDone = true
+                    item.refreshAll()
+                }
+            }
+        }
+
+        Connections {
+            target: vpnLoader.item
+            ignoreUnknownSignals: true
+            function onRequestToast(text) { statusMessage = text }
+        }
 
     }
 }

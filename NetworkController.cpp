@@ -11,6 +11,8 @@
 #include <QJsonArray>
 #include <QJsonValue>
 #include <QMap>
+#include <QHash>
+#include <QSet>
 #include <QThread>
 #include <QRegularExpression>
 #include <QTextStream>
@@ -20,6 +22,11 @@
 #include <QDir>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QHostAddress>
+#include <QUrl>
 
 #include <functional>
 
@@ -286,6 +293,15 @@ static bool updateNetworkConfigRoot(const std::function<void(QJsonObject &)> &mu
 
     mutator(root);
     return writeNetworkConfigRootUnlocked(root, outMsg);
+}
+
+static bool vpnFeatureEnabledFromConfig()
+{
+    const QJsonObject root = readNetworkConfigRoot();
+    const QJsonObject vpn = root.value(QStringLiteral("vpn")).toObject();
+    // Backward-compatible default: revisions before NET-VPN2.1 had no master
+    // enable flag, so an absent setting must preserve the existing enabled behavior.
+    return vpn.value(QStringLiteral("enabled")).toBool(true);
 }
 
 static bool runProcessBlocking(const QString &program,
@@ -2193,6 +2209,362 @@ void NetworkController::requestDhcpInfo(const QString &iface)
         QMetaObject::invokeMethod(self, [self, iface, result]() {
             if (self)
                 emit self->dhcpInfoReady(iface, result);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+// ============================================================
+// VPN / WireGuard (NetworkManager)
+// ============================================================
+QVariantMap NetworkController::vpnStatus()
+{
+    QVariantMap result;
+    result[QStringLiteral("enabled")] = vpnFeatureEnabledFromConfig();
+    QVariantList profiles;
+    QVariantList activeProfiles;
+    QString out, err;
+
+    const bool ok = runProcessBlocking(QStringLiteral("nmcli"),
+                                       {QStringLiteral("-t"), QStringLiteral("-f"),
+                                        QStringLiteral("NAME,UUID,TYPE,DEVICE"),
+                                        QStringLiteral("connection"), QStringLiteral("show")},
+                                       &out, &err, 10000);
+    if (!ok) {
+        result[QStringLiteral("ok")] = false;
+        result[QStringLiteral("state")] = QStringLiteral("failed");
+        result[QStringLiteral("message")] = err.isEmpty()
+            ? QStringLiteral("Unable to query NetworkManager VPN profiles") : err.trimmed();
+        result[QStringLiteral("profiles")] = profiles;
+        result[QStringLiteral("activeProfiles")] = activeProfiles;
+        return result;
+    }
+
+    // Query active connections with the same fields so runtime DEVICE comes from
+    // NetworkManager rather than from stale saved profile metadata.
+    QString activeOut;
+    QString activeErr;
+    const bool activeQueryOk = runProcessBlocking(QStringLiteral("nmcli"),
+                                                  {QStringLiteral("-t"), QStringLiteral("-f"),
+                                                   QStringLiteral("NAME,UUID,TYPE,DEVICE"),
+                                                   QStringLiteral("connection"), QStringLiteral("show"),
+                                                   QStringLiteral("--active")},
+                                                  &activeOut, &activeErr, 10000);
+
+    QHash<QString, QVariantMap> activeByUuid;
+    if (activeQueryOk) {
+        const QStringList activeLines = activeOut.split('\n', QString::SkipEmptyParts);
+        for (const QString &line : activeLines) {
+            const QStringList f = splitNmcliEscaped(line);
+            if (f.size() < 3)
+                continue;
+            const QString type = f.value(2).trimmed().toLower();
+            if (type != QStringLiteral("vpn") && type != QStringLiteral("wireguard"))
+                continue;
+
+            QVariantMap activeRow;
+            activeRow[QStringLiteral("name")] = f.value(0).trimmed();
+            activeRow[QStringLiteral("uuid")] = f.value(1).trimmed();
+            activeRow[QStringLiteral("type")] = type;
+            activeRow[QStringLiteral("device")] = f.value(3).trimmed();
+            activeByUuid.insert(activeRow.value(QStringLiteral("uuid")).toString(), activeRow);
+        }
+    }
+
+    auto resolveDeviceIpv4 = [](const QString &device) -> QString {
+        const QString dev = device.trimmed();
+        if (dev.isEmpty() || dev == QStringLiteral("--"))
+            return QString();
+        QString ipOut;
+        if (!runProcessBlocking(QStringLiteral("nmcli"),
+                                {QStringLiteral("-g"), QStringLiteral("IP4.ADDRESS"),
+                                 QStringLiteral("device"), QStringLiteral("show"), dev},
+                                &ipOut, nullptr, 5000))
+            return QString();
+        const QStringList addresses = ipOut.split('\n', QString::SkipEmptyParts);
+        if (addresses.isEmpty())
+            return QString();
+        QString ip = addresses.first().trimmed();
+        const int slash = ip.indexOf('/');
+        if (slash > 0)
+            ip.truncate(slash);
+        return ip;
+    };
+
+    const QStringList lines = out.split('\n', QString::SkipEmptyParts);
+    for (const QString &line : lines) {
+        const QStringList f = splitNmcliEscaped(line);
+        if (f.size() < 3)
+            continue;
+        const QString name = f.value(0).trimmed();
+        const QString uuid = f.value(1).trimmed();
+        const QString type = f.value(2).trimmed().toLower();
+        if (type != QStringLiteral("vpn") && type != QStringLiteral("wireguard"))
+            continue;
+
+        QVariantMap row;
+        row[QStringLiteral("name")] = name;
+        row[QStringLiteral("uuid")] = uuid;
+        row[QStringLiteral("type")] = type;
+
+        const bool active = activeByUuid.contains(uuid);
+        const QVariantMap activeRow = activeByUuid.value(uuid);
+        const QString runtimeDevice = active ? activeRow.value(QStringLiteral("device")).toString().trimmed()
+                                             : QString();
+        const QString savedDevice = f.value(3).trimmed();
+        const QString device = active && !runtimeDevice.isEmpty() && runtimeDevice != QStringLiteral("--")
+            ? runtimeDevice : savedDevice;
+        const QString ipv4 = active ? resolveDeviceIpv4(device) : QString();
+
+        row[QStringLiteral("device")] = (device == QStringLiteral("--")) ? QString() : device;
+        row[QStringLiteral("ipv4")] = ipv4;
+        row[QStringLiteral("active")] = active;
+        row[QStringLiteral("state")] = active ? QStringLiteral("connected") : QStringLiteral("disconnected");
+        profiles.append(row);
+
+        if (active) {
+            QVariantMap activeDetail = row;
+            activeProfiles.append(activeDetail);
+        }
+    }
+
+    result[QStringLiteral("ok")] = true;
+    result[QStringLiteral("profiles")] = profiles;
+    result[QStringLiteral("activeProfiles")] = activeProfiles;
+    result[QStringLiteral("active")] = !activeProfiles.isEmpty();
+    result[QStringLiteral("state")] = activeProfiles.isEmpty()
+        ? QStringLiteral("disconnected") : QStringLiteral("connected");
+
+    if (!activeProfiles.isEmpty()) {
+        const QVariantMap primary = activeProfiles.first().toMap();
+        result[QStringLiteral("activeName")] = primary.value(QStringLiteral("name"));
+        result[QStringLiteral("activeUuid")] = primary.value(QStringLiteral("uuid"));
+        result[QStringLiteral("activeType")] = primary.value(QStringLiteral("type"));
+        result[QStringLiteral("activeDevice")] = primary.value(QStringLiteral("device"));
+        result[QStringLiteral("activeIpv4")] = primary.value(QStringLiteral("ipv4"));
+    } else {
+        result[QStringLiteral("activeName")] = QString();
+        result[QStringLiteral("activeUuid")] = QString();
+        result[QStringLiteral("activeType")] = QString();
+        result[QStringLiteral("activeDevice")] = QString();
+        result[QStringLiteral("activeIpv4")] = QString();
+    }
+
+    if (!activeQueryOk && !activeErr.trimmed().isEmpty()) {
+        result[QStringLiteral("message")] = QStringLiteral("VPN profiles loaded; active-state query warning: %1")
+            .arg(activeErr.trimmed());
+    } else if (profiles.isEmpty()) {
+        result[QStringLiteral("message")] = QStringLiteral("No VPN profiles configured in NetworkManager");
+    } else if (!activeProfiles.isEmpty()) {
+        result[QStringLiteral("message")] = QStringLiteral("VPN tunnel state synchronized with NetworkManager");
+    } else {
+        result[QStringLiteral("message")] = QStringLiteral("VPN profiles loaded; no active tunnel");
+    }
+    return result;
+}
+
+void NetworkController::requestVpnStatus()
+{
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self]() {
+        NetworkController worker;
+        const QVariantMap result = worker.vpnStatus();
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, result]() {
+            if (self)
+                emit self->vpnStatusReady(result);
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void NetworkController::requestVpnPublicIp()
+{
+    // Public IP cannot be derived reliably from local interfaces when the unit is
+    // behind NAT. Resolve it asynchronously through a minimal HTTPS endpoint so
+    // the GUI/audio thread is never blocked. No credentials or device metadata
+    // are sent; the service only observes the normal source IP of this request.
+    QNetworkAccessManager *manager = new QNetworkAccessManager(this);
+    QNetworkRequest request(QUrl(QStringLiteral("https://api.ipify.org")));
+    request.setRawHeader("User-Agent", "iScanMR10/NET-VPN2.1");
+
+    QNetworkReply *reply = manager->get(request);
+    QTimer *timeout = new QTimer(reply);
+    timeout->setSingleShot(true);
+    timeout->setInterval(6000);
+
+    connect(timeout, &QTimer::timeout, reply, [reply]() {
+        if (reply->isRunning())
+            reply->abort();
+    });
+
+    connect(reply, &QNetworkReply::finished, this, [this, reply, manager]() {
+        const QNetworkReply::NetworkError error = reply->error();
+        QString ip;
+        QString message;
+        bool ok = false;
+
+        if (error == QNetworkReply::NoError) {
+            ip = QString::fromUtf8(reply->readAll()).trimmed();
+            QHostAddress address;
+            if (address.setAddress(ip)) {
+                ok = true;
+                message = QStringLiteral("Public IP refreshed");
+            } else {
+                message = QStringLiteral("Public IP service returned an invalid address");
+                ip.clear();
+            }
+        } else {
+            message = reply->errorString().trimmed();
+            if (message.isEmpty())
+                message = QStringLiteral("Unable to resolve public IP");
+        }
+
+        emit vpnPublicIpReady(ok, ip, message);
+        reply->deleteLater();
+        manager->deleteLater();
+    });
+
+    timeout->start();
+}
+
+void NetworkController::setVpnEnabled(bool enabled)
+{
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self, enabled]() {
+        QString saveMessage;
+        const bool saved = updateNetworkConfigRoot([enabled](QJsonObject &root) {
+            QJsonObject vpn = root.value(QStringLiteral("vpn")).toObject();
+            vpn[QStringLiteral("enabled")] = enabled;
+            root[QStringLiteral("vpn")] = vpn;
+        }, &saveMessage);
+
+        if (!saved) {
+            const QString msg = saveMessage.isEmpty()
+                ? QStringLiteral("Failed to save VPN enable state") : saveMessage;
+            if (!self)
+                return;
+            QMetaObject::invokeMethod(self, [self, enabled, msg]() {
+                if (!self)
+                    return;
+                emit self->vpnEnableFinished(enabled, false, msg);
+                self->requestVpnStatus();
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        bool ok = true;
+        QStringList failures;
+
+        // Disable is an operational command, not just a cosmetic preference.
+        // After the desired state is persisted, disconnect every active VPN/WG
+        // profile best-effort. If one fails, the readback will expose the mismatch.
+        if (!enabled) {
+            QString activeOut, activeErr;
+            const bool queryOk = runProcessBlocking(QStringLiteral("nmcli"),
+                                                     {QStringLiteral("-t"), QStringLiteral("-f"),
+                                                      QStringLiteral("UUID,TYPE"),
+                                                      QStringLiteral("connection"), QStringLiteral("show"),
+                                                      QStringLiteral("--active")},
+                                                     &activeOut, &activeErr, 10000);
+            if (!queryOk) {
+                ok = false;
+                failures << (activeErr.trimmed().isEmpty()
+                             ? QStringLiteral("Unable to enumerate active VPN tunnels")
+                             : activeErr.trimmed());
+            } else {
+                const QStringList lines = activeOut.split('\n', QString::SkipEmptyParts);
+                for (const QString &line : lines) {
+                    const QStringList fields = splitNmcliEscaped(line);
+                    const QString uuid = fields.value(0).trimmed();
+                    const QString type = fields.value(1).trimmed().toLower();
+                    if (uuid.isEmpty() || (type != QStringLiteral("vpn") &&
+                                           type != QStringLiteral("wireguard")))
+                        continue;
+
+                    QString out, err;
+                    if (!runProcessBlocking(QStringLiteral("nmcli"),
+                                            {QStringLiteral("connection"), QStringLiteral("down"),
+                                             QStringLiteral("uuid"), uuid},
+                                            &out, &err, 45000)) {
+                        ok = false;
+                        const QString detail = !err.trimmed().isEmpty() ? err.trimmed() : out.trimmed();
+                        failures << (detail.isEmpty()
+                                     ? QStringLiteral("Failed to disconnect VPN %1").arg(uuid)
+                                     : detail);
+                    }
+                }
+            }
+        }
+
+        QString message;
+        if (enabled) {
+            message = QStringLiteral("VPN enabled. Select a profile and press Connect.");
+        } else if (ok) {
+            message = QStringLiteral("VPN disabled and active tunnels disconnected");
+        } else {
+            message = QStringLiteral("VPN disabled, but runtime cleanup reported: %1")
+                          .arg(failures.join(QStringLiteral(" | ")));
+        }
+
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, enabled, ok, message]() {
+            if (!self)
+                return;
+            emit self->vpnEnableFinished(enabled, ok, message);
+            self->requestVpnStatus();
+        }, Qt::QueuedConnection);
+    });
+    connect(thread, &QThread::finished, thread, &QObject::deleteLater);
+    thread->start();
+}
+
+void NetworkController::setVpnConnectionActive(const QString &uuid, bool active)
+{
+    const QString cleanUuid = uuid.trimmed();
+    if (cleanUuid.isEmpty()) {
+        emit vpnOperationFinished(active ? QStringLiteral("connect") : QStringLiteral("disconnect"),
+                                  false, QStringLiteral("VPN profile UUID is empty"));
+        return;
+    }
+
+    QPointer<NetworkController> self(this);
+    QThread *thread = QThread::create([self, cleanUuid, active]() {
+        if (active && !vpnFeatureEnabledFromConfig()) {
+            const QString msg = QStringLiteral("VPN is disabled. Enable VPN before connecting a profile.");
+            if (!self)
+                return;
+            QMetaObject::invokeMethod(self, [self, msg]() {
+                if (self)
+                    emit self->vpnOperationFinished(QStringLiteral("connect"), false, msg);
+            }, Qt::QueuedConnection);
+            return;
+        }
+
+        QString out, err;
+        const QStringList args = active
+            ? QStringList{QStringLiteral("connection"), QStringLiteral("up"), QStringLiteral("uuid"), cleanUuid}
+            : QStringList{QStringLiteral("connection"), QStringLiteral("down"), QStringLiteral("uuid"), cleanUuid};
+        const bool ok = runProcessBlocking(QStringLiteral("nmcli"), args, &out, &err, 45000);
+        const QString detail = !err.trimmed().isEmpty() ? err.trimmed() : out.trimmed();
+        const QString msg = ok
+            ? (active
+               ? QStringLiteral("VPN connect command completed; verifying tunnel state")
+               : QStringLiteral("VPN disconnect command completed; verifying tunnel state"))
+            : (detail.isEmpty()
+               ? (active ? QStringLiteral("VPN connect command failed") : QStringLiteral("VPN disconnect command failed"))
+               : detail);
+        if (!self)
+            return;
+        QMetaObject::invokeMethod(self, [self, active, ok, msg]() {
+            if (!self)
+                return;
+            emit self->vpnOperationFinished(active ? QStringLiteral("connect") : QStringLiteral("disconnect"), ok, msg);
+            self->requestVpnStatus();
         }, Qt::QueuedConnection);
     });
     connect(thread, &QThread::finished, thread, &QObject::deleteLater);

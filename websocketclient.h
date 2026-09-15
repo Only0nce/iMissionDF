@@ -39,6 +39,7 @@ class WebSocketClient : public QObject {
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
     ~WebSocketClient() override;
+    void shutdown();
 
     int  m_volumePercent = 25;   // 0–100
     int m_lastVolumeBeforeMute = 100;

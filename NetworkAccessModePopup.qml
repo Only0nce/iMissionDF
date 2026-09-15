@@ -9,8 +9,8 @@ Popup {
     focus: true
     closePolicy: Popup.NoAutoClose
 
-    width: 640
-    height: 360
+    width: 720
+    height: 460
     x: parent ? Math.max(10, (parent.width - width) / 2) : 10
     y: parent ? Math.max(10, (parent.height - height) / 3) : 10
 
@@ -39,27 +39,30 @@ Popup {
 
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 24
-        spacing: 16
+        anchors.margins: 28
+        spacing: 14
 
         Text {
             text: "Network Access"
             color: root.textColor
             font.pixelSize: 26
             font.bold: true
+            Layout.fillWidth: true
         }
 
         Text {
             text: "Choose the access level for this Network Settings session"
             color: root.subTextColor
             font.pixelSize: 14
+            wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
 
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 16
+            Layout.minimumHeight: 248
+            spacing: 18
 
             Button {
                 id: viewerButton
@@ -80,37 +83,56 @@ Popup {
                     border.width: 2
                 }
 
-                contentItem: Column {
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
+                contentItem: Item {
+                    implicitWidth: 0
+                    implicitHeight: 0
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 22
+                        spacing: 10
 
                     Text {
                         text: "VIEWER"
                         color: root.viewerColor
                         font.pixelSize: 22
                         font.bold: true
+                        Layout.fillWidth: true
                     }
                     Text {
-                        width: parent.width
                         text: "Limited network access"
                         color: root.textColor
                         font.pixelSize: 17
                         font.bold: true
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                     Text {
-                        width: parent.width
-                        text: "Can modify LAN1, LAN2, WiFi and 5G. LAN3 and LAN4 remain visible but read-only."
+                        text: "Can modify LAN1, LAN2, WiFi and 5G. LAN3/LAN4 and VPN control remain read-only."
                         color: root.subTextColor
                         font.pixelSize: 14
+                        lineHeight: 1.12
                         wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
-                    Item { width: 1; height: 4 }
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 6
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Qt.rgba(1, 1, 1, 0.08)
+                    }
                     Text {
                         text: "Continue without administrator password"
                         color: root.viewerColor
                         font.pixelSize: 13
                         font.bold: true
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                     }
                 }
             }
@@ -134,37 +156,56 @@ Popup {
                     border.width: 2
                 }
 
-                contentItem: Column {
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
+                contentItem: Item {
+                    implicitWidth: 0
+                    implicitHeight: 0
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 22
+                        spacing: 10
 
                     Text {
                         text: "ADMIN"
                         color: root.accentColor
                         font.pixelSize: 22
                         font.bold: true
+                        Layout.fillWidth: true
                     }
                     Text {
-                        width: parent.width
                         text: "Full network access"
                         color: root.textColor
                         font.pixelSize: 17
                         font.bold: true
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
                     Text {
-                        width: parent.width
-                        text: "Can modify LAN1, LAN2, LAN3, LAN4, WiFi and 5G."
+                        text: "Can modify LAN1-LAN4, WiFi, 5G and connect/disconnect VPN profiles."
                         color: root.subTextColor
                         font.pixelSize: 14
+                        lineHeight: 1.12
                         wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
                     }
-                    Item { width: 1; height: 4 }
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        Layout.minimumHeight: 6
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 1
+                        color: Qt.rgba(1, 1, 1, 0.08)
+                    }
                     Text {
                         text: "Administrator password required"
                         color: root.accentColor
                         font.pixelSize: 13
                         font.bold: true
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                    }
                     }
                 }
             }

@@ -12,8 +12,29 @@ LogWatcher::LogWatcher(QObject *parent) : QObject(parent)
             this, &LogWatcher::handleReadyRead);
 }
 
+
+LogWatcher::~LogWatcher()
+{
+    stopWatching();
+}
+
+void LogWatcher::stopWatching()
+{
+    if (!tailProcess || tailProcess->state() == QProcess::NotRunning)
+        return;
+
+    // tail -f is a long-lived child. Stop it explicitly before QObject/QProcess
+    // teardown so Qt never destroys a running process during application exit.
+    tailProcess->terminate();
+    if (!tailProcess->waitForFinished(500)) {
+        tailProcess->kill();
+        tailProcess->waitForFinished(500);
+    }
+}
+
 void LogWatcher::startWatching(const QString &logFile)
 {
+    stopWatching();
     QStringList args = {"-f", logFile};
     tailProcess->start("tail", args);
     qDebug() << "startWatching tails::";

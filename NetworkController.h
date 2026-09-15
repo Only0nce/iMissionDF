@@ -97,6 +97,14 @@ public:
                                      bool autoConnect = true);
     Q_INVOKABLE void disconnectCellular(const QString &connectionName = QStringLiteral("cellular-5g"));
 
+    // ===== VPN =====
+    // NetworkManager-backed read/control path. Profile secrets are never exposed to QML.
+    Q_INVOKABLE QVariantMap vpnStatus();
+    Q_INVOKABLE void requestVpnStatus();
+    Q_INVOKABLE void requestVpnPublicIp();
+    Q_INVOKABLE void setVpnEnabled(bool enabled);
+    Q_INVOKABLE void setVpnConnectionActive(const QString &uuid, bool active);
+
     // ===== NTP =====
     void setNtpServer(const QString &ntpServer);
     void resetNtp();
@@ -122,6 +130,10 @@ signals:
     void wifiOperationFinished(const QString &action, bool ok, const QString &message);
     void cellularOperationFinished(const QString &action, bool ok, const QString &message);
     void cellularRealtimeStatusChanged(const QVariantMap &status);
+    void vpnStatusReady(const QVariantMap &status);
+    void vpnPublicIpReady(bool ok, const QString &publicIp, const QString &message);
+    void vpnEnableFinished(bool enabled, bool ok, const QString &message);
+    void vpnOperationFinished(const QString &action, bool ok, const QString &message);
 
     void lanConfigReady(const QVariantMap &result);
     void lanInterfaceConfigReady(const QString &iface, const QVariantMap &result);

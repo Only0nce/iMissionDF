@@ -80,25 +80,33 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
 
 WebSocketClient::~WebSocketClient()
 {
+    shutdown();
+
+    // These players are created by WebSocketClient in this source tree.
+    // shutdown() has already joined their worker threads; deletion is now
+    // deterministic and cannot race an ALSA write during object teardown.
+    delete hdAudioPlayer;
+    hdAudioPlayer = nullptr;
+    delete sdAudioPlayer;
+    sdAudioPlayer = nullptr;
+}
+
+void WebSocketClient::shutdown()
+{
+    // May be called explicitly before QML/backend destruction and again from
+    // the destructor. Keep it idempotent while always ensuring audio workers
+    // are joined before process teardown continues.
     m_shuttingDown = true;
     m_reconnectTimer.stop();
     resetSQL.stop();
-    if (webSocket.state() != QAbstractSocket::UnconnectedState)
-        webSocket.close();
 
-    // These players are created by WebSocketClient in this source tree.
-    // Stop their QThreads before process teardown so Qt never destroys a
-    // running playback thread.
-    if (hdAudioPlayer) {
+    if (webSocket.state() != QAbstractSocket::UnconnectedState)
+        webSocket.abort();
+
+    if (hdAudioPlayer)
         hdAudioPlayer->stop();
-        delete hdAudioPlayer;
-        hdAudioPlayer = nullptr;
-    }
-    if (sdAudioPlayer) {
+    if (sdAudioPlayer)
         sdAudioPlayer->stop();
-        delete sdAudioPlayer;
-        sdAudioPlayer = nullptr;
-    }
 }
 
 void WebSocketClient::setFftUiActive(bool active)

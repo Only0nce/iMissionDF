@@ -11,8 +11,10 @@ class LogWatcher : public QObject
     Q_OBJECT
 public:
     explicit LogWatcher(QObject *parent = nullptr);
+    ~LogWatcher() override;
 
     void startWatching(const QString &logFile);
+    void stopWatching();
 
 signals:
     void stateChanged(const QString &alsaId, const QString &conn, const QString &state);
