@@ -81,10 +81,6 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
 WebSocketClient::~WebSocketClient()
 {
     shutdown();
-
-    // These players are created by WebSocketClient in this source tree.
-    // shutdown() has already joined their worker threads; deletion is now
-    // deterministic and cannot race an ALSA write during object teardown.
     delete hdAudioPlayer;
     hdAudioPlayer = nullptr;
     delete sdAudioPlayer;
@@ -93,16 +89,11 @@ WebSocketClient::~WebSocketClient()
 
 void WebSocketClient::shutdown()
 {
-    // May be called explicitly before QML/backend destruction and again from
-    // the destructor. Keep it idempotent while always ensuring audio workers
-    // are joined before process teardown continues.
     m_shuttingDown = true;
     m_reconnectTimer.stop();
     resetSQL.stop();
-
     if (webSocket.state() != QAbstractSocket::UnconnectedState)
         webSocket.abort();
-
     if (hdAudioPlayer)
         hdAudioPlayer->stop();
     if (sdAudioPlayer)
@@ -956,6 +947,7 @@ void WebSocketClient::sendFrequency(quint64 freq) {
 Q_INVOKABLE void WebSocketClient::setSpeakerVolumeMute(bool active)
 {
     qDebug() << "setSpeakerVolumeMute::" << active;
+    const bool previousMuted = m_isMuted;
     if (active) {
         // ----- MUTE -----
         if (!m_isMuted) {
@@ -970,6 +962,8 @@ Q_INVOKABLE void WebSocketClient::setSpeakerVolumeMute(bool active)
             m_isMuted = false;
         }
     }
+    if (previousMuted != m_isMuted)
+        qInfo().noquote() << "[AUDIO-MUTE] muted=" << m_isMuted;
     emit mutedChanged(m_isMuted);
 }
 

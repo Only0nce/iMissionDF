@@ -606,7 +606,6 @@ Item {
         onNavigate: function(title, source, index) {
             if (source !== "qrc:/HomeDisplay.qml") {
                 if (loader.depth > 1) loader.pop()
-
                 if (source === "qrc:/Setting.qml") {
                     loader.push(source, {
                                     "networkAccessRole": settingsDrawer.networkAccessRole

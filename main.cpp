@@ -517,10 +517,6 @@ int main(int argc, char *argv[])
 
     const int exitCode = app.exec();
 
-    // Stop AstraRX socket/audio workers before QML, recorder, GPIO and other
-    // backend objects begin teardown. The target crash log showed SIGSEGV while
-    // the audio worker was at AUDIO_WRITE after SIGTERM; joining it here removes
-    // that late-shutdown overlap without changing normal runtime audio behavior.
     qInfo().noquote() << "[SHUTDOWN] stopping AstraRX/audio workers before backend teardown";
     mainWindows.wsClient.shutdown();
 

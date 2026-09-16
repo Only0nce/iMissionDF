@@ -351,6 +351,8 @@ public slots:
     void sendRfAgcEnable(int ch, bool enable);
     void setLinkStatus(bool linkStatus);
     void connectToDFserver(const QString &ip);
+    void reconnectDFserver();
+    void requestServiceEndpointsState();
     void setCompassOffset(double offset);
     void onUpdateNetworkDfDevice(const QString &iface,
                                  const QString &dhcp,

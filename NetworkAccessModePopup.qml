@@ -26,9 +26,7 @@ Popup {
     signal adminSelected()
     signal cancelled()
 
-    function requestSelection() {
-        open()
-    }
+    function requestSelection() { open() }
 
     background: Rectangle {
         radius: 18
@@ -70,11 +68,7 @@ Popup {
                 Layout.fillHeight: true
                 scale: pressed ? 0.975 : 1.0
                 Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
-
-                onClicked: {
-                    root.close()
-                    root.viewerSelected()
-                }
+                onClicked: { root.close(); root.viewerSelected() }
 
                 background: Rectangle {
                     radius: 16
@@ -83,56 +77,28 @@ Popup {
                     border.width: 2
                 }
 
+                // Zero-implicit-size wrapper breaks the Button implicitHeight cycle
+                // while preserving the layout-managed card geometry.
                 contentItem: Item {
                     implicitWidth: 0
                     implicitHeight: 0
-
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 22
                         spacing: 10
-
-                    Text {
-                        text: "VIEWER"
-                        color: root.viewerColor
-                        font.pixelSize: 22
-                        font.bold: true
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "Limited network access"
-                        color: root.textColor
-                        font.pixelSize: 17
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "Can modify LAN1, LAN2, WiFi and 5G. LAN3/LAN4 and VPN control remain read-only."
-                        color: root.subTextColor
-                        font.pixelSize: 14
-                        lineHeight: 1.12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: 6
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: Qt.rgba(1, 1, 1, 0.08)
-                    }
-                    Text {
-                        text: "Continue without administrator password"
-                        color: root.viewerColor
-                        font.pixelSize: 13
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
+                        Text { text: "VIEWER"; color: root.viewerColor; font.pixelSize: 22; font.bold: true; Layout.fillWidth: true }
+                        Text { text: "Limited network access"; color: root.textColor; font.pixelSize: 17; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text {
+                            text: "Can modify LAN1, LAN2, Service Endpoints, WiFi and 5G. LAN3/LAN4 and VPN control remain read-only."
+                            color: root.subTextColor
+                            font.pixelSize: 14
+                            lineHeight: 1.12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Item { Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 6 }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Qt.rgba(1, 1, 1, 0.08) }
+                        Text { text: "Continue without administrator password"; color: root.viewerColor; font.pixelSize: 13; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
             }
@@ -143,11 +109,7 @@ Popup {
                 Layout.fillHeight: true
                 scale: pressed ? 0.975 : 1.0
                 Behavior on scale { NumberAnimation { duration: 100; easing.type: Easing.OutCubic } }
-
-                onClicked: {
-                    root.close()
-                    root.adminSelected()
-                }
+                onClicked: { root.close(); root.adminSelected() }
 
                 background: Rectangle {
                     radius: 16
@@ -159,53 +121,23 @@ Popup {
                 contentItem: Item {
                     implicitWidth: 0
                     implicitHeight: 0
-
                     ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 22
                         spacing: 10
-
-                    Text {
-                        text: "ADMIN"
-                        color: root.accentColor
-                        font.pixelSize: 22
-                        font.bold: true
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "Full network access"
-                        color: root.textColor
-                        font.pixelSize: 17
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Text {
-                        text: "Can modify LAN1-LAN4, WiFi, 5G and connect/disconnect VPN profiles."
-                        color: root.subTextColor
-                        font.pixelSize: 14
-                        lineHeight: 1.12
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
-                    Item {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        Layout.minimumHeight: 6
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 1
-                        color: Qt.rgba(1, 1, 1, 0.08)
-                    }
-                    Text {
-                        text: "Administrator password required"
-                        color: root.accentColor
-                        font.pixelSize: 13
-                        font.bold: true
-                        wrapMode: Text.WordWrap
-                        Layout.fillWidth: true
-                    }
+                        Text { text: "ADMIN"; color: root.accentColor; font.pixelSize: 22; font.bold: true; Layout.fillWidth: true }
+                        Text { text: "Full network access"; color: root.textColor; font.pixelSize: 17; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
+                        Text {
+                            text: "Can modify LAN1-LAN4, Service Endpoints, WiFi, 5G and connect/disconnect VPN profiles."
+                            color: root.subTextColor
+                            font.pixelSize: 14
+                            lineHeight: 1.12
+                            wrapMode: Text.WordWrap
+                            Layout.fillWidth: true
+                        }
+                        Item { Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 6 }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Qt.rgba(1, 1, 1, 0.08) }
+                        Text { text: "Administrator password required"; color: root.accentColor; font.pixelSize: 13; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
             }
@@ -219,25 +151,9 @@ Popup {
             Layout.preferredHeight: 42
             scale: pressed ? 0.96 : 1.0
             Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
-
-            background: Rectangle {
-                radius: 10
-                color: cancelButton.pressed ? "#26384b" : "#1a2a3b"
-                border.color: root.borderColor
-            }
-
-            contentItem: Text {
-                text: cancelButton.text
-                color: root.textColor
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                font.bold: true
-            }
-
-            onClicked: {
-                root.close()
-                root.cancelled()
-            }
+            background: Rectangle { radius: 10; color: cancelButton.pressed ? "#26384b" : "#1a2a3b"; border.color: root.borderColor }
+            contentItem: Text { text: cancelButton.text; color: root.textColor; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true }
+            onClicked: { root.close(); root.cancelled() }
         }
     }
 }

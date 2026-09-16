@@ -210,15 +210,11 @@ Item {
     property string wifi5gSourceUrl: "qrc:/Setting.qml"
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
 
-    // NET-AUTH1: Network Settings is protected at page entry, not per Apply.
-    // Keep the pending navigation local to this drawer so Cancel/wrong password
-    // never changes the current page or toolbar selection.
+    // NET-AUTH2.2: choose Network Settings access level before entering the page.
+    // Viewer may edit LAN1 + LAN2 + Endpoints + WiFi + 5G; Admin gets full LAN1-LAN4 access.
     property int pendingProtectedNavigationIndex: -1
     property string pendingProtectedNavigationTitle: ""
     property string pendingProtectedNavigationSource: ""
-
-    // NET-AUTH2: Access level is chosen once when entering Network Settings.
-    // Viewer may edit LAN1 + LAN2 + WiFi + 5G; Admin gets full LAN1-LAN4 access.
     property string networkAccessRole: "viewer"
 
     function clearPendingProtectedNavigation() {
@@ -265,11 +261,8 @@ Item {
         if (km && enteringMap) {
             if (typeof Krakenmapval.sendSetSpectrumEnable === "function")
                 Krakenmapval.sendSetSpectrumEnable(false)
-
             if (typeof Krakenmapval.requestRfFrequency === "function")
                 Krakenmapval.requestRfFrequency()
-
-            // Do not auto-reload SideLogsFile when returning to QMLMap.qml.
         }
     }
 
@@ -285,7 +278,6 @@ Item {
 
     function requestToolbarNavigation(index, title, source) {
         if (source !== settingsPanel.wifi5gSourceUrl) {
-            // Do not carry an administrator session across page exits.
             if (toolbar.currentIndex >= 0
                     && toolbar.currentIndex < toolbar.pages.length
                     && toolbar.pages[toolbar.currentIndex].source === settingsPanel.wifi5gSourceUrl) {
@@ -295,7 +287,6 @@ Item {
             return
         }
 
-        // Already on the Network Settings page: do not reopen the access selector.
         if (toolbar.currentIndex === index)
             return
 
@@ -307,11 +298,8 @@ Item {
 
     SharedComponents.NetworkAccessModePopup {
         id: networkAccessModePopup
-
         onViewerSelected: settingsPanel.completeProtectedNetworkNavigation("viewer")
-
         onAdminSelected: networkEntryPasswordPopup.requestUnlock()
-
         onCancelled: settingsPanel.clearPendingProtectedNavigation()
     }
 
@@ -320,9 +308,7 @@ Item {
         titleText: "Administrator Access"
         messageText: "Enter the administrator password for full Network Settings access"
         unlockButtonText: "Enter as Admin"
-
         onAuthorized: settingsPanel.completeProtectedNetworkNavigation("admin")
-
         onCancelled: settingsPanel.clearPendingProtectedNavigation()
     }
 

@@ -1514,8 +1514,13 @@ Drawer {
                                 }
 
                                 onClicked: {
-                                    if (krakenmapval && typeof krakenmapval.connectToserverKraken === "function")
-                                        krakenmapval.connectToserverKraken(serverField.text)
+                                    if (!krakenmapval) return
+                                    // Service Endpoints uses the live DF-server reconnect path.
+                                    // connectToserverKraken() is legacy/commented in the current C++ backend.
+                                    if (typeof krakenmapval.reconnectDFserver === "function")
+                                        krakenmapval.reconnectDFserver()
+                                    else if (typeof krakenmapval.connectToDFserver === "function")
+                                        krakenmapval.connectToDFserver(serverField.text)
                                 }
                             }
                         }

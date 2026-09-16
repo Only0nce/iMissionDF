@@ -125,9 +125,12 @@ public:
     Q_INVOKABLE QString start_mod() const { return wsClient.rxconfig.start_mod; }
 
     // Replayable SQL state for QML. QML reads the current value when the
-    // page is created, then follows sqlActiveChanged(bool) for live updates.
-    // This avoids Q_PROPERTY accessor parsing issues on older Qt5 moc tools.
+    // State replay helpers for QML pages created after backend transitions.
+    // SQL and recorder state are intentionally separate: SQL is an RF condition,
+    // while recorder state comes from the alsarecd LogWatcher.
     Q_INVOKABLE bool getSqlActive() const;
+    Q_INVOKABLE bool getRecActive() const;
+    Q_INVOKABLE QString getRecorderState() const;
 
     Q_INVOKABLE QVariantList getWaterfallColorMap() const {
         QVariantList list;

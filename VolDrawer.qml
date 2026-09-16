@@ -271,7 +271,8 @@ Item {
                 slider.value: inivalue
                 progressBar.value: slider.value
                 progressBar.onValueChanged: {
-                    mute = false
+                    // MUTE-STATE1: presentation only. `mute` is externally
+                    // bound to HomeDisplay.scanMuteOn and must never be assigned here.
                 }
                 levelmin: 50
                 levelmax: 255

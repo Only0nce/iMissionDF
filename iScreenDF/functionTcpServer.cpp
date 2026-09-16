@@ -388,6 +388,7 @@ void iScreenDF::connectToDFserver(const QString &ip)
     p->m_ipdfServer = ip;
 
     queueUpdateParameterField(db, "ipdfserver", p->m_ipdfServer);
+    emit updateServeripDfserver(p->m_ipdfServer);
 
     qDebug() << "[iScreenDF] connectToDFserver" << p->m_ipdfServer;
     localDFclient->connectToServer(p->m_ipdfServer, 5555);
@@ -396,6 +397,42 @@ void iScreenDF::connectToDFserver(const QString &ip)
         gpsReader->setGpsdEndpoint(p->m_ipdfServer, 2947);
         gpsReader->start();
     }
+}
+
+void iScreenDF::reconnectDFserver()
+{
+    if (m_parameter.isEmpty() || !m_parameter.first() || !localDFclient) {
+        qWarning() << "[ServiceEndpoints] reconnectDFserver: endpoint state not ready";
+        return;
+    }
+
+    const QString host = m_parameter.first()->m_ipdfServer.trimmed();
+    if (host.isEmpty()) {
+        qWarning() << "[ServiceEndpoints] reconnectDFserver: saved DF Server IP is empty";
+        return;
+    }
+
+    qInfo() << "[ServiceEndpoints] reconnect DF Server" << host << 5555;
+    localDFclient->connectToServer(host, 5555);
+
+    if (gpsReader) {
+        gpsReader->setGpsdEndpoint(host, 2947);
+        gpsReader->start();
+    }
+
+    emit updateServeripDfserver(host);
+}
+
+void iScreenDF::requestServiceEndpointsState()
+{
+    if (m_parameter.isEmpty() || !m_parameter.first()) {
+        qWarning() << "[ServiceEndpoints] request state: parameter object not ready";
+        return;
+    }
+
+    const Parameter *p = m_parameter.first();
+    emit updateServeripDfserver(p->m_ipdfServer);
+    emit updateGlobalOffsets(p->m_offset_value, p->m_compass_offset);
 }
 
 void iScreenDF::applyRfsocParameterToServer(bool needAck)

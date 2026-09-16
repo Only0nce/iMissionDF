@@ -52,32 +52,16 @@ Item {
     }
 
 
-    // R15 single mute owner restored. Child drawers only request a toggle;
-    // this function preserves the existing mute + squelch behavior exactly once.
+    // R20.4 RADIO UX1.4: mute is playback-only. SQL/squelch and recorder
+    // policy are independent and must not change when the operator mutes audio.
     function toggleVolumeMute() {
         var nextMute = !scanMuteOn
-        if (!nextMute) {
-            wsClient.setSpeakerVolumeMute(0)
-            mainWindows.setSqlLevel(0)
-            mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((0-255)/2).toFixed(1)+'}}')
-            currentSqlLevel = (0-255)/2
-            mainWindows.setSqlOffManual()
-        } else {
-            wsClient.setSpeakerVolumeMute(1)
-            mainWindows.setSqlLevel(scanSqlLevel)
-            mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
-            currentSqlLevel = (scanSqlLevel-255)/2
-            mainWindows.setSqlOffManual()
-        }
+        console.log("[AUDIO-MUTE-UX] toggle playback mute =", nextMute)
+        wsClient.setSpeakerVolumeMute(nextMute)
     }
 
-    Connections {
-        target: wsClient
-        function onMutedChanged(m) {
-            scanMuteOn = m
-        }
-    }
-
+    // MUTE-STATE1: HomeDisplay owns backend mute readback. This drawer only
+    // sends toggle requests and consumes the parent-provided scanMuteOn binding.
 
     Rectangle {
         anchors.fill: parent
@@ -161,12 +145,14 @@ Item {
             }
             audioCtrlLevel.slider2.onMoved: {
                 if (root_drawerItem.itemShow !== 5) return
+                unmuteFromUserVolumeAdjustment()
                 console.log("audioCtrl>>",scanAudioLevel)
                 scanAudioLevel = audioCtrlLevel.slider2.value
                 closeDrawerTimer.restart()
             }
             volumeCtrlLevel.slider.onMoved: {
                 if (root_drawerItem.itemShow !== 5) return
+                unmuteFromUserVolumeAdjustment()
                 console.log("audioCtrl>>",scanVolLevel)
                 scanVolLevel = volumeCtrlLevel.slider.value
                 closeDrawerTimer.restart()
@@ -198,12 +184,14 @@ Item {
             }
             audioCtrlLevel.slider2.onMoved: {
                 if (root_drawerItem.itemShow !== 1) return
+                unmuteFromUserVolumeAdjustment()
                 console.log("audioCtrl>>",scanAudioLevel)
                 scanAudioLevel = audioCtrlLevel.slider2.value
                 closeDrawerTimer.restart()
             }
             volumeCtrlLevel.slider.onMoved: {
                 if (root_drawerItem.itemShow !== 1) return
+                unmuteFromUserVolumeAdjustment()
                 console.log("audioCtrl>>",scanVolLevel)
                 scanVolLevel = volumeCtrlLevel.slider.value
                 closeDrawerTimer.restart()

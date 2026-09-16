@@ -98,7 +98,6 @@ public:
     Q_INVOKABLE void disconnectCellular(const QString &connectionName = QStringLiteral("cellular-5g"));
 
     // ===== VPN =====
-    // NetworkManager-backed read/control path. Profile secrets are never exposed to QML.
     Q_INVOKABLE QVariantMap vpnStatus();
     Q_INVOKABLE void requestVpnStatus();
     Q_INVOKABLE void requestVpnPublicIp();

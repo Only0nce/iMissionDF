@@ -16,15 +16,12 @@ Item {
     property string activeType: ""
     property string activeDevice: ""
     property string activeIpv4: ""
-
     property string publicIp: "—"
     property bool publicIpLoading: false
     property string publicIpMessage: ""
-
     property string selectedUuid: ""
     property string selectedName: ""
     property string selectedType: ""
-
     property string message: "Press Refresh to load VPN status"
     property bool busy: false
     property bool statusRequestInFlight: false
@@ -51,10 +48,7 @@ Item {
         property color info: "#38bdf8"
     }
 
-    function normalizedType(typeText) {
-        return String(typeText).toLowerCase() === "wireguard" ? "WireGuard" : "VPN"
-    }
-
+    function normalizedType(typeText) { return String(typeText).toLowerCase() === "wireguard" ? "WireGuard" : "VPN" }
     function stateLabel() {
         if (!vpnEnabled && runtimeState === "disconnected") return "DISABLED"
         if (runtimeState === "connecting") return "CONNECTING"
@@ -63,7 +57,6 @@ Item {
         if (runtimeState === "failed") return "FAILED"
         return "DISCONNECTED"
     }
-
     function stateColor() {
         if (!vpnEnabled && runtimeState === "disconnected") return c.muted
         if (runtimeState === "connected") return c.accent
@@ -71,295 +64,136 @@ Item {
         if (runtimeState === "failed") return c.danger
         return c.warning
     }
-
     function profileByUuid(uuid) {
         var wanted = String(uuid || "")
-        for (var i = 0; i < vpnProfiles.length; ++i) {
-            if (String(vpnProfiles[i].uuid || "") === wanted)
-                return vpnProfiles[i]
-        }
+        for (var i = 0; i < vpnProfiles.length; ++i)
+            if (String(vpnProfiles[i].uuid || "") === wanted) return vpnProfiles[i]
         return null
     }
-
     function selectProfile(profile) {
-        if (!profile)
-            return
+        if (!profile) return
         selectedUuid = String(profile.uuid || "")
         selectedName = String(profile.name || "Unnamed VPN")
         selectedType = String(profile.type || "vpn")
     }
-
     function ensureSelection() {
         var current = profileByUuid(selectedUuid)
-        if (current) {
-            selectedName = String(current.name || "Unnamed VPN")
-            selectedType = String(current.type || "vpn")
-            return
-        }
-
+        if (current) { selectProfile(current); return }
         var active = profileByUuid(activeUuid)
-        if (active) {
-            selectProfile(active)
-            return
-        }
-
-        if (vpnProfiles.length > 0) {
-            selectProfile(vpnProfiles[0])
-            return
-        }
-
-        selectedUuid = ""
-        selectedName = ""
-        selectedType = ""
+        if (active) { selectProfile(active); return }
+        if (vpnProfiles.length > 0) { selectProfile(vpnProfiles[0]); return }
+        selectedUuid = ""; selectedName = ""; selectedType = ""
     }
-
     function selectedProfileIsActive() {
-        var profile = profileByUuid(selectedUuid)
-        return profile ? profile.active === true : false
+        var p = profileByUuid(selectedUuid)
+        return p ? p.active === true : false
     }
-
-    function refreshVpn(showBusyMessage) {
-        if (statusRequestInFlight)
-            return
+    function refreshVpn(showMessage) {
+        if (statusRequestInFlight) return
         statusRequestInFlight = true
-        if (showBusyMessage === true)
-            message = "Refreshing VPN runtime state..."
+        if (showMessage === true) message = "Refreshing VPN runtime state..."
         NetworkController.requestVpnStatus()
     }
-
     function refreshPublicIp() {
-        if (publicIpLoading)
-            return
+        if (publicIpLoading) return
         publicIpLoading = true
         publicIpMessage = "Detecting public IP..."
         NetworkController.requestVpnPublicIp()
     }
-
-    function refreshAll() {
-        refreshVpn(true)
-        refreshPublicIp()
-    }
-
+    function refreshAll() { refreshVpn(true); refreshPublicIp() }
     function openVpnConfirmation(profile, targetActive) {
-        if (!adminMode || busy || enableChangeInFlight || !profile)
-            return
-        if (targetActive && !vpnEnabled) {
-            requestToast("Enable VPN before connecting a profile")
-            return
-        }
+        if (!adminMode || busy || enableChangeInFlight || !profile) return
+        if (targetActive && !vpnEnabled) { requestToast("Enable VPN before connecting a profile"); return }
         pendingUuid = String(profile.uuid || "")
         pendingName = String(profile.name || "Unnamed VPN")
         pendingTargetActive = targetActive
-        if (pendingUuid.length > 0)
-            vpnConfirmDialog.open()
+        if (pendingUuid.length > 0) vpnConfirmDialog.open()
     }
-
     function executePendingVpnAction() {
-        if (pendingUuid.length === 0)
-            return
+        if (pendingUuid.length === 0) return
         busy = true
         runtimeState = pendingTargetActive ? "connecting" : "disconnecting"
-        message = pendingTargetActive
-                ? "Connecting " + pendingName + "..."
-                : "Disconnecting " + pendingName + "..."
+        message = pendingTargetActive ? "Connecting " + pendingName + "..." : "Disconnecting " + pendingName + "..."
         NetworkController.setVpnConnectionActive(pendingUuid, pendingTargetActive)
     }
-
-    function connectSelectedProfile() {
-        var profile = profileByUuid(selectedUuid)
-        if (!profile)
-            return
-        openVpnConfirmation(profile, true)
-    }
-
+    function connectSelectedProfile() { var p = profileByUuid(selectedUuid); if (p) openVpnConfirmation(p, true) }
     function disconnectActiveProfile() {
-        var profile = profileByUuid(activeUuid)
-        if (!profile && activeUuid.length > 0) {
-            profile = { "uuid": activeUuid,
-                        "name": activeName.length > 0 ? activeName : "Active VPN" }
-        }
-        if (profile)
-            openVpnConfirmation(profile, false)
+        var p = profileByUuid(activeUuid)
+        if (!p && activeUuid.length > 0) p = {"uuid": activeUuid, "name": activeName.length > 0 ? activeName : "Active VPN"}
+        if (p) openVpnConfirmation(p, false)
     }
-
     function executeEnableChange(targetEnabled) {
-        if (!adminMode || busy || enableChangeInFlight)
-            return
-        busy = true
-        enableChangeInFlight = true
+        if (!adminMode || busy || enableChangeInFlight) return
+        busy = true; enableChangeInFlight = true
         message = targetEnabled ? "Enabling VPN..." : "Disabling VPN and disconnecting active tunnels..."
         NetworkController.setVpnEnabled(targetEnabled)
     }
-
     function requestEnableToggle() {
-        if (!adminMode || busy || enableChangeInFlight)
-            return
-        if (vpnEnabled) {
-            disableVpnDialog.open()
-        } else {
-            executeEnableChange(true)
-        }
+        if (!adminMode || busy || enableChangeInFlight) return
+        if (vpnEnabled) disableVpnDialog.open(); else executeEnableChange(true)
     }
+
+    // No startup timer/polling here. Setting.qml calls refreshAll() once on the
+    // first VPN tab entry per Network Settings session. Later refresh is manual.
 
     Connections {
         target: NetworkController
-
         function onVpnStatusReady(status) {
             statusRequestInFlight = false
             vpnProfiles = status.profiles || []
             activeProfiles = status.activeProfiles || []
             vpnEnabled = status.enabled !== false
-
             if (status.ok === false) {
-                busy = false
-                enableChangeInFlight = false
-                runtimeState = "failed"
-                message = status.message || "Unable to read VPN state"
-                ensureSelection()
-                return
+                busy = false; enableChangeInFlight = false; runtimeState = "failed"
+                message = status.message || "Unable to read VPN state"; ensureSelection(); return
             }
-
-            activeName = status.activeName || ""
-            activeUuid = status.activeUuid || ""
-            activeType = status.activeType || ""
-            activeDevice = status.activeDevice || ""
-            activeIpv4 = status.activeIpv4 || ""
-
-            // NetworkManager readback is authoritative. It completes connect,
-            // disconnect and enable/disable transactions instead of trusting
-            // command exit status alone.
+            activeName = status.activeName || ""; activeUuid = status.activeUuid || ""; activeType = status.activeType || ""
+            activeDevice = status.activeDevice || ""; activeIpv4 = status.activeIpv4 || ""
             runtimeState = status.active === true ? "connected" : "disconnected"
-            busy = false
-            enableChangeInFlight = false
-            message = status.message || "VPN state synchronized"
-            ensureSelection()
-
+            busy = false; enableChangeInFlight = false; message = status.message || "VPN state synchronized"; ensureSelection()
         }
-
         function onVpnOperationFinished(action, ok, text) {
             message = text
-            if (!ok) {
-                busy = false
-                runtimeState = "failed"
-                requestToast(text)
-            }
-            // On success the backend immediately launches authoritative readback.
+            if (!ok) { busy = false; runtimeState = "failed"; requestToast(text) }
         }
-
         function onVpnEnableFinished(enabled, ok, text) {
             message = text
-            if (!ok) {
-                busy = false
-                enableChangeInFlight = false
-                requestToast(text)
-                return
-            }
+            if (!ok) { busy = false; enableChangeInFlight = false; requestToast(text); return }
             vpnEnabled = enabled
-            // Backend follows with authoritative VPN readback.
         }
-
         function onVpnPublicIpReady(ok, ip, text) {
-            publicIpLoading = false
-            publicIpMessage = text || ""
+            publicIpLoading = false; publicIpMessage = text || ""
             publicIp = ok && String(ip).length > 0 ? String(ip) : "Unavailable"
         }
     }
 
     Rectangle {
         id: summaryCard
-        x: 28
-        y: 24
-        width: parent.width - 56
-        height: 246
-        radius: 16
-        color: c.panel
-        border.color: c.border
+        x: 28; y: 24; width: parent.width - 56; height: 246; radius: 16
+        color: c.panel; border.color: c.border
+        Text { x: 22; y: 15; text: "VPN Control"; color: c.text; font.pixelSize: 24; font.bold: true }
+        Text { x: 22; y: 45; text: adminMode ? "ADMIN · runtime control enabled" : "VIEWER · status only"; color: adminMode ? c.accent : c.sub; font.pixelSize: 12; font.bold: true }
 
-        Text {
-            x: 22
-            y: 15
-            text: "VPN Control"
-            color: c.text
-            font.pixelSize: 24
-            font.bold: true
-        }
-
-        Text {
-            x: 22
-            y: 45
-            text: adminMode ? "ADMIN · runtime control enabled" : "VIEWER · status only"
-            color: adminMode ? c.accent : c.sub
-            font.pixelSize: 12
-            font.bold: true
-        }
-
-        // Row 1: the information the operator needs before taking an action.
         Row {
             id: primaryInfoRow
-            x: 22
-            y: 72
-            width: parent.width - 44
-            height: 62
-            spacing: 12
-
-            Rectangle {
-                width: (primaryInfoRow.width - 36) / 4
-                height: parent.height
-                radius: 10
-                color: c.field
-                border.color: c.borderSoft
-                Text { x: 12; y: 8; text: "PUBLIC IP"; color: c.sub; font.pixelSize: 10; font.bold: true }
-                Text {
-                    x: 12; y: 27; width: parent.width - 24
-                    text: publicIpLoading ? "Detecting..." : publicIp
-                    color: publicIp === "Unavailable" ? c.warning : c.text
-                    font.pixelSize: 17; font.bold: true; elide: Text.ElideRight
-                }
-            }
-
-            Rectangle {
-                width: (primaryInfoRow.width - 36) / 4
-                height: parent.height
-                radius: 10
-                color: c.field
-                border.color: c.borderSoft
-                Rectangle { x: 12; y: 29; width: 10; height: 10; radius: 5; color: stateColor() }
-                Text { x: 12; y: 8; text: "STATUS"; color: c.sub; font.pixelSize: 10; font.bold: true }
-                Text { x: 30; y: 24; text: stateLabel(); color: stateColor(); font.pixelSize: 16; font.bold: true }
-            }
-
-            Rectangle {
-                width: (primaryInfoRow.width - 36) / 4
-                height: parent.height
-                radius: 10
-                color: c.field
-                border.color: vpnEnabled ? c.accent : c.borderSoft
-                Text { x: 12; y: 8; text: "VPN ENABLE"; color: c.sub; font.pixelSize: 10; font.bold: true }
-                Text {
-                    x: 12; y: 27
-                    text: vpnEnabled ? "ENABLED" : "DISABLED"
-                    color: vpnEnabled ? c.accent : c.muted
-                    font.pixelSize: 17; font.bold: true
-                }
-            }
-
-            Rectangle {
-                width: (primaryInfoRow.width - 36) / 4
-                height: parent.height
-                radius: 10
-                color: c.field
-                border.color: selectedUuid.length > 0 ? c.info : c.borderSoft
-                Text { x: 12; y: 8; text: "SELECTED PROFILE"; color: c.sub; font.pixelSize: 10; font.bold: true }
-                Text {
-                    x: 12; y: 27; width: parent.width - 24
-                    text: selectedName.length > 0 ? selectedName : "None selected"
-                    color: c.text; font.pixelSize: 16; font.bold: true; elide: Text.ElideRight
+            x: 22; y: 72; width: parent.width - 44; height: 62; spacing: 12
+            Repeater {
+                model: [
+                    {title:"PUBLIC IP", value: publicIpLoading ? "Detecting..." : publicIp, kind:"public"},
+                    {title:"STATUS", value: stateLabel(), kind:"status"},
+                    {title:"VPN ENABLE", value: vpnEnabled ? "ENABLED" : "DISABLED", kind:"enable"},
+                    {title:"SELECTED PROFILE", value: selectedName.length > 0 ? selectedName : "None selected", kind:"profile"}
+                ]
+                Rectangle {
+                    width: (primaryInfoRow.width - 36) / 4; height: parent.height; radius: 10; color: c.field
+                    border.color: modelData.kind === "profile" && selectedUuid.length > 0 ? c.info : modelData.kind === "enable" && vpnEnabled ? c.accent : c.borderSoft
+                    Text { x: 12; y: 8; text: modelData.title; color: c.sub; font.pixelSize: 10; font.bold: true }
+                    Text { x: 12; y: 27; width: parent.width - 24; text: modelData.value; color: modelData.kind === "status" ? stateColor() : modelData.kind === "enable" ? (vpnEnabled ? c.accent : c.muted) : c.text; font.pixelSize: 16; font.bold: true; elide: Text.ElideRight }
                 }
             }
         }
 
         Row {
-            id: secondaryInfoRow
             x: 22
             y: 143
             spacing: 32
@@ -367,23 +201,27 @@ Item {
             Column {
                 spacing: 2
                 Text { text: "ACTIVE PROFILE"; color: c.sub; font.pixelSize: 10; font.bold: true }
-                Text { text: activeName.length > 0 ? activeName : "—"; color: c.text; font.pixelSize: 13; elide: Text.ElideRight; width: 190 }
+                Text { text: activeName.length > 0 ? activeName : "—"; color: c.text; font.pixelSize: 13; width: 190; elide: Text.ElideRight }
             }
+
             Column {
                 spacing: 2
                 Text { text: "TYPE"; color: c.sub; font.pixelSize: 10; font.bold: true }
                 Text { text: activeType.length > 0 ? normalizedType(activeType) : "—"; color: c.text; font.pixelSize: 13 }
             }
+
             Column {
                 spacing: 2
                 Text { text: "INTERFACE"; color: c.sub; font.pixelSize: 10; font.bold: true }
                 Text { text: activeDevice.length > 0 ? activeDevice : "—"; color: c.text; font.pixelSize: 13 }
             }
+
             Column {
                 spacing: 2
                 Text { text: "TUNNEL IPv4"; color: c.sub; font.pixelSize: 10; font.bold: true }
                 Text { text: activeIpv4.length > 0 ? activeIpv4 : "—"; color: c.text; font.pixelSize: 13 }
             }
+
             Column {
                 spacing: 2
                 Text { text: "ACTIVE TUNNELS"; color: c.sub; font.pixelSize: 10; font.bold: true }
@@ -404,7 +242,7 @@ Item {
                 text: vpnEnabled ? "Disable VPN" : "Enable VPN"
                 enabled: adminMode && !busy && !enableChangeInFlight
                 scale: pressed ? 0.96 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 90 } }
                 onClicked: requestEnableToggle()
                 contentItem: Text {
                     text: parent.text
@@ -427,7 +265,7 @@ Item {
                 text: (statusRequestInFlight || publicIpLoading) ? "Refreshing..." : "Refresh"
                 enabled: !statusRequestInFlight && !publicIpLoading && !busy
                 scale: pressed ? 0.96 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 90 } }
                 onClicked: refreshAll()
                 contentItem: Text {
                     text: parent.text
@@ -451,7 +289,7 @@ Item {
                 enabled: adminMode && vpnEnabled && selectedUuid.length > 0 &&
                          !selectedProfileIsActive() && !busy && !statusRequestInFlight
                 scale: pressed ? 0.96 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 90 } }
                 onClicked: connectSelectedProfile()
                 contentItem: Text {
                     text: parent.text
@@ -474,7 +312,7 @@ Item {
                 text: "Disconnect"
                 enabled: adminMode && activeUuid.length > 0 && !busy && !statusRequestInFlight
                 scale: pressed ? 0.96 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                Behavior on scale { NumberAnimation { duration: 90 } }
                 onClicked: disconnectActiveProfile()
                 contentItem: Text {
                     text: parent.text
@@ -490,114 +328,27 @@ Item {
                 }
             }
         }
-
-        Text {
-            anchors.right: parent.right
-            anchors.rightMargin: 22
-            y: 202
-            width: parent.width - controlRow.x - controlRow.width - 58
-            text: publicIpLoading ? "Checking external address..." : publicIpMessage
-            color: c.sub
-            font.pixelSize: 11
-            horizontalAlignment: Text.AlignRight
-            elide: Text.ElideRight
-        }
+        Text { anchors.right: parent.right; anchors.rightMargin:22; y:202; width:parent.width-controlRow.x-controlRow.width-58; text:publicIpLoading?"Checking external address...":publicIpMessage; color:c.sub; font.pixelSize:11; horizontalAlignment:Text.AlignRight; elide:Text.ElideRight }
     }
 
-    Text {
-        x: 30
-        y: 292
-        text: "VPN Profiles"
-        color: c.text
-        font.pixelSize: 22
-        font.bold: true
-    }
-
-    Text {
-        x: 30
-        y: 323
-        text: "Select a NetworkManager VPN / WireGuard profile, then use the controls above"
-        color: c.sub
-        font.pixelSize: 14
-    }
+    Text { x:30; y:292; text:"VPN Profiles"; color:c.text; font.pixelSize:22; font.bold:true }
+    Text { x:30; y:323; text:"Select a NetworkManager VPN / WireGuard profile, then use the controls above"; color:c.sub; font.pixelSize:14 }
 
     Flickable {
-        id: listArea
-        x: 28
-        y: 356
-        width: parent.width - 56
-        height: parent.height - y - 64
-        contentWidth: width
-        contentHeight: Math.max(height, profileColumn.height + 8)
-        clip: true
-
+        x:28; y:356; width:parent.width-56; height:parent.height-y-64; contentWidth:width; contentHeight:Math.max(height, profileColumn.height+8); clip:true
         Column {
-            id: profileColumn
-            width: parent.width
-            spacing: 12
-
+            id: profileColumn; width:parent.width; spacing:12
             Repeater {
-                model: vpnProfiles
-
+                model:vpnProfiles
                 Rectangle {
-                    id: profileCard
-                    width: profileColumn.width
-                    height: 94
-                    radius: 14
-                    color: c.card
-                    border.color: String(modelData.uuid || "") === root.selectedUuid
-                                  ? c.info : (modelData.active ? c.accent : c.border)
-                    border.width: String(modelData.uuid || "") === root.selectedUuid || modelData.active ? 2 : 1
-
-                    MouseArea {
-                        anchors.fill: parent
-                        onClicked: root.selectProfile(modelData)
-                    }
-
-                    Rectangle {
-                        x: 18
-                        y: 25
-                        width: 12
-                        height: 12
-                        radius: 6
-                        color: modelData.active ? c.accent : "#64748b"
-                    }
-
-                    Text {
-                        x: 44
-                        y: 13
-                        width: parent.width - 300
-                        text: modelData.name || "Unnamed VPN"
-                        color: c.text
-                        font.pixelSize: 18
-                        font.bold: true
-                        elide: Text.ElideRight
-                    }
-
-                    Text {
-                        x: 44
-                        y: 42
-                        width: parent.width - 300
-                        text: normalizedType(modelData.type) +
-                              (modelData.device ? " · " + modelData.device : "") +
-                              (modelData.ipv4 ? " · " + modelData.ipv4 : "")
-                        color: c.sub
-                        font.pixelSize: 13
-                        elide: Text.ElideRight
-                    }
-
-                    Text {
-                        x: 44
-                        y: 67
-                        width: parent.width - 300
-                        text: (modelData.active ? "CONNECTED" : "AVAILABLE") +
-                              " · UUID " + String(modelData.uuid || "")
-                        color: modelData.active ? c.accent : "#68798c"
-                        font.pixelSize: 10
-                        font.bold: modelData.active
-                        elide: Text.ElideMiddle
-                    }
-
+                    width:profileColumn.width; height:94; radius:14; color:c.card
+                    border.color:String(modelData.uuid||"")===root.selectedUuid?c.info:(modelData.active?c.accent:c.border)
+                    border.width:String(modelData.uuid||"")===root.selectedUuid||modelData.active?2:1
+                    MouseArea { anchors.fill:parent; onClicked:root.selectProfile(modelData) }
+                    Rectangle { x:18; y:25; width:12; height:12; radius:6; color:modelData.active?c.accent:"#64748b" }
+                    Text { x:44; y:13; width:parent.width-300; text:modelData.name||"Unnamed VPN"; color:c.text; font.pixelSize:18; font.bold:true; elide:Text.ElideRight }
+                    Text { x:44; y:42; width:parent.width-300; text:normalizedType(modelData.type)+(modelData.device?" · "+modelData.device:"")+(modelData.ipv4?" · "+modelData.ipv4:""); color:c.sub; font.pixelSize:13; elide:Text.ElideRight }
+                    Text { x:44; y:67; width:parent.width-300; text:(modelData.active?"CONNECTED":"AVAILABLE")+" · UUID "+String(modelData.uuid||""); color:modelData.active?c.accent:"#68798c"; font.pixelSize:10; font.bold:modelData.active; elide:Text.ElideMiddle }
                     Button {
                         id: selectButton
                         width: 150
@@ -607,9 +358,12 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         text: String(modelData.uuid || "") === root.selectedUuid ? "Selected" : "Select"
                         enabled: !root.busy && !root.statusRequestInFlight
-                        scale: pressed ? 0.96 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: root.selectProfile(modelData)
+                        background: Rectangle {
+                            radius: 10
+                            color: c.field
+                            border.color: String(modelData.uuid || "") === root.selectedUuid ? c.info : c.border
+                        }
                         contentItem: Text {
                             text: parent.text
                             color: String(modelData.uuid || "") === root.selectedUuid ? c.info : c.text
@@ -617,128 +371,40 @@ Item {
                             verticalAlignment: Text.AlignVCenter
                             font.bold: true
                         }
-                        background: Rectangle {
-                            radius: 10
-                            color: c.field
-                            border.color: String(modelData.uuid || "") === root.selectedUuid ? c.info : c.border
-                        }
                     }
                 }
             }
-
-            Rectangle {
-                visible: vpnProfiles.length === 0
-                width: profileColumn.width
-                height: 130
-                radius: 14
-                color: c.card
-                border.color: c.border
-
-                Text {
-                    anchors.centerIn: parent
-                    width: parent.width - 60
-                    text: statusRequestInFlight
-                          ? "Searching for VPN profiles..."
-                          : "No VPN profiles found. Add a VPN or WireGuard profile to NetworkManager, then press Refresh."
-                    color: c.sub
-                    font.pixelSize: 15
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.WordWrap
-                }
-            }
+            Rectangle { visible:vpnProfiles.length===0; width:profileColumn.width; height:130; radius:14; color:c.card; border.color:c.border; Text { anchors.centerIn:parent; width:parent.width-60; text:statusRequestInFlight?"Searching for VPN profiles...":"No VPN profiles found. Add a VPN or WireGuard profile to NetworkManager, then press Refresh."; color:c.sub; font.pixelSize:15; horizontalAlignment:Text.AlignHCenter; wrapMode:Text.WordWrap } }
         }
     }
 
-    Text {
-        anchors.left: parent.left
-        anchors.leftMargin: 30
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: 18
-        text: message
-        color: runtimeState === "failed" ? c.danger : c.sub
-        font.pixelSize: 13
-        elide: Text.ElideRight
-        width: parent.width - 60
-    }
+    Text { anchors.left:parent.left; anchors.leftMargin:30; anchors.bottom:parent.bottom; anchors.bottomMargin:18; text:message; color:runtimeState==="failed"?c.danger:c.sub; font.pixelSize:13; elide:Text.ElideRight; width:parent.width-60 }
 
     Dialog {
-        id: vpnConfirmDialog
-        modal: true
-        focus: true
-        width: 520
-        height: 270
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-        closePolicy: Popup.NoAutoClose
-
-        background: Rectangle {
-            radius: 16
-            color: c.panel
-            border.color: c.border
-            border.width: 1
-        }
-
-        contentItem: ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 24
-            spacing: 14
-
-            Text {
-                Layout.fillWidth: true
-                text: pendingTargetActive ? "Connect VPN?" : "Disconnect VPN?"
-                color: c.text
-                font.pixelSize: 23
-                font.bold: true
-            }
-
-            Text {
-                Layout.fillWidth: true
-                text: pendingTargetActive
-                      ? "Connect to “" + pendingName + "”? Network routing and the public IP may change while the tunnel is active."
-                      : "Disconnect “" + pendingName + "”? Traffic currently using this tunnel may be interrupted."
-                color: c.sub
-                font.pixelSize: 14
-                wrapMode: Text.WordWrap
-            }
-
-            Item { Layout.fillHeight: true }
-
+        id:vpnConfirmDialog; modal:true; focus:true; width:520; height:270; x:Math.round((root.width-width)/2); y:Math.round((root.height-height)/2); closePolicy:Popup.NoAutoClose
+        background:Rectangle{radius:16;color:c.panel;border.color:c.border;border.width:1}
+        contentItem:ColumnLayout{anchors.fill:parent;anchors.margins:24;spacing:14
+            Text{Layout.fillWidth:true;text:pendingTargetActive?"Connect VPN?":"Disconnect VPN?";color:c.text;font.pixelSize:23;font.bold:true}
+            Text{Layout.fillWidth:true;text:pendingTargetActive?"Connect to “"+pendingName+"”? Network routing and the public IP may change while the tunnel is active.":"Disconnect “"+pendingName+"”? Traffic currently using this tunnel may be interrupted.";color:c.sub;font.pixelSize:14;wrapMode:Text.WordWrap}
+            Item{Layout.fillHeight:true}
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
                 Item { Layout.fillWidth: true }
-
                 Button {
                     text: "Cancel"
                     Layout.preferredWidth: 130
                     Layout.preferredHeight: 44
                     onClicked: vpnConfirmDialog.close()
-                    contentItem: Text { text: parent.text; color: c.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true }
-                    background: Rectangle { radius: 10; color: c.field; border.color: c.border }
                 }
-
                 Button {
                     id: confirmVpnButton
                     text: pendingTargetActive ? "Connect" : "Disconnect"
                     Layout.preferredWidth: 150
                     Layout.preferredHeight: 44
-                    scale: pressed ? 0.96 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                     onClicked: {
                         vpnConfirmDialog.close()
                         executePendingVpnAction()
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: pendingTargetActive ? "#001412" : "#ffffff"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
-                    background: Rectangle {
-                        radius: 10
-                        color: pendingTargetActive ? c.accent : "#7f1d1d"
-                        border.color: pendingTargetActive ? c.accent : c.danger
                     }
                 }
             }
@@ -746,83 +412,29 @@ Item {
     }
 
     Dialog {
-        id: disableVpnDialog
-        modal: true
-        focus: true
-        width: 540
-        height: 280
-        x: Math.round((root.width - width) / 2)
-        y: Math.round((root.height - height) / 2)
-        closePolicy: Popup.NoAutoClose
-
-        background: Rectangle {
-            radius: 16
-            color: c.panel
-            border.color: c.warning
-            border.width: 1
-        }
-
-        contentItem: ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 24
-            spacing: 14
-
-            Text {
-                Layout.fillWidth: true
-                text: "Disable VPN?"
-                color: c.text
-                font.pixelSize: 23
-                font.bold: true
-            }
-
-            Text {
-                Layout.fillWidth: true
-                text: activeProfiles.length > 0
-                      ? "VPN control will be disabled and all active VPN/WireGuard tunnels will be disconnected. Network routes and the public IP may change."
-                      : "VPN control will be disabled. Existing profiles remain saved in NetworkManager and can be used again after VPN is enabled."
-                color: c.sub
-                font.pixelSize: 14
-                wrapMode: Text.WordWrap
-            }
-
-            Item { Layout.fillHeight: true }
-
+        id:disableVpnDialog;modal:true;focus:true;width:540;height:280;x:Math.round((root.width-width)/2);y:Math.round((root.height-height)/2);closePolicy:Popup.NoAutoClose
+        background:Rectangle{radius:16;color:c.panel;border.color:c.warning;border.width:1}
+        contentItem:ColumnLayout{anchors.fill:parent;anchors.margins:24;spacing:14
+            Text{Layout.fillWidth:true;text:"Disable VPN?";color:c.text;font.pixelSize:23;font.bold:true}
+            Text{Layout.fillWidth:true;text:activeProfiles.length>0?"VPN control will be disabled and all active VPN/WireGuard tunnels will be disconnected.":"VPN control will be disabled. Existing profiles remain saved in NetworkManager.";color:c.sub;font.pixelSize:14;wrapMode:Text.WordWrap}
+            Item{Layout.fillHeight:true}
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 12
                 Item { Layout.fillWidth: true }
-
                 Button {
                     text: "Cancel"
                     Layout.preferredWidth: 130
                     Layout.preferredHeight: 44
                     onClicked: disableVpnDialog.close()
-                    contentItem: Text { text: parent.text; color: c.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true }
-                    background: Rectangle { radius: 10; color: c.field; border.color: c.border }
                 }
-
                 Button {
-                    id: confirmDisableButton
                     text: "Disable VPN"
                     Layout.preferredWidth: 160
                     Layout.preferredHeight: 44
-                    scale: pressed ? 0.96 : 1.0
-                    Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                     onClicked: {
                         disableVpnDialog.close()
                         executeEnableChange(false)
-                    }
-                    contentItem: Text {
-                        text: parent.text
-                        color: "#ffffff"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
-                    background: Rectangle {
-                        radius: 10
-                        color: "#7c2d12"
-                        border.color: c.warning
                     }
                 }
             }

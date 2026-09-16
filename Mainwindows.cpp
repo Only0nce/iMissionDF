@@ -25,6 +25,16 @@ bool Mainwindows::getSqlActive() const
     return currentSQLValue;
 }
 
+bool Mainwindows::getRecActive() const
+{
+    return m_lastRecIsRecord;
+}
+
+QString Mainwindows::getRecorderState() const
+{
+    return m_lastRecState;
+}
+
 Mainwindows::Mainwindows(QObject *parent)
     : Mainwindows(nullptr, nullptr, parent)
 {
@@ -265,6 +275,8 @@ Mainwindows::Mainwindows(NetworkController *networkController,
         m_lastRecIsRecord = (state == "RECORD");
         recRunningCount = 0;
 
+        qInfo().noquote() << "[REC-STATE] state=" << m_lastRecState
+                          << "active=" << m_lastRecIsRecord;
         qDebug() << "[LogWatcher] emit onRecStatusChanged =" << m_lastRecIsRecord;
         emit onRecStatusChanged(m_lastRecIsRecord);
     });
@@ -860,6 +872,7 @@ void Mainwindows::onSQLChanged(bool sqlVal)
     currentSQLValue = sqlVal;
 
     if (sqlChanged) {
+        qInfo().noquote() << "[SQL-STATE] active=" << currentSQLValue;
         qDebug() << "[SQL UI] sqlActiveChanged =" << currentSQLValue;
         emit sqlActiveChanged(currentSQLValue);
     }

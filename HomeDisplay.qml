@@ -52,6 +52,10 @@ Item {
     property real scanAudioLevel: 0
 
     property bool scanMuteOn: false
+    // UX1.3: a deliberate Speaker/Volume adjustment while muted is treated as
+    // user intent to hear audio. Keep a short guard so slider movement does not
+    // flood the backend with repeated unmute requests before mutedChanged arrives.
+    property bool volumeAdjustmentUnmutePending: false
     property bool phoneMuteOn: false
     property bool scanRadioPause: false
     property bool initData: false
@@ -82,6 +86,28 @@ Item {
     property bool currentRxLoaded: false
     property bool cardUpdate: false
 
+    function unmuteFromUserVolumeAdjustment() {
+        if (!scanMuteOn || volumeAdjustmentUnmutePending)
+            return
+
+        volumeAdjustmentUnmutePending = true
+        volumeAdjustmentUnmuteGuard.restart()
+
+        // R20.4 RADIO UX1.4: a user Volume/Speaker adjustment expresses
+        // intent to hear playback. Clear only the playback mute state.
+        // SQL/squelch is an RF condition and must not be modified here,
+        // otherwise recorder gating can be changed by a volume gesture.
+        console.log("[AUDIO-MUTE-UX] user volume adjustment -> unmute playback only")
+        wsClient.setSpeakerVolumeMute(false)
+    }
+
+    Timer {
+        id: volumeAdjustmentUnmuteGuard
+        interval: 700
+        repeat: false
+        onTriggered: volumeAdjustmentUnmutePending = false
+    }
+
     Timer {
         id: rotaryStepTimer10
         running: false
@@ -99,14 +125,8 @@ Item {
     }
 
     onScanAudioLevelChanged:{
+        // Playback volume is independent of RF SQL/recorder gating.
         wsClient.setVolumePercent(scanAudioLevel)
-        if (mainWindows.getSqlLevel() !== scanSqlLevel){
-            mainWindows.setSqlLevel(scanSqlLevel)
-            mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
-            currentSqlLevel = (scanSqlLevel-255)/2
-            console.log("initData scanSqlLevel::",scanSqlLevel)
-            wsClient.setSpeakerVolumeMute(0)
-        }
         // console.log("onScanAudioLevelChanged maybeUpdateCurrentRx")
         maybeUpdateCurrentRx()
     }
@@ -272,6 +292,7 @@ Item {
         if(val === -1) //CW
         {
             if (gpiokeyProfile == 0) {
+                unmuteFromUserVolumeAdjustment()
                 var ctrl = radioScanner.drawerVolume.volumeCtrl
 
                 // step = +1 หรือ -1 (ตามปุ่ม)
@@ -340,7 +361,8 @@ Item {
             }
             else if (gpiokeyProfile == 5)
             {
-                var ctrl = radioScanner.drawerVolume.volumeCtrl   // ใช้ drawer เดียว
+                unmuteFromUserVolumeAdjustment()
+                var ctrl = radioScanner.drawerVolume.volumeCtrl   // ใช้ drawerเดียว
                 var step = +1   // หรือ -1
 
                 // --- 1) คำนวณจาก source of truth ---
@@ -360,6 +382,7 @@ Item {
         else if(val === 1) //CCW
         {
             if (gpiokeyProfile == 0) {
+                unmuteFromUserVolumeAdjustment()
                 var ctrl = radioScanner.drawerVolume.volumeCtrl
 
                 // step = +1 หรือ -1 (ตามปุ่ม)
@@ -430,7 +453,8 @@ Item {
             }
             else if (gpiokeyProfile == 5)
             {
-                var ctrl = radioScanner.drawerVolume.volumeCtrl   // ใช้ drawer เดียว
+                unmuteFromUserVolumeAdjustment()
+                var ctrl = radioScanner.drawerVolume.volumeCtrl   // ใช้ drawerเดียว
                 var step = -1   // หรือ -1
 
                 // --- 1) คำนวณจาก source of truth ---
@@ -565,6 +589,22 @@ Item {
         loadCurrentRxConfig.start()
     }
 
+    // R20.4 MUTE-STATE1: HomeDisplay is the single owner of the UI mute state.
+    // Drawer components only request a toggle; backend mutedChanged readback is
+    // mirrored here so every Main-page control observes the same state.
+    Connections {
+        target: wsClient
+        ignoreUnknownSignals: true
+
+        function onMutedChanged(muted) {
+            scanMuteOn = muted
+            if (!muted) {
+                volumeAdjustmentUnmutePending = false
+                volumeAdjustmentUnmuteGuard.stop()
+            }
+        }
+    }
+
     // R20.2 / R16.1 restore: lifecycle-scoped Mainwindows signal handlers.
     Connections {
         target: mainWindows
@@ -605,6 +645,10 @@ Item {
     }
 
     Component.onCompleted: {
+        // Synchronize the initial QML state with the C++ Q_PROPERTY before any
+        // drawer is opened. Subsequent updates arrive through mutedChanged.
+        scanMuteOn = wsClient.muted
+
         // scanVolLevel =  mainWindows.getSpeakerVolume1()
         // scanVolLevelHeadphone =   mainWindows.getHeadphoneVolume()
         // scanSqlLevel = mainWindows.getSqlLevel()
@@ -735,14 +779,8 @@ Item {
 
     onScanVolLevelChanged: {
         if (initData) {
-            if (mainWindows.getSpeakerVolume1() !== scanVolLevel){
+            if (mainWindows.getSpeakerVolume1() !== scanVolLevel)
                 mainWindows.setSpeakerVolume(scanVolLevel)
-                mainWindows.setSqlLevel(scanSqlLevel)
-                mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
-                currentSqlLevel = (scanSqlLevel-255)/2
-                console.log("initData scanSqlLevel::",scanSqlLevel)
-                wsClient.setSpeakerVolumeMute(0)
-            }
         }
         if (currentRxLoaded)
             maybeUpdateCurrentRx()
@@ -750,14 +788,8 @@ Item {
 
     onScanVolLevelHeadphoneChanged: {
         if (initData) {
-            if (mainWindows.getHeadphoneVolume() !== scanVolLevelHeadphone){
+            if (mainWindows.getHeadphoneVolume() !== scanVolLevelHeadphone)
                 mainWindows.setHeadphoneVolume(scanVolLevelHeadphone)
-                mainWindows.setSqlLevel(scanSqlLevel)
-                mainWindows.sendmessage('{"type": "dspcontrol","params": {"squelch_level": '+((scanSqlLevel-255)/2).toFixed(1)+'}}')
-                currentSqlLevel = (scanSqlLevel-255)/2
-                console.log("initData scanSqlLevel::",scanSqlLevel)
-                wsClient.setSpeakerVolumeMute(0)
-            }
         }
         if (currentRxLoaded)
             maybeUpdateCurrentRx()

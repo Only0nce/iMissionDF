@@ -1,7 +1,7 @@
 TEMPLATE = app
 TARGET = iScanMR10
 
-QT += quick websockets sql widgets multimedia opengl concurrent
+QT += quick websockets sql widgets multimedia opengl concurrent network
 CONFIG += c++17
 contains(CONFIG, static) {
     QT += svg

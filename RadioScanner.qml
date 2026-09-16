@@ -692,7 +692,9 @@ Item {
                     border.width: 0
                     anchors.fill: parent
                     Label {
-                        property string speakerText: "Speaker\n" + ((scanVolLevel-255)/2).toFixed(1) +" dB"
+                        property string speakerText: scanMuteOn
+                                                     ? "Speaker\nMute"
+                                                     : "Speaker\n" + ((scanVolLevel-255)/2).toFixed(1) +" dB"
                         width: 40
                         text: speakerText
                         anchors.fill: parent
@@ -768,35 +770,41 @@ Item {
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
 
-                // REC indication follows SQL directly. Read the current SQL
-                // state once when this button is created, then follow the
-                // live sqlActiveChanged(bool) signal. This preserves state
-                // replay without relying on Q_PROPERTY in older Qt5 moc.
+                // R20.4 RADIO UX1.4: REC indication follows the actual recorder
+                // state reported by LogWatcher/Mainwindows, not SQL. SQL can gate
+                // recording policy, but it is not itself proof that alsarecd is
+                // currently in RECORD state.
                 property bool scanRecOn: false
                 property bool blinkPhaseOn: true
 
-                function syncSqlState() {
+                function syncRecorderState() {
                     if (typeof mainWindows !== "undefined"
                             && mainWindows
-                            && typeof mainWindows.getSqlActive === "function") {
-                        scanRecOn = mainWindows.getSqlActive()
+                            && typeof mainWindows.getRecActive === "function") {
+                        scanRecOn = mainWindows.getRecActive()
                     }
                 }
 
-                Component.onCompleted: syncSqlState()
+                Component.onCompleted: syncRecorderState()
 
                 Connections {
                     target: (typeof mainWindows !== "undefined")
                             ? mainWindows
                             : null
 
-                    function onSqlActiveChanged(active) {
-                        toolButtonRec.scanRecOn = active
+                    function onOnRecStatusChanged(active) {
+                        if (toolButtonRec.scanRecOn !== active) {
+                            toolButtonRec.scanRecOn = active
+                            var stateText = "UNKNOWN"
+                            if (typeof mainWindows.getRecorderState === "function")
+                                stateText = mainWindows.getRecorderState()
+                            console.log("[REC-UI] active =", active, "state =", stateText)
+                        }
                     }
                 }
 
                 onScanRecOnChanged: {
-                    console.log("[REC ICON] SQL active =", scanRecOn)
+                    console.log("[REC ICON] recorder active =", scanRecOn)
                     blinkPhaseOn = true
                 }
 
