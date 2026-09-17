@@ -16,6 +16,8 @@ class SPIClass
 {
 public:
     explicit SPIClass(const std::string& spidev);
+    ~SPIClass();
+    bool isReady() const { return m_ready; }
     int send_byte_data(uint8_t *txByteData, uint8_t *rxByteData, uint32_t len);
     uint8_t tx[5120] = {0, };
     uint8_t rx[5120] = {0, };
@@ -33,7 +35,8 @@ private :
 
     std::string spiDev;
     void delay_mSec(int mSec);
-    Linux_SPI* spi_dev;
+    Linux_SPI* spi_dev = nullptr;
+    bool m_ready = false;
 };
 
 #endif // SPI_H

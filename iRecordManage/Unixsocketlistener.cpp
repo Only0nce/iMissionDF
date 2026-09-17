@@ -6,7 +6,8 @@
 #include <cstring>
 
 UnixSocketListener::UnixSocketListener(QObject* parent)
-    : QObject(parent), socketFd(-1), notifier(nullptr) {
+    : QObject(parent)
+{
     setupSocket();
 }
 
@@ -15,7 +16,8 @@ UnixSocketListener::~UnixSocketListener() {
         delete notifier;
     if (socketFd >= 0)
         close(socketFd);
-    ::unlink("/tmp/recd_status.sock");
+    if (m_bound)
+        ::unlink(socketPath.toLocal8Bit().constData());
 }
 bool UnixSocketListener::makeNonBlocking(int fd)
 {
@@ -29,7 +31,8 @@ bool UnixSocketListener::makeNonBlocking(int fd)
 void UnixSocketListener::setupSocket() {
     socketFd = socket(AF_UNIX, SOCK_DGRAM, 0);
     if (socketFd < 0) {
-        qFatal("Failed to create socket");
+        qCritical() << "[UnixSocketListener] socket() failed:" << strerror(errno)
+                    << "-- recorder status integration disabled";
         return;
     }
 
@@ -46,11 +49,14 @@ void UnixSocketListener::setupSocket() {
     socklen_t addr_len = offsetof(struct sockaddr_un, sun_path) + strlen(addr.sun_path);
 
     if (bind(socketFd, (struct sockaddr*)&addr, addr_len) < 0) {
-        qFatal("Failed to bind to socket path: %s", addr.sun_path);
+        qCritical() << "[UnixSocketListener] bind failed" << addr.sun_path
+                    << strerror(errno)
+                    << "-- recorder status integration disabled";
         close(socketFd);
         socketFd = -1;
         return;
     }
+    m_bound = true;
 
     notifier = new QSocketNotifier(socketFd, QSocketNotifier::Read, this);
     connect(notifier, &QSocketNotifier::activated,

@@ -25,6 +25,12 @@ Rectangle {
         return (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
     }
 
+    // In the integrated iScan application Krakenmapval owns the remote RFSoC
+    // connection and rebroadcasts live JSON to localhost:9000. Keep these
+    // fields editable only for the standalone DoaViewer diagnostic program.
+    readonly property bool integratedBridgeMode:
+        (typeof Krakenmapval !== "undefined" && Krakenmapval !== null)
+
     // ========= MHz UI <-> Hz backend helpers =========
     function rfTextToHz(s) {
         var mhz = parseFloat((s || "").toString().trim())
@@ -295,8 +301,11 @@ Rectangle {
                 Layout.preferredHeight: root.rowH
                 Layout.preferredWidth: 180
                 text: root.dc() ? root.dc().host : ""
-                placeholderText: "IP"
+                placeholderText: root.integratedBridgeMode ? "Local bridge" : "IP"
+                readOnly: root.integratedBridgeMode
+                selectByMouse: !root.integratedBridgeMode
                 onEditingFinished: {
+                    if (root.integratedBridgeMode) return
                     var c = root.dc()
                     if (!c) return
                     c.host = text
@@ -307,9 +316,12 @@ Rectangle {
                 Layout.preferredHeight: root.rowH
                 Layout.preferredWidth: 90
                 inputMethodHints: Qt.ImhDigitsOnly
-                text: root.dc() ? String(root.dc().port) : "5555"
+                text: root.dc() ? String(root.dc().port) : "9000"
                 placeholderText: "Port"
+                readOnly: root.integratedBridgeMode
+                selectByMouse: !root.integratedBridgeMode
                 onEditingFinished: {
+                    if (root.integratedBridgeMode) return
                     var c = root.dc()
                     if (!c) return
                     c.port = parseInt(text)

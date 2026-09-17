@@ -24,16 +24,18 @@ AlsaAudioPlayer::AlsaAudioPlayer(int sampleRate, int audioFormat, QObject *paren
         return std::max(minimum, std::min(maximum, value));
     };
 
-    // Preserve the historical timing defaults in this backend-hardening
-    // revision so normal audio UX does not change. Low-latency values such as
-    // 40/10/20 ms can still be enabled explicitly for controlled A/B testing.
-    m_bufferMs = envInt("ISCAN_AUDIO_BUFFER_MS", 100, 20, 250);
-    m_periodMs = envInt("ISCAN_AUDIO_PERIOD_MS", 20, 5, 50);
+    // Restore the validated low-latency live-receiver profile. The previous
+    // 100/20/100 ms defaults accumulated too much local backlog under UI/GPU
+    // bursts; once the producer queue reached its limit, every incoming packet
+    // caused another drop + qWarning, creating a self-reinforcing log storm.
+    m_bufferMs = envInt("ISCAN_AUDIO_BUFFER_MS", 40, 20, 250);
+    m_periodMs = envInt("ISCAN_AUDIO_PERIOD_MS", 10, 5, 50);
     if (m_periodMs >= m_bufferMs)
         m_periodMs = std::max(5, m_bufferMs / 4);
-    m_stageMs = envInt("ISCAN_AUDIO_STAGE_MS", 100, 5, 150);
+    m_stageMs = envInt("ISCAN_AUDIO_STAGE_MS", 20, 5, 100);
     m_stageMs = std::min(m_stageMs, m_bufferMs);
-    m_maxQueuedChunks = envInt("ISCAN_AUDIO_MAX_QUEUE_CHUNKS", 30, 3, 60);
+    m_maxQueuedChunks = envInt("ISCAN_AUDIO_MAX_QUEUE_CHUNKS", 8, 3, 60);
+    m_overflowReportTimer.start();
 
     qInfo().noquote() << "[AUDIO CONFIG]"
                       << "rate=" << m_sampleRate
@@ -227,15 +229,38 @@ void AlsaAudioPlayer::pushAudio(const QByteArray &data)
 
     QMutexLocker locker(&m_mutex);
 
-    int dropped = 0;
-    while (m_queue.size() >= m_maxQueuedChunks) {
-        m_queue.dequeue();
-        ++dropped;
+    // Live audio must follow the newest RF data. If the consumer falls behind,
+    // do not drop exactly one chunk on every packet (which keeps the queue
+    // permanently pinned at the high-water mark and floods stderr). Collapse
+    // the stale backlog to half of the configured bound in one operation so
+    // the player has headroom to recover after a short scheduling/GPU burst.
+    if (m_queue.size() >= m_maxQueuedChunks) {
+        const int keepChunks = qMax(1, m_maxQueuedChunks / 2);
+        quint64 droppedNow = 0;
+        while (m_queue.size() > keepChunks) {
+            m_queue.dequeue();
+            ++droppedNow;
+        }
+        m_droppedQueuedChunks += droppedNow;
     }
-    if (dropped > 0)
-        qWarning() << "Audio queue overflow - dropped" << dropped << "old chunks";
 
     m_queue.enqueue(data);
+
+    // Aggregate the warning. Continuous qWarning() traffic itself steals CPU
+    // and can worsen real-time playback/QML scheduling. Report at most once per
+    // five seconds, while retaining the exact cumulative drop count.
+    if (m_droppedQueuedChunks != m_reportedDroppedQueuedChunks
+            && (!m_overflowReportTimer.isValid()
+                || m_overflowReportTimer.elapsed() >= 5000)) {
+        const quint64 delta = m_droppedQueuedChunks - m_reportedDroppedQueuedChunks;
+        qWarning().noquote() << "[AUDIO-LIVE-EDGE]"
+                             << "dropped_stale_chunks=" << delta
+                             << "total_dropped=" << m_droppedQueuedChunks
+                             << "queue_chunks=" << m_queue.size()
+                             << "max_queue_chunks=" << m_maxQueuedChunks;
+        m_reportedDroppedQueuedChunks = m_droppedQueuedChunks;
+        m_overflowReportTimer.restart();
+    }
     m_dataAvailable.wakeOne();
     CrashDiagnostics::checkpoint(CrashDiagnostics::CpAudioPushDone);
 }

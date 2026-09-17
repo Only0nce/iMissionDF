@@ -14,6 +14,7 @@ class TcpClientDF : public QObject
     Q_OBJECT
 public:
     explicit TcpClientDF(QObject *parent = nullptr);
+    ~TcpClientDF() override;
 
     void connectToServer(const QString &host, quint16 port);
     void disconnectFromServer();
@@ -25,12 +26,17 @@ public:
     // Optional: enable/disable heartbeat
     void setHeartbeatEnabled(bool en);
 
-    // Send to DoA server
+    // Send to DoA server. The legacy sendLine()/sendJson() path may queue
+    // commands while the socket is offline. Remote LAN IP configuration must
+    // never be deferred, so sendLineIfConnected() is the strict TCP-only path
+    // used by LAN3/end0 and LAN4/end1.
     bool sendJson(const QJsonObject &obj, bool addNewline = true);
     bool sendLine(const QByteArray &line, bool addNewline = true);
+    bool sendLineIfConnected(const QByteArray &line, bool addNewline = true);
 
-    // External RFSoC LAN control-channel state. This is deliberately only the
-    // TCP management link, not remote end0/end1 physical carrier state.
+    // R-LAN4A: read-only state used by the Network Settings page for the
+    // external RFSoC LAN control channel. This is the TCP control-link state,
+    // not the physical end0/end1 carrier state on the remote RFSoC.
     bool isConnected() const { return m_socket.state() == QAbstractSocket::ConnectedState; }
     QString targetHost() const { return m_lastHost; }
     quint16 targetPort() const { return m_lastPort; }
@@ -59,8 +65,8 @@ private:
     void processLine(const QByteArray &line);
     void updateFromJson(const QJsonObject &obj);
     void flushPendingWrites();
-    void requestReconnect(const QString &reason, bool allowImmediate);
     void scheduleReconnect(const QString &reason);
+    void requestReconnect(const QString &reason, bool allowImmediate);
 
     // --- sockets ---
     QTcpSocket m_socket;
@@ -69,17 +75,18 @@ private:
     QTimer m_reconnectTimer;
     QTimer m_heartbeatTimer;
 
-    int  m_reconnectMs        = 10000; // base delay
-    int  m_reconnectCurrentMs = 10000;
-    int  m_reconnectMaxMs     = 60000;
-    int  m_heartbeatMs        = 10000;
-    bool m_heartbeatEnabled   = true;
-
-    // Reconnect lifecycle guards. Exactly one immediate retry is allowed for
-    // each outage; later retries are bounded by single-shot exponential backoff.
+    int  m_reconnectMs  = 10000;   // periodic retry/watchdog interval
+    int  m_heartbeatMs  = 10000;   // 10s
+    // The RFSoC control protocol has no negotiated heartbeat packet contract.
+    // Do not inject synthetic {menuID:"ping"} traffic by default; connection
+    // state is driven by QTcpSocket connected/disconnected/error events.
+    bool m_heartbeatEnabled = false;
     bool m_userDisconnect = false;
+    bool m_shuttingDown = false;
+    // One immediate retry is allowed per outage; after that the proven
+    // periodic watchdog retries at m_reconnectMs without a tight loop.
     bool m_immediateRetryConsumed = false;
-    bool m_suppressNextDisconnected = false;
+    bool m_rxSeenThisSession = false;
 
     // --- last target ---
     QString m_lastHost;

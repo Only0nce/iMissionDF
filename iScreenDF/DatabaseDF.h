@@ -135,7 +135,11 @@ public:
 
     void GetrfsocParameter();
     void GetIPDFServerFromDB();
+    Q_INVOKABLE void requestDfServerEndpointSnapshot();
     void UpdateParameterField(const QString &field, const QVariant &value);
+    // DF endpoint transaction: persist only after a candidate TCP connection
+    // has succeeded, then read back in the same DB thread before reporting OK.
+    Q_INVOKABLE void persistDfServerEndpoint(const QString &ip, qulonglong generation);
     void ensureParameterHasMaxDoaLineMeters();
     void ensureParameterIPLocalForRemoteGroup();
 
@@ -180,6 +184,13 @@ signals:
                            int TargetOffsetHz, int DoaBwHz, double DoaPowerThresholdDb,const QString &DoaAlgorithm, double ucaRadiusM,double TargetDb,bool rfAgcEnabled,bool linkStatus,double offsetvalue,double compassoffset
                            , int maxDoaLineMeters,const QString &ipLocalForRemoteGroup, int setDelayMs, int setDistance);
     void GetIPDFServer(const QString &ip);
+    void dfServerEndpointPersisted(const QString &requestedIp,
+                                   qulonglong generation,
+                                   bool ok,
+                                   const QString &storedIp,
+                                   const QString &detail);
+    void dfServerEndpointSnapshotReady(const QString &ip,
+                                       const QString &detail);
     void updateNetworkDfDevice(const QString &iface,const QString &mode,const QString &ip,const QString &subnet,const QString &gateway,const QString &primaryDns,const QString &secondaryDns);
     void setSideLogsJson(const QString &json);
 
@@ -199,6 +210,8 @@ public slots:
     // void getDoaLogRecords();
     void getDoaLogRecordsPage(int page, int pageSize, const QString &searchText = QString());
 private:
+    bool syncLegacyDfEndpointMirror(const QString &ip, QString *detail = nullptr);
+
     QSqlDatabase db;
     bool ensureDb();
 

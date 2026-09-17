@@ -604,11 +604,14 @@ Item {
         z: 1
 
         onNavigate: function(title, source, index) {
+            console.info("[NAV] title=", title, "source=", source, "index=", index)
             if (source !== "qrc:/HomeDisplay.qml") {
                 if (loader.depth > 1) loader.pop()
                 if (source === "qrc:/Setting.qml") {
+                    // NET-AUTH3: every fresh entry to Network Settings starts
+                    // in Viewer mode. Admin elevation happens inside Setting.qml.
                     loader.push(source, {
-                                    "networkAccessRole": settingsDrawer.networkAccessRole
+                                    "networkAccessRole": "viewer"
                                 })
                 } else {
                     loader.push(source)

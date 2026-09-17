@@ -172,14 +172,20 @@ private:
     static void* ThreadMonitor(void* pTr);
     typedef void * (*THREADMONITOR)(void *);
 
-    pthread_t idThreaddatetime;
-    pthread_t idThreadFan;
-    pthread_t idThread;
-    pthread_t idThread2;
-    pthread_t idThread3;
-    pthread_t idThread4;
+    pthread_t idThreaddatetime{};
+    pthread_t idThreadFan{};
+    pthread_t idThread{};
+    pthread_t idThread2{};
+    pthread_t idThread3{};
+    pthread_t idThread4{};
     pthread_t idThreadMonitor{};
 
+    bool m_dateTimeThreadStarted = false;
+    bool m_fanThreadStarted = false;
+    bool m_mainThreadStarted = false;
+    bool m_monitorThreadStarted = false;
+    bool m_cleanupThreadStarted = false;
+    std::atomic_bool m_cleanupThreadRunning{false};
     std::atomic_bool m_qmlConnected{false};
     std::atomic_bool m_threadRunning{true};
     QString date, time;

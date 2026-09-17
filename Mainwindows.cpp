@@ -11,13 +11,72 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
-#include <QProcess>
 #include <QNetworkInterface>
 #include <QNetworkAddressEntry>
 #include <QHostAddress>
 #include <QTimeZone>
 #include <QPointer>
 #include <cmath>
+
+namespace {
+
+bool runSystemctlBounded(const QStringList &arguments, int timeoutMs, QByteArray *stdOut = nullptr)
+{
+    QProcess process;
+    process.setProcessChannelMode(QProcess::SeparateChannels);
+    process.start(QStringLiteral("systemctl"), arguments);
+
+    if (!process.waitForStarted(750)) {
+        qWarning() << "[SYSTEMD] failed to start systemctl" << arguments
+                   << process.errorString();
+        return false;
+    }
+
+    if (!process.waitForFinished(timeoutMs)) {
+        qWarning() << "[SYSTEMD] systemctl timed out" << arguments;
+        process.kill();
+        process.waitForFinished(500);
+        return false;
+    }
+
+    if (stdOut)
+        *stdOut = process.readAllStandardOutput();
+
+    const QByteArray err = process.readAllStandardError().trimmed();
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        qWarning() << "[SYSTEMD] systemctl failed" << arguments
+                   << "exit=" << process.exitCode()
+                   << "stderr=" << QString::fromLocal8Bit(err);
+        return false;
+    }
+    return true;
+}
+
+void restartAstraRxServiceSafely()
+{
+    // systemd warns when the unit/drop-ins changed after the manager last
+    // loaded them. Reload only when systemd reports it is necessary, then use
+    // a bounded restart so application startup can never hang indefinitely on
+    // systemctl. AstraRX WebSocket already has reconnect/backoff semantics.
+    QByteArray needReload;
+    if (runSystemctlBounded({QStringLiteral("show"),
+                             QStringLiteral("astrarx.service"),
+                             QStringLiteral("-p"),
+                             QStringLiteral("NeedDaemonReload"),
+                             QStringLiteral("--value")},
+                            1500, &needReload)) {
+        const QByteArray flag = needReload.trimmed().toLower();
+        if (flag == "yes" || flag == "true") {
+            qInfo() << "[SYSTEMD] astrarx.service changed on disk; daemon-reload required";
+            runSystemctlBounded({QStringLiteral("daemon-reload")}, 3000);
+        }
+    }
+
+    if (!runSystemctlBounded({QStringLiteral("restart"), QStringLiteral("astrarx.service")}, 5000))
+        qWarning() << "[SYSTEMD] astrarx.service restart failed; application will continue and backend reconnect will retry";
+}
+
+} // namespace
 
 
 bool Mainwindows::getSqlActive() const
@@ -361,7 +420,9 @@ Mainwindows::Mainwindows(NetworkController *networkController,
     setTimeHWClock->start(1000 * 60 * 5);
     #endif
 
-    system("systemctl restart astrarx");
+#ifdef PLATFORM_JETSON
+    restartAstraRxServiceSafely();
+#endif
 }
 
 
@@ -884,17 +945,27 @@ void Mainwindows::onSQLChanged(bool sqlVal)
 
 #ifdef PLATFORM_JETSON
     bool current = false;
-    if (shd_amp->getValue(current) != 0) {
-        qWarning() << "[SQL] Failed to read SHD_AMP state";
+    const bool shdAmpReadable = shd_amp && (shd_amp->getValue(current) == 0);
+    if (!shdAmpReadable) {
+        if (!m_shdAmpReadFaultLogged) {
+            qWarning() << "[SQL] Failed to read SHD_AMP state; using desired state and suppressing repeats until recovery";
+            m_shdAmpReadFaultLogged = true;
+        }
+        // Force the desired write below because current is not trustworthy.
+        current = !sqlVal;
+    } else if (m_shdAmpReadFaultLogged) {
+        qInfo() << "[SQL] SHD_AMP state read recovered";
+        m_shdAmpReadFaultLogged = false;
     }
 
+    bool gpioWriteOk = true;
     if (sqlVal)
     {
         if (current != 1) {
-            shd_amp->setValue(1);
-            hs_mute->setValue(1);
+            gpioWriteOk = shd_amp && shd_amp->setValue(1) && gpioWriteOk;
+            gpioWriteOk = hs_mute && hs_mute->setValue(1) && gpioWriteOk;
         }
-        led4->setValue(LED_ON);
+        gpioWriteOk = led4 && led4->setValue(LED_ON) && gpioWriteOk;
 
         // Cancel pending OFF.
         if (squelchOffTimer->isActive()) {
@@ -906,16 +977,26 @@ void Mainwindows::onSQLChanged(bool sqlVal)
         sendSquelchStatus(true);
     } else {
         if (current != 0) {
-            shd_amp->setValue(0);
-            hs_mute->setValue(0);
+            gpioWriteOk = shd_amp && shd_amp->setValue(0) && gpioWriteOk;
+            gpioWriteOk = hs_mute && hs_mute->setValue(0) && gpioWriteOk;
         }
-        led4->setValue(LED_OFF);
+        gpioWriteOk = led4 && led4->setValue(LED_OFF) && gpioWriteOk;
 
         isSquelchOffPending = true;
         if (!squelchOffTimer->isActive()) {
             squelchOffTimer->start(100);
             qDebug() << "Scheduled squelch OFF in 100 msec";
         }
+    }
+
+    if (!gpioWriteOk) {
+        if (!m_sqlGpioWriteFaultLogged) {
+            qWarning() << "[SQL] one or more GPIO writes failed; SQL state retained and application continues";
+            m_sqlGpioWriteFaultLogged = true;
+        }
+    } else if (m_sqlGpioWriteFaultLogged) {
+        qInfo() << "[SQL] GPIO writes recovered";
+        m_sqlGpioWriteFaultLogged = false;
     }
 #endif
 }
@@ -1559,15 +1640,25 @@ void Mainwindows::profiles(){
     emit updateCardProfile();
 }
 
-void Mainwindows::setNetworkFormDisplay(const QString &ipWithCidr){
-    qDebug() << "setNetworkFormDisplay Kraken::" << ipWithCidr;
-    // netWorkController->applyNetworkConfig("end0", "static", ipWithCidr, "", "");
-    // QVariantMap result = netWorkController->loadAllLanConfig();
-    // QJsonObject jsonObj = QJsonObject::fromVariantMap(result);
-    // QJsonDocument jsonDoc(jsonObj);
-    // QString jsonString = QString::fromUtf8(jsonDoc.toJson(QJsonDocument::Compact));
+void Mainwindows::setNetworkFormDisplay(const QString &ipWithCidr)
+{
+    // NET-ENDPOINTS1.7: this legacy bridge is already called by the Endpoints
+    // page before iScreenDF::connectToDFserver(). Keep LAN3/end0 configuration
+    // independent: this path only mirrors the DF control target into the shared
+    // atomic network_config.json store. Parameter.ipdfserver is still persisted
+    // by the existing iScreenDF backend.
+    const QString ip = ipWithCidr.section('/', 0, 0).trimmed();
+    qInfo().noquote() << "[ENDPOINTS][APPLY] DF control target=" << ip;
 
-    // wsServer->broadcastMessage(jsonString);
+    if (!netWorkController) {
+        qWarning() << "[ENDPOINTS][FILE] NetworkController unavailable";
+        return;
+    }
+
+    QString msg;
+    if (!netWorkController->persistDfServerEndpoint(ip, &msg)) {
+        qWarning().noquote() << "[ENDPOINTS][FILE] persistence mirror failed:" << msg;
+    }
 }
 
 void Mainwindows::setNetworkFormDisplay(const int index,
@@ -1693,6 +1784,28 @@ bool Mainwindows::applyLanSettings(const int index,
         return false;
     }
 
+    // NET-ENDPOINTS2.0: remote RFSoC IP changes are allowed only while the
+    // actual TCP control session is connected. Do this before any DB/config
+    // persistence so a disconnected Apply cannot claim a configuration that
+    // was never sent to the RFSoC server.
+    if (remoteLan && !m_lanIntegrationBackend->isRfsocControlConnected()) {
+        const QString host = m_lanIntegrationBackend->rfsocControlHost();
+        const int port = static_cast<int>(m_lanIntegrationBackend->rfsocControlPort());
+        const QString target = (!host.trimmed().isEmpty() && port > 0)
+            ? QStringLiteral("%1:%2").arg(host).arg(port)
+            : QStringLiteral("not-configured");
+        const QString detail = QStringLiteral("control=%1 target-ip=%2")
+                                   .arg(target, ipOnly);
+
+        qWarning().noquote() << "[LAN][APPLY] rejected: RFSoC control TCP is disconnected"
+                             << "iface=" << iface
+                             << detail;
+        emit remoteLanIpConfigDispatch(iface, ipOnly,
+                                       QStringLiteral("CONTROL_DISCONNECTED"),
+                                       detail);
+        return false;
+    }
+
     // Restore the proven Network2 integration first. DatabaseDF emits
     // updateNetworkDfDevice(end0/end1), and iScreenDF::onUpdateNetworkDfDevice()
     // sends the existing TCP JSON:
@@ -1718,7 +1831,10 @@ bool Mainwindows::applyLanSettings(const int index,
         qWarning() << "[LAN][APPLY] Network2 integration backend is unavailable";
     }
 
-    // Preserve JSON + local system behaviour in exactly one place.
+    // Preserve the existing restart/display persistence. For end0/end1 the
+    // NetworkController implementation explicitly skips nmcli/local-device
+    // mutation and only updates /etc/network_config.json. LAN3/LAN4 remote
+    // execution itself remains TCP setIpConfig only.
     netWorkController->applyNetworkConfig(iface,
                                           normalizedMode,
                                           ipWithCidr,
@@ -1785,8 +1901,8 @@ QVariantMap Mainwindows::externalLanStatus(const int index) const
         ? static_cast<int>(m_lanIntegrationBackend->rfsocControlPort())
         : 0;
     result[QStringLiteral("status")] = connected
-        ? QStringLiteral("TCP Connected")
-        : QStringLiteral("TCP Disconnected");
+        ? QStringLiteral("RFSoC Control Connected")
+        : QStringLiteral("RFSoC Control Disconnected");
     return result;
 }
 

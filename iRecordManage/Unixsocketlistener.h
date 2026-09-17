@@ -2,7 +2,6 @@
 
 #include <QObject>
 #include <QSocketNotifier>
-#include "Unixsocketlistener.h"
 #include <QDebug>
 #include <sys/socket.h>
 #include <sys/un.h>
@@ -21,8 +20,9 @@ signals:
     void messageReceived(const QString& message);
 
 private:
-    int socketFd;
-    QSocketNotifier* notifier= nullptr;;
+    int socketFd = -1;
+    QSocketNotifier* notifier = nullptr;
+    bool m_bound = false;
     QString socketPath = "/tmp/recd_status.sock";
 
     void setupSocket();

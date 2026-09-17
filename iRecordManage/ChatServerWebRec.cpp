@@ -22,14 +22,22 @@ ChatServerWebRec::~ChatServerWebRec()
 {
     qInfo() << "[ChatServerWebRec] shutting down, closing" << m_clients.size() << "clients";
 
-    // ปิด client ทุกตัวอย่างสุภาพ
-    for (QWebSocket *socket : qAsConst(m_clients)) {
+    // Detach lists first so close()/disconnected cannot mutate a container
+    // currently being iterated during teardown.
+    const auto clientsCopy = m_clients;
+    m_clients.clear();
+    m_WebSocketClients.clear();
+    for (QWebSocket *socket : clientsCopy) {
         if (!socket)
             continue;
+        QObject::disconnect(socket, nullptr, this, nullptr);
         socket->close();
         socket->deleteLater();
     }
-    m_clients.clear();
+    qDeleteAll(softPhoneSocketClient);
+    qDeleteAll(recSocketClient);
+    softPhoneSocketClient.clear();
+    recSocketClient.clear();
 
     if (m_server) {
         m_server->close();
@@ -67,8 +75,6 @@ void ChatServerWebRec::onNewConnection()
 
 void ChatServerWebRec::onTextMessageReceived(const QString &message)
 {
-    QWebSocket *senderSocket = qobject_cast<QWebSocket*>(sender());
-
     qDebug() << "[ChatServerWebRec] text message from web:"
              << message.left(200); // กัน log ยาวเกิน
     emit cppCommandToWeb(message);
@@ -95,7 +101,8 @@ void ChatServerWebRec::commandProcess(QString message, QWebSocket *pSender){
     {
         qDebug() << "getSystemPageWeb:" << message;
 
-        m_WebSocketClients << pSender;
+        if (pSender && !m_WebSocketClients.contains(pSender))
+            m_WebSocketClients << pSender;
         emit getSystemPage(pSender);
         emit getVuMeter(pSender);
 
@@ -114,6 +121,26 @@ void ChatServerWebRec::onSocketDisconnected()
         return;
 
     m_clients.removeAll(socket);
+    m_WebSocketClients.removeAll(socket);
+
+    // The socket can still be referenced by auxiliary wrappers in legacy
+    // paths. Remove any wrapper that points at this connection before the
+    // QObject is deleted.
+    for (int i = recSocketClient.size() - 1; i >= 0; --i) {
+        SoftPhoneSocketClient *client = recSocketClient.at(i);
+        if (!client || client->SocketClients == socket) {
+            delete client;
+            recSocketClient.removeAt(i);
+        }
+    }
+    for (int i = softPhoneSocketClient.size() - 1; i >= 0; --i) {
+        SoftPhoneSocketClient *client = softPhoneSocketClient.at(i);
+        if (!client || client->SocketClients == socket) {
+            delete client;
+            softPhoneSocketClient.removeAt(i);
+        }
+    }
+
     socket->deleteLater();
 
     if (m_clients.isEmpty()) {
@@ -130,8 +157,9 @@ void ChatServerWebRec::broadcastMessage(const QString &message)
     qDebug() << "[ChatServerWebRec] broadcast:" << message.left(200)
     << "to" << m_clients.size() << "clients";
 
-    for (QWebSocket *sock : qAsConst(m_clients)) {
-        if (!sock)
+    const auto clientsCopy = m_clients;
+    for (QWebSocket *sock : clientsCopy) {
+        if (!sock || sock->state() != QAbstractSocket::ConnectedState)
             continue;
         sock->sendTextMessage(message);
     }
@@ -147,6 +175,10 @@ void ChatServerWebRec::sendMessageTo(QWebSocket *client, const QString &message)
         qWarning() << "[ChatServerWebRec] sendMessageTo: client not in list";
         return;
     }
+    if (client->state() != QAbstractSocket::ConnectedState) {
+        qDebug() << "[ChatServerWebRec] sendMessageTo: client not connected";
+        return;
+    }
 
     client->sendTextMessage(message);
 }
@@ -157,9 +189,10 @@ void ChatServerWebRec::sendMessageToRecService(QString message, int softPhoneID)
     Q_FOREACH (SoftPhoneSocketClient *sClient, recSocketClient)
     {
 
-        if (sClient->softPhoneID == softPhoneID)
+        if (sClient && sClient->softPhoneID == softPhoneID
+                && sClient->SocketClients
+                && sClient->SocketClients->state() == QAbstractSocket::ConnectedState)
         {
-            // qDebug() <<  "sendMessageToRecService recSocketClient" << recSocketClient.length() << sClient->softPhoneID << message;
             sClient->SocketClients->sendTextMessage(message);
         }
     }
@@ -184,18 +217,24 @@ void ChatServerWebRec::sendSquelchStatus(int softPhoneID, bool pttOn, bool sqlOn
 void ChatServerWebRec::sendToWebMessageClientWebSender(QString message,QWebSocket *webClient)
 {
     qDebug() <<"sendSquelchStatus:jsonString_Webrec" << message;
+    if (!webClient || webClient->state() != QAbstractSocket::ConnectedState)
+        return;
     Q_FOREACH (QWebSocket *client, m_WebSocketClients)
     {
-        if (client == webClient)
+        if (client == webClient) {
             webClient->sendTextMessage(message);
+            return;
+        }
     }
 }
 void ChatServerWebRec::updateAllowedUri(uint8_t softPhoneID, uint8_t numConn, QString uri1, QString uri2, QString uri3, QString uri4, QString uri5, QString uri6, QString uri7, QString uri8)
 {
     QString message = QString("{\"menuID\":\"uriAllowedList\", \"numConn\":%1, \"uri1\":\"%2\", \"uri2\":\"%3\", \"uri3\":\"%4\", \"uri4\":\"%5\", \"uri5\":\"%6\", \"uri6\":\"%7\", \"uri7\":\"%8\", \"uri8\":\"%9\", \"softPhoneID\":%10}")
     .arg(numConn).arg(uri1).arg(uri2).arg(uri3).arg(uri4).arg(uri5).arg(uri6).arg(uri7).arg(uri8).arg(softPhoneID);
-    Q_FOREACH (QWebSocket *client, m_WebSocketClients)
+    const auto clientsCopy = m_WebSocketClients;
+    for (QWebSocket *client : clientsCopy)
     {
-        client->sendTextMessage(message);
+        if (client && client->state() == QAbstractSocket::ConnectedState)
+            client->sendTextMessage(message);
     }
 }

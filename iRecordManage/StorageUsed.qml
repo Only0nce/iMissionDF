@@ -15,6 +15,10 @@ Item {
 
     property real startDeg: 90
 
+    // STAB2: direct property handler avoids a dangling/undefined Connections
+    // target and keeps the Canvas repaint local to this component.
+    onValuePctChanged: ring.requestPaint()
+
     // -------- theme --------
     property color cCard:   "#2A2F33"
     property color cBorder: "#3D6B7E"
@@ -50,6 +54,8 @@ Item {
 
         onPaint: {
             var ctx = getContext("2d")
+            if (!ctx)
+                return
             ctx.reset()
 
             var cx = width * 0.5
@@ -92,10 +98,6 @@ Item {
             }
         }
 
-        Connections {
-            target: root
-            function onValuePctChanged(){ ring.requestPaint() }
-        }
     }
 
     Column {

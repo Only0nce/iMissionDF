@@ -29,7 +29,11 @@ Item {
 id: mapviewer
 // width: 1920
 // height: 1080
-anchors.fill: parent
+// STAB2: StackView owns page geometry during transitions. Root anchors
+    // conflict with StackView's x/y/width/height animation. Width/height bindings
+    // still preserve full-parent sizing when this component is used directly.
+    width: parent ? parent.width : 1920
+    height: parent ? parent.height : 1080
 signal requestScreenshot()
 
 // ================== STYLE CONFIG (3 styles) ==================
@@ -1014,8 +1018,13 @@ return false
 }
 
 function isDoaActive(it) {
-var now = mapviewer.doaNowMs
-return (now - (it.updatedMs || 0) <= mapviewer.doaTimeoutMs)
+// ListModel.get(index) can transiently return undefined while rows are being
+// removed/rebuilt. Treat that frame as inactive instead of dereferencing it.
+if (!it) return false
+var now = Number(mapviewer.doaNowMs)
+var updated = Number(it.updatedMs || 0)
+if (!isFinite(now) || !isFinite(updated) || updated <= 0) return false
+return (now - updated <= mapviewer.doaTimeoutMs)
 }
 
 function isValidDoaFrame(thetaArray, spectrumArray, doaDeg, confidence) {
@@ -2831,6 +2840,7 @@ Item {
             antialiasing: true
 
             property bool paintScheduled: false
+            property bool clearRequested: false
 
             function clearCanvas() {
                 savedDoaDrawChunkTimer.stop()
@@ -2838,9 +2848,21 @@ Item {
                 mapviewer._savedDoaDrawIndex = 0
                 mapviewer._savedDoaDrawSegments = []
 
-                var ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
+                // Do not call getContext() from an arbitrary function. During
+                // StackView incubation/teardown Canvas may not have a render
+                // context yet. Defer all context access to onPaint.
+                clearRequested = true
                 requestPaint()
+            }
+
+            onAvailableChanged: {
+                if (available && clearRequested)
+                    requestPaint()
+            }
+
+            onVisibleChanged: {
+                if (visible && clearRequested)
+                    requestPaint()
             }
 
             function safeRequestPaint() {
@@ -2868,6 +2890,13 @@ Item {
 
             onPaint: {
                 var ctx = getContext("2d")
+                if (!ctx)
+                    return
+
+                if (clearRequested) {
+                    ctx.clearRect(0, 0, width, height)
+                    clearRequested = false
+                }
 
                 if (!mapviewer._savedDoaDrawBusy) {
                     if (mapviewer._savedDoaDrawSegments.length <= 0)
@@ -2976,6 +3005,8 @@ Item {
 
                         onPaint: {
                             const ctx = getContext("2d")
+                            if (!ctx)
+                                return
                             ctx.clearRect(0, 0, width, height)
 
                             const cx = width / 2
@@ -3116,6 +3147,8 @@ Item {
                     return
 
                 var ctx = getContext("2d")
+                if (!ctx)
+                    return
                 ctx.clearRect(0, 0, width, height)
 
                 if (!visible)
@@ -3317,6 +3350,8 @@ Item {
                         if (it0 && hudBox.isKeyHidden(it0.key)) return
 
                         const ctx = getContext("2d")
+                        if (!ctx)
+                            return
                         const w = width
                         const h = height
                         ctx.clearRect(0,0,w,h)
@@ -3436,6 +3471,8 @@ Item {
             onPaint: {
                 if (!map) return
                 const ctx = getContext("2d")
+                if (!ctx)
+                    return
                 ctx.clearRect(0,0,width,height)
 
                 for (var i=0; i<doaPinsModel.count; ++i) {
@@ -3545,6 +3582,8 @@ Item {
                 if (!map) return
 
                 const ctx = getContext("2d")
+                if (!ctx)
+                    return
                 ctx.clearRect(0, 0, width, height)
 
                 const meters = Number(lineLengthMeters)
@@ -3837,6 +3876,8 @@ Item {
 
                     onPaint: {
                         const ctx = getContext("2d")
+                        if (!ctx)
+                            return
                         ctx.clearRect(0,0,width,height)
 
                         const cx = width/2, cy = height/2
@@ -4475,6 +4516,8 @@ Item {
 
                            onPaint: {
                                var ctx = getContext("2d")
+                               if (!ctx)
+                                   return
                                ctx.clearRect(0, 0, width, height)
 
                                var cx = width / 2

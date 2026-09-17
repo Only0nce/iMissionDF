@@ -20,7 +20,9 @@ GetInputEvent::GetInputEvent(char *inputdev, int codedetect, int InputEventID, Q
 void* GetInputEvent::ThreadFunc(void* pTr )
 {
     GetInputEvent* pThis = static_cast<GetInputEvent*>(pTr);
-    pThis->run();
+    if (pThis)
+        pThis->run();
+    return nullptr;
 }
 
 void GetInputEvent::run()
@@ -28,8 +30,10 @@ void GetInputEvent::run()
     int fd;
     struct input_event ie;
     if ((fd = open(inputevent, O_RDONLY)) == -1) {
-        perror("opening device");
-        exit(EXIT_FAILURE);
+        qWarning() << "[GetInputEvent] cannot open input device"
+                   << (inputevent ? inputevent : "<null>")
+                   << "-- input integration disabled; application continues";
+        return;
     }
 
     while (read(fd, &ie, sizeof(struct input_event)))

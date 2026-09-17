@@ -7,7 +7,11 @@ Rectangle {
     id: root
     // width: 1920
     // height: 1080
-    anchors.fill: parent
+    // STAB2: StackView owns page geometry during transitions. Root anchors
+    // conflict with StackView's x/y/width/height animation. Width/height bindings
+    // still preserve full-parent sizing when this component is used directly.
+    width: parent ? parent.width : 1920
+    height: parent ? parent.height : 1080
     color: "#000000"
 
     // =========================

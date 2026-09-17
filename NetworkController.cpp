@@ -1649,6 +1649,43 @@ NetworkController::NetworkController(QObject *parent) : QObject(parent)
 #endif
 }
 
+bool NetworkController::persistDfServerEndpoint(const QString &ip, QString *outMessage)
+{
+    const QString normalized = ip.trimmed();
+
+    QHostAddress address;
+    if (!address.setAddress(normalized) ||
+        address.protocol() != QAbstractSocket::IPv4Protocol) {
+        const QString msg = QStringLiteral("Invalid DF Server IPv4 address: %1")
+                                .arg(normalized);
+        if (outMessage)
+            *outMessage = msg;
+        qWarning().noquote() << "[ENDPOINTS][FILE]" << msg;
+        return false;
+    }
+
+    QString msg;
+    const bool ok = updateNetworkConfigRoot([&](QJsonObject &rootObj) {
+        QJsonObject endpoints = rootObj.value(QStringLiteral("endpoints")).toObject();
+        endpoints.insert(QStringLiteral("dfServerIp"), normalized);
+        rootObj.insert(QStringLiteral("endpoints"), endpoints);
+    }, &msg);
+
+    if (outMessage)
+        *outMessage = msg;
+
+    if (ok) {
+        qInfo().noquote() << "[ENDPOINTS][FILE] saved endpoints.dfServerIp="
+                          << normalized;
+    } else {
+        qWarning().noquote() << "[ENDPOINTS][FILE] save failed ip="
+                             << normalized
+                             << "reason=" << msg;
+    }
+
+    return ok;
+}
+
 // ============================================================
 // LAN apply
 // ============================================================

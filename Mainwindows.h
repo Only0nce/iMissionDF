@@ -488,6 +488,9 @@ private:
     QTimer *squelchOffTimer = nullptr;
     QTimer *startScanCard = nullptr;
     bool isSquelchOffPending = false;
+    // STAB2: log a persistent SHD_AMP read fault once until the GPIO recovers.
+    bool m_shdAmpReadFaultLogged = false;
+    bool m_sqlGpioWriteFaultLogged = false;
 
 
     // newGPIOClass *A_IN = new newGPIOClass(GPIO_A_SW_IN);

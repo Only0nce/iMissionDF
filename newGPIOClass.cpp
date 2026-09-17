@@ -30,6 +30,8 @@ bool newGPIOClass::requestOutput() {
         return false;
     }
     isOutput = true;
+    hasCachedValue = true;
+    cachedValue = false; // request_output() above initializes the line to 0
     return true;
 }
 
@@ -41,6 +43,7 @@ bool newGPIOClass::requestInput() {
         return false;
     }
     isOutput = false;
+    hasCachedValue = false;
     return true;
 }
 
@@ -51,11 +54,21 @@ bool newGPIOClass::setValue(bool value) {
         std::cerr << "Failed to set value on line " << lineNum << std::endl;
         return false;
     }
+    cachedValue = value;
+    hasCachedValue = true;
     return true;
 }
 
 int newGPIOClass::getValue(bool &value) {
-    if (!line || isOutput) return -1;
+    if (!line) return -1;
+
+    // An output requested through this object cannot change behind our back.
+    // Returning the last successfully driven value avoids false read failures
+    // while keeping input lines backed by a real GPIO read.
+    if (isOutput && hasCachedValue) {
+        value = cachedValue;
+        return 0;
+    }
 
     int val = gpiod_line_get_value(line);
     if (val < 0) {
@@ -63,6 +76,8 @@ int newGPIOClass::getValue(bool &value) {
         return -1;
     }
     value = val ? true : false;
+    cachedValue = value;
+    hasCachedValue = true;
     return 0;
 }
 
@@ -71,6 +86,8 @@ void newGPIOClass::release() {
         gpiod_line_release(line);
         line = nullptr;
     }
+    isOutput = false;
+    hasCachedValue = false;
 
     if (chip) {
         gpiod_chip_close(chip);

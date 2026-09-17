@@ -133,9 +133,9 @@ class MAX31760 : public QObject
     Q_OBJECT
 public:
     explicit MAX31760(QObject *parent = nullptr);
+    ~MAX31760() override;
     int readFanRpm1();
     int tempDetect();
-    MAX31760();
     float gputemp = 0;
     float cputemp = 0;
     int count = 0;
@@ -145,10 +145,18 @@ public slots:
     void safemode();
     void normalmode();
 private:
-    I2CReadWrite *ReadWrite;
-    QProcess* Process;
+    bool writeProfilePayload(int address, quint8 controlByte, quint8 profileByte, const char *reason);
+    void logI2cFailure(const char *reason, const QString &detail);
+
+    I2CReadWrite *ReadWrite = nullptr;
+    QProcess* Process = nullptr;
     QString i2cDev;
     QString checkDevice();
+    int m_lastFanProfile = -1;
+    bool m_i2cFaultLogged = false;
+    bool m_thermalFaultLogged = false;
+    qint64 m_nextI2cRetryMs = 0;
+    int m_i2cRetryDelayMs = 5000;
 
 
 };

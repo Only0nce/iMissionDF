@@ -26,7 +26,6 @@ import QtQuick.VirtualKeyboard 2.4
 import Qt.labs.settings 1.1
 
 import "../i18n" as I18n
-import "../.." as SharedComponents
 import "./"
 
 Item {
@@ -210,18 +209,8 @@ Item {
     property string wifi5gSourceUrl: "qrc:/Setting.qml"
     property bool hardwareHasWireless: (typeof HardwareHasWireless === "undefined") ? false : HardwareHasWireless
 
-    // NET-AUTH2.2: choose Network Settings access level before entering the page.
-    // Viewer may edit LAN1 + LAN2 + Endpoints + WiFi + 5G; Admin gets full LAN1-LAN4 access.
-    property int pendingProtectedNavigationIndex: -1
-    property string pendingProtectedNavigationTitle: ""
-    property string pendingProtectedNavigationSource: ""
-    property string networkAccessRole: "viewer"
-
-    function clearPendingProtectedNavigation() {
-        pendingProtectedNavigationIndex = -1
-        pendingProtectedNavigationTitle = ""
-        pendingProtectedNavigationSource = ""
-    }
+    // NET-AUTH3: Network Settings enters directly in Viewer mode.
+    // Privilege elevation to Admin is handled only inside Setting.qml.
 
     function performToolbarNavigation(index, title, source) {
         if (index < 0 || index >= toolbar.pages.length)
@@ -240,14 +229,19 @@ Item {
         }
 
         toolbar.currentIndex = index
-        toolbar.hoveredIndex = index
+        // Selected state belongs to currentIndex. Hover is transient pointer state
+        // and must never be latched across navigation/cancel paths.
+        toolbar.hoveredIndex = -1
         settingsPanel.navigate(title, source, index)
 
         if (newSource === "qrc:/DoaViewer/ViewerPage.qml") {
-            if (typeof doaClient !== "undefined"
-                    && doaClient
-                    && !doaClient.connected) {
-                doaClient.connectToServer()
+            if (typeof doaClient !== "undefined" && doaClient) {
+                // NET-ENDPOINTS1.7: DoA Viewer consumes the local iScreenDF
+                // bridge. DF Server IP remains the single remote RFSoC target.
+                doaClient.host = "127.0.0.1"
+                doaClient.port = 9000
+                if (!doaClient.connected)
+                    doaClient.connectToServer()
             }
         }
 
@@ -266,50 +260,23 @@ Item {
         }
     }
 
-    function completeProtectedNetworkNavigation(role) {
-        var index = settingsPanel.pendingProtectedNavigationIndex
-        var title = settingsPanel.pendingProtectedNavigationTitle
-        var source = settingsPanel.pendingProtectedNavigationSource
-
-        settingsPanel.networkAccessRole = (role === "admin") ? "admin" : "viewer"
-        settingsPanel.clearPendingProtectedNavigation()
-        settingsPanel.performToolbarNavigation(index, title, source)
-    }
-
     function requestToolbarNavigation(index, title, source) {
-        if (source !== settingsPanel.wifi5gSourceUrl) {
-            if (toolbar.currentIndex >= 0
-                    && toolbar.currentIndex < toolbar.pages.length
-                    && toolbar.pages[toolbar.currentIndex].source === settingsPanel.wifi5gSourceUrl) {
-                settingsPanel.networkAccessRole = "viewer"
+        if (index < 0 || index >= toolbar.pages.length)
+            return
+
+        // NET-AUTH3: no entry popup. The Network Settings page is pushed
+        // directly and MainPage supplies Viewer as the least-privileged role.
+        if (source === settingsPanel.wifi5gSourceUrl) {
+            if (toolbar.currentIndex === index) {
+                toolbar.hoveredIndex = -1
+                return
             }
+            console.log("[NET-AUTH3] direct Network Settings entry -> Viewer")
             performToolbarNavigation(index, title, source)
             return
         }
 
-        if (toolbar.currentIndex === index)
-            return
-
-        pendingProtectedNavigationIndex = index
-        pendingProtectedNavigationTitle = title
-        pendingProtectedNavigationSource = source
-        networkAccessModePopup.requestSelection()
-    }
-
-    SharedComponents.NetworkAccessModePopup {
-        id: networkAccessModePopup
-        onViewerSelected: settingsPanel.completeProtectedNetworkNavigation("viewer")
-        onAdminSelected: networkEntryPasswordPopup.requestUnlock()
-        onCancelled: settingsPanel.clearPendingProtectedNavigation()
-    }
-
-    SharedComponents.NetworkPasswordPopup {
-        id: networkEntryPasswordPopup
-        titleText: "Administrator Access"
-        messageText: "Enter the administrator password for full Network Settings access"
-        unlockButtonText: "Enter as Admin"
-        onAuthorized: settingsPanel.completeProtectedNetworkNavigation("admin")
-        onCancelled: settingsPanel.clearPendingProtectedNavigation()
+        performToolbarNavigation(index, title, source)
     }
 
     function toolbarPages() {
@@ -865,9 +832,8 @@ Item {
                             onHoveredChanged: {
                                 if (hovered) {
                                     toolbar.hoveredIndex = index
-                                } else {
-                                    if (toolbar.hoveredIndex === index && toolbar.currentIndex !== index)
-                                        toolbar.hoveredIndex = -1
+                                } else if (toolbar.hoveredIndex === index) {
+                                    toolbar.hoveredIndex = -1
                                 }
                             }
 

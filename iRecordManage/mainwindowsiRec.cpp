@@ -12,7 +12,8 @@ mainwindowsiRec::mainwindowsiRec(QString platform,QObject *parent) : QObject(par
     mysql        = new DatabaseiRec("recorder", "iScreenKraken", "Ifz8zean6868**", "localhost", this);
     max31760     = new MAX31760(this);
     max9850      = new Max9850("7", 0x10);
-    UnixSocketListener* unixReceiver = new UnixSocketListener(this);
+    // One owner for /tmp/recd_status.sock. A second listener would unlink the
+    // first listener's pathname and leave an unreachable bound socket behind.
     m_unixReceiver = new UnixSocketListener(this);
     dataLoggerServer = new ChatClientiGate(8088,"127.0.0.1","",1,enableDataLogger);
     dataLoggerServer->setDevice("Server","localhost");
@@ -27,30 +28,24 @@ mainwindowsiRec::mainwindowsiRec(QString platform,QObject *parent) : QObject(par
     connect(mysql, &DatabaseiRec::verifyUserDatabaseDone,this, &mainwindowsiRec::onVerifyUserDatabaseDone);
 
     int ret = pthread_create(&idThreaddatetime, nullptr, ThreadFuncDateTime, this);
-    if (ret == 0) qDebug() << "Thread created successfully.";
-    else          qDebug() << "Thread not created.";
+    m_dateTimeThreadStarted = (ret == 0);
+    if (m_dateTimeThreadStarted) qDebug() << "[iRec] date-time worker started";
+    else qWarning() << "[iRec] date-time worker start failed" << ret;
 
-    ret=pthread_create(&idThreadFan, NULL, ThreadFuncFan, this);
-    if(ret==0){
-        qDebug() <<("Thread created successfully.\n");
-    }
-    else{
-        qDebug() <<("Thread not created.\n");
-    }
-    ret=pthread_create(&idThread, NULL, ThreadFunc, this);
-    if(ret==0){
-        qDebug() <<("Thread created successfully.\n");
-    }
-    else{
-        qDebug() <<("Thread not created.\n");
-    }
-    ret=pthread_create(&idThreadMonitor, NULL, ThreadMonitor, this);
-    if(ret==0){
-        qDebug() <<("Thread created successfully.\n");
-    }
-    else{
-        qDebug() <<("Thread not created.\n");
-    }
+    ret = pthread_create(&idThreadFan, nullptr, ThreadFuncFan, this);
+    m_fanThreadStarted = (ret == 0);
+    if (m_fanThreadStarted) qDebug() << "[iRec] fan worker started";
+    else qWarning() << "[iRec] fan worker start failed" << ret;
+
+    ret = pthread_create(&idThread, nullptr, ThreadFunc, this);
+    m_mainThreadStarted = (ret == 0);
+    if (m_mainThreadStarted) qDebug() << "[iRec] periodic worker started";
+    else qWarning() << "[iRec] periodic worker start failed" << ret;
+
+    ret = pthread_create(&idThreadMonitor, nullptr, ThreadMonitor, this);
+    m_monitorThreadStarted = (ret == 0);
+    if (m_monitorThreadStarted) qDebug() << "[iRec] monitor worker started";
+    else qWarning() << "[iRec] monitor worker start failed" << ret;
 
     mysql->VerifyUserDatabase();
     QTimer::singleShot(1000, this, [this]() {
@@ -107,9 +102,36 @@ void mainwindowsiRec::installFfmpegIfNeeded()
 
 mainwindowsiRec::~mainwindowsiRec()
 {
-    m_threadRunning = false;
-    void* dummy = nullptr;
-    pthread_join(idThreaddatetime, &dummy);
+    // All startup pthread workers capture `this`; stop and join every worker
+    // before QObject members are destroyed. The previous destructor joined
+    // only the date-time worker, leaving fan/monitor/periodic workers able to
+    // dereference a freed mainwindowsiRec during shutdown.
+    m_threadRunning.store(false, std::memory_order_relaxed);
+
+    if (m_dateTimeThreadStarted) {
+        pthread_join(idThreaddatetime, nullptr);
+        m_dateTimeThreadStarted = false;
+    }
+    if (m_fanThreadStarted) {
+        pthread_join(idThreadFan, nullptr);
+        m_fanThreadStarted = false;
+    }
+    if (m_mainThreadStarted) {
+        pthread_join(idThread, nullptr);
+        m_mainThreadStarted = false;
+    }
+    if (m_monitorThreadStarted) {
+        pthread_join(idThreadMonitor, nullptr);
+        m_monitorThreadStarted = false;
+    }
+
+    // Hourly cleanup is one-shot but still owns `this`/mysql. If one is in
+    // flight, wait for it before destroying those objects rather than allowing
+    // a shutdown use-after-free.
+    if (m_cleanupThreadStarted) {
+        pthread_join(idThread4, nullptr);
+        m_cleanupThreadStarted = false;
+    }
 }
 
 void mainwindowsiRec::VerifyFolderAndText()
@@ -463,14 +485,27 @@ void mainwindowsiRec::getDateTime()
         }
 
 
+        // Reap the previous one-shot cleanup worker before reusing its
+        // pthread_t. A completed joinable pthread otherwise leaks resources.
+        if (m_cleanupThreadStarted) {
+            if (m_cleanupThreadRunning.load(std::memory_order_acquire)) {
+                qWarning() << "[Hourly] previous cleanup still running; skip overlapping cleanup";
+                lastRunHour = nowTime.hour();
+                return;
+            }
+            pthread_join(idThread4, nullptr);
+            m_cleanupThreadStarted = false;
+        }
+
         int ret = pthread_create(&idThread4, nullptr, ThreadFunc4, this);
         if (ret == 0) {
-            qDebug() << QString("[Hourly %1:00] Thread4 created successfully. used=%2%")
+            m_cleanupThreadStarted = true;
+            qDebug() << QString("[Hourly %1:00] cleanup worker created. used=%2%")
             .arg(nowTime.hour())
                 .arg(usedPct);
             lastRunHour = nowTime.hour();
         } else {
-            qWarning() << QString("[Hourly %1:00] Thread4 not created. used=%2%")
+            qWarning() << QString("[Hourly %1:00] cleanup worker not created. used=%2%")
             .arg(nowTime.hour())
                 .arg(usedPct);
         }
@@ -539,8 +574,11 @@ void mainwindowsiRec::cppSubmitTextFiled(QString qmlJson)
     QJsonObject obj = doc.object();
 
     getCommand = getCommand.trimmed();
-    QWebSocket* wClient;
-    clientSocket = wClient;
+    // QML-originated commands do not carry a WebSocket sender. The previous
+    // uninitialized local pointer could propagate arbitrary memory into DB
+    // response paths and become a use-after-free/crash source.
+    QWebSocket *wClient = nullptr;
+    clientSocket = nullptr;
     if (getCommand ==  "socketConnect"){
         QString socketConnect = QJsonValue(command["socketCPP"]).toString();
         qDebug() << "socketConnect:" << socketConnect;
@@ -1988,7 +2026,7 @@ void mainwindowsiRec::recLogging(int softPhoneID, int recorderID,QString recStat
 void* mainwindowsiRec::ThreadFunc(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
-    while (true) {
+    while (pThis->m_threadRunning.load(std::memory_order_relaxed)) {
         emit pThis->getDateTime();
         QThread::msleep(1000);
     }
@@ -1998,7 +2036,7 @@ void* mainwindowsiRec::ThreadFuncDateTime(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
     qDebug() << "ThreadFuncDateTime start";
-    while (pThis->m_threadRunning) {
+    while (pThis->m_threadRunning.load(std::memory_order_relaxed)) {
         if (pThis->m_qmlConnected.load(std::memory_order_relaxed)) {
             //            pThis->calendar();
         }
@@ -2010,21 +2048,26 @@ void* mainwindowsiRec::ThreadFuncDateTime(void* pTr)
 void* mainwindowsiRec::ThreadFuncFan(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
-    while (true) {
-        pThis->max31760->tempDetect();
+    while (pThis->m_threadRunning.load(std::memory_order_relaxed)) {
+        if (pThis->max31760)
+            pThis->max31760->tempDetect();
         QThread::msleep(1000);
     }
-    return NULL;
+    return nullptr;
 }
 void* mainwindowsiRec::ThreadFunc4(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
-    pThis->mysql->checkFlieAndRemoveDB();
+    pThis->m_cleanupThreadRunning.store(true, std::memory_order_release);
+    if (pThis->m_threadRunning.load(std::memory_order_relaxed) && pThis->mysql)
+        pThis->mysql->checkFlieAndRemoveDB();
+    pThis->m_cleanupThreadRunning.store(false, std::memory_order_release);
+    return nullptr;
 }
 void* mainwindowsiRec::ThreadMonitor(void* pTr)
 {
     mainwindowsiRec* pThis = static_cast<mainwindowsiRec*>(pTr);
-    while (true) {
+    while (pThis->m_threadRunning.load(std::memory_order_relaxed)) {
         emit pThis->getMonitorParemeter();
         QThread::msleep(1000);
     }

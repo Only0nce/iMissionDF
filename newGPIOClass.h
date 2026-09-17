@@ -23,6 +23,11 @@ private:
     gpiod_chip *chip = nullptr;
     gpiod_line *line = nullptr;
     bool isOutput = false;
+    // STAB2: output lines are driven exclusively by this object. Cache the
+    // successfully driven logical value so callers can read state without
+    // issuing an invalid input-style read on an output request.
+    bool hasCachedValue = false;
+    bool cachedValue = false;
 };
 
 #endif // NEWGPIOCLASS_H

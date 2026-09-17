@@ -421,6 +421,13 @@ int main(int argc, char *argv[])
 #endif
 
     DoaClient doaClient;
+    // NET-ENDPOINTS1.7: the integrated DoA Viewer does not open a second
+    // connection to the RFSoC. iScreenDF owns the remote DF control/data link
+    // at Parameter.ipdfserver:5555 and rebroadcasts received JSON on the local
+    // TcpServerDF bridge. The viewer consumes that live stream locally.
+    doaClient.setHost(QStringLiteral("127.0.0.1"));
+    doaClient.setPort(9000);
+    qInfo().noquote() << "[DOA][BRIDGE] integrated viewer target=127.0.0.1:9000";
     engine->rootContext()->setContextProperty("doaClient", &doaClient);
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));

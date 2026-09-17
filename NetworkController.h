@@ -25,6 +25,12 @@ public:
     Q_INVOKABLE QVariantMap loadAllLanConfig();
     Q_INVOKABLE QVariantMap queryDhcpInfo(const QString &iface);
 
+    // NET-ENDPOINTS1.7: mirror the DF/RFSoC control target into the existing
+    // atomic /etc/network_config.json store. Database Parameter.ipdfserver
+    // remains the authoritative startup source; this is persistence mirroring
+    // only and does not configure RFSoC end0/end1.
+    bool persistDfServerEndpoint(const QString &ip, QString *outMessage = nullptr);
+
     // R20.2: asynchronous read-only LAN queries for QML. The legacy synchronous
     // getters remain available for compatibility, but the Network page uses
     // these requests so nmcli/device probing never blocks the Qt GUI/audio event loop.

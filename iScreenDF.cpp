@@ -29,16 +29,6 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     chatServerDF  = new ChatServerDF(8000);
     chartclientDF = new ChatClientDF(this);
     localDFclient = new TcpClientDF(this);
-    m_dfEndpointApplyTimer = new QTimer(this);
-    m_dfEndpointApplyTimer->setSingleShot(true);
-    connect(m_dfEndpointApplyTimer, &QTimer::timeout, this, [this]() {
-        if (!m_dfApplyInProgress || m_dfAwaitingDbCommit)
-            return;
-
-        const qulonglong generation = m_dfEndpointGeneration;
-        rollbackDfEndpoint(QStringLiteral("candidate connect timeout"), generation);
-    });
-
     keepAliveTimer = new QTimer(this);
     compassTimer = new QTimer(this);
 
@@ -137,10 +127,6 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
 
     connect(db, &DatabaseDF::Getrfsocparameter,this, &iScreenDF::GetrfsocParameter, Qt::QueuedConnection);
     connect(db, &DatabaseDF::GetIPDFServer,this, &iScreenDF::GetIPDFServer, Qt::QueuedConnection);
-    connect(db, &DatabaseDF::dfServerEndpointPersisted,
-            this, &iScreenDF::onDfServerEndpointPersisted, Qt::QueuedConnection);
-    connect(db, &DatabaseDF::dfServerEndpointSnapshotReady,
-            this, &iScreenDF::onDfServerEndpointSnapshotReady, Qt::QueuedConnection);
     connect(db, &DatabaseDF::updateNetworkDfDevice,
             this,       &iScreenDF::onUpdateNetworkDfDevice, Qt::QueuedConnection);
 
@@ -183,14 +169,16 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     //////////////////////////////////////////////////////////////////////////////////
     // localDFclient->connectToServer("192.168.10.87",5555);
 
-    connect(localDFclient, &TcpClientDF::connected,
-            this, &iScreenDF::sendParameterToServer);
+    // NET-ENDPOINTS2.1: a TCP connection is transport establishment only.
+    // Do not blast the full RF/DoA parameter set on every reconnect. LAN3/LAN4
+    // need this channel only to observe the real TCP state and send the exact
+    // setIpConfig JSON when the operator presses Apply. RF/DoA commands remain
+    // available through their explicit command paths.
 
     connect(localDFclient, &TcpClientDF::connected,
             this, [this]() {
                 qInfo() << "[LAN][RFSoC-TCP] control channel connected"
                         << rfsocControlHost() << rfsocControlPort();
-                handleDfControlConnected();
                 emit rfsocControlConnectionChanged(true);
             });
 
@@ -199,15 +187,14 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
                 qDebug() << "DOA TCP Disconnected";
                 qInfo() << "[LAN][RFSoC-TCP] control channel disconnected"
                         << rfsocControlHost() << rfsocControlPort();
-                handleDfControlFailure(QStringLiteral("socket disconnected"));
                 emit rfsocControlConnectionChanged(false);
             });
 
     connect(localDFclient, &TcpClientDF::errorOccurred,
-            this, [this](const QString &err){
+            this, [](const QString &err){
+                // Error is diagnostic only. Connected/Disconnected UI state is
+                // emitted exclusively from QTcpSocket connected/disconnected.
                 qDebug() << "[DOA ERROR]" << err;
-                handleDfControlFailure(QStringLiteral("socket error: %1").arg(err));
-                emit rfsocControlConnectionChanged(false);
             });
 
     // connect(localDFclient, &TcpClientDF::connected,

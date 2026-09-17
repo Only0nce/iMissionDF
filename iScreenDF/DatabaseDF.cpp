@@ -2487,6 +2487,58 @@ void DatabaseDF::GetrfsocParameter()
                            offsetvalue, compassoffset, maxDoaLineMeters, ipLocalForRemoteGroup,setDelayMs,setDistance);
 }
 
+bool DatabaseDF::syncLegacyDfEndpointMirror(const QString &ip, QString *detail)
+{
+    const QString endpoint = ip.trimmed();
+    if (endpoint.isEmpty()) {
+        if (detail)
+            *detail = QStringLiteral("empty endpoint");
+        return false;
+    }
+
+    QSqlQuery mirror(db);
+    mirror.prepare(QStringLiteral(
+        "UPDATE Network2 "
+        "SET krakenserver = :ip_set "
+        "WHERE COALESCE(TRIM(krakenserver), '') <> :ip_cmp"));
+    mirror.bindValue(QStringLiteral(":ip_set"), endpoint);
+    mirror.bindValue(QStringLiteral(":ip_cmp"), endpoint);
+
+    if (!mirror.exec()) {
+        if (detail)
+            *detail = QStringLiteral("Network2 mirror UPDATE failed: %1")
+                          .arg(mirror.lastError().text());
+        return false;
+    }
+
+    QSqlQuery verify(db);
+    verify.prepare(QStringLiteral(
+        "SELECT COUNT(*) FROM Network2 "
+        "WHERE COALESCE(TRIM(krakenserver), '') <> :ip_cmp"));
+    verify.bindValue(QStringLiteral(":ip_cmp"), endpoint);
+
+    if (!verify.exec() || !verify.next()) {
+        if (detail)
+            *detail = QStringLiteral("Network2 mirror read-back failed: %1")
+                          .arg(verify.lastError().text());
+        return false;
+    }
+
+    const int staleRows = verify.value(0).toInt();
+    if (staleRows != 0) {
+        if (detail)
+            *detail = QStringLiteral("Network2 mirror mismatch: %1 stale row(s)")
+                          .arg(staleRows);
+        return false;
+    }
+
+    if (detail) {
+        *detail = QStringLiteral("Network2.krakenserver mirror OK; rows=%1")
+                      .arg(mirror.numRowsAffected());
+    }
+    return true;
+}
+
 void DatabaseDF::GetIPDFServerFromDB()
 {
     if (!ensureDb()) {
@@ -2513,11 +2565,179 @@ void DatabaseDF::GetIPDFServerFromDB()
     }
     const QString ip = qry.value("ipdfserver").toString().trimmed();
     qInfo() << "[LAN][RFSoC-TCP] Parameter.ipdfserver from DB =" << ip;
-    if (ip.isEmpty())
+    if (ip.isEmpty()) {
         qWarning() << "[LAN][RFSoC-TCP] Parameter.ipdfserver is empty in Parameter.id=1";
+    } else {
+        // Parameter.ipdfserver is the only authoritative DF endpoint. Keep the
+        // legacy per-NIC Network2.krakenserver column mirrored for old code/UI
+        // paths, but never let that legacy column become the source of truth.
+        QString mirrorDetail;
+        if (!syncLegacyDfEndpointMirror(ip, &mirrorDetail)) {
+            qWarning() << "[DF-ENDPOINT-DB][LEGACY-MIRROR]" << mirrorDetail
+                       << "authoritative=" << ip;
+        } else {
+            qInfo() << "[DF-ENDPOINT-DB][LEGACY-MIRROR]" << mirrorDetail
+                    << "authoritative=" << ip;
+        }
+    }
     emit GetIPDFServer(ip);
 
 }
+
+void DatabaseDF::requestDfServerEndpointSnapshot()
+{
+    if (!ensureDb()) {
+        emit dfServerEndpointSnapshotReady(QString(),
+                                           QStringLiteral("DB open failed"));
+        return;
+    }
+
+    QSqlQuery qry(db);
+    qry.prepare(QStringLiteral(
+        "SELECT ipdfserver FROM Parameter WHERE id = 1"));
+
+    if (!qry.exec() || !qry.next()) {
+        const QString detail = qry.lastError().isValid()
+            ? QStringLiteral("SELECT failed: %1").arg(qry.lastError().text())
+            : QStringLiteral("Parameter.id=1 missing");
+        qWarning() << "[DF-ENDPOINT-DB][SNAPSHOT]" << detail;
+        emit dfServerEndpointSnapshotReady(QString(), detail);
+        return;
+    }
+
+    const QString ip = qry.value(0).toString().trimmed();
+    if (ip.isEmpty()) {
+        const QString detail = QStringLiteral("Parameter.ipdfserver is empty");
+        qWarning() << "[DF-ENDPOINT-DB][SNAPSHOT]" << detail;
+        emit dfServerEndpointSnapshotReady(QString(), detail);
+        return;
+    }
+
+    QString mirrorDetail;
+    if (!syncLegacyDfEndpointMirror(ip, &mirrorDetail)) {
+        qWarning() << "[DF-ENDPOINT-DB][SNAPSHOT] legacy mirror warning:"
+                   << mirrorDetail << "authoritative=" << ip;
+    }
+
+    qInfo() << "[DF-ENDPOINT-DB][SNAPSHOT] authoritative=" << ip
+            << "source=Parameter.id=1.ipdfserver";
+    emit dfServerEndpointSnapshotReady(ip,
+                                       QStringLiteral("Parameter.id=1.ipdfserver"));
+}
+void DatabaseDF::persistDfServerEndpoint(const QString &ip, qulonglong generation)
+{
+    const QString requested = ip.trimmed();
+    if (requested.isEmpty()) {
+        const QString detail = QStringLiteral("empty endpoint rejected");
+        qWarning() << "[DF-ENDPOINT-DB]" << detail << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    if (!ensureDb()) {
+        const QString detail = QStringLiteral("DB open failed");
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    if (!db.transaction()) {
+        const QString detail = QStringLiteral("transaction begin failed: %1")
+                                   .arg(db.lastError().text());
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    QSqlQuery update(db);
+    update.prepare(QStringLiteral(
+        "UPDATE Parameter SET ipdfserver = :ip WHERE id = 1"));
+    update.bindValue(QStringLiteral(":ip"), requested);
+
+    if (!update.exec()) {
+        const QString detail = QStringLiteral("UPDATE failed: %1")
+                                   .arg(update.lastError().text());
+        db.rollback();
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    // Keep the legacy Network2.krakenserver copies synchronized inside the
+    // same transaction. Parameter.ipdfserver remains authoritative; this mirror
+    // only prevents old screens/caches from resurrecting a stale endpoint.
+    QString mirrorDetail;
+    if (!syncLegacyDfEndpointMirror(requested, &mirrorDetail)) {
+        const QString detail = QStringLiteral("legacy mirror failed: %1")
+                                   .arg(mirrorDetail);
+        db.rollback();
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    // numRowsAffected()==0 is not by itself a failure: MySQL commonly reports
+    // zero when the requested value is already stored. Read-back is the owner.
+    QSqlQuery verify(db);
+    verify.prepare(QStringLiteral(
+        "SELECT ipdfserver FROM Parameter WHERE id = 1"));
+
+    if (!verify.exec() || !verify.next()) {
+        const QString detail = verify.lastError().isValid()
+            ? QStringLiteral("read-back failed: %1").arg(verify.lastError().text())
+            : QStringLiteral("read-back failed: Parameter.id=1 missing");
+        db.rollback();
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, QString(), detail);
+        return;
+    }
+
+    const QString stored = verify.value(0).toString().trimmed();
+    if (stored != requested) {
+        const QString detail = QStringLiteral("read-back mismatch");
+        db.rollback();
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "stored=" << stored
+                   << "rows=" << update.numRowsAffected()
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, stored, detail);
+        return;
+    }
+
+    if (!db.commit()) {
+        const QString detail = QStringLiteral("commit failed: %1")
+                                   .arg(db.lastError().text());
+        db.rollback();
+        qWarning() << "[DF-ENDPOINT-DB]" << detail
+                   << "requested=" << requested
+                   << "stored=" << stored
+                   << "generation=" << generation;
+        emit dfServerEndpointPersisted(requested, generation, false, stored, detail);
+        return;
+    }
+
+    qInfo() << "[DF-ENDPOINT-DB]"
+            << "requested=" << requested
+            << "stored=" << stored
+            << "rows=" << update.numRowsAffected()
+            << "generation=" << generation
+            << "legacy_mirror=" << mirrorDetail
+            << "result=COMMIT_OK";
+    emit dfServerEndpointPersisted(requested, generation, true, stored,
+                                   QStringLiteral("COMMIT_OK"));
+}
+
 void DatabaseDF::UpdateParameterField(const QString &field, const QVariant &value)
 {
     static const QSet<QString> allowed = {

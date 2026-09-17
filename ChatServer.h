@@ -112,15 +112,15 @@ private:
     QList<QWebSocket *> m_clients;
     QList<QWebSocket *> m_WebSocketClients;
     QList<QWebSocket *> m_snmpSocketClients;
-    QWebSocket *newSocket;
+    QWebSocket *newSocket = nullptr;
     QList<QWebSocket *> m_WebSocketVUClients;
     QList<QWebSocket *> m_WebSocketRecClients;
     static QString wsInfo(QWebSocket *s);
     struct SoftPhoneSocketClient
 
     {
-        int softPhoneID;
-        QWebSocket *SocketClients;
+        int softPhoneID = 0;
+        QPointer<QWebSocket> SocketClients;
     };
     QList<SoftPhoneSocketClient *> softPhoneSocketClient;
     QList<SoftPhoneSocketClient *> recSocketClient;

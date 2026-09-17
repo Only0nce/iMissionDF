@@ -3,12 +3,16 @@
 #include <QCoreApplication>
 #include <QDebug>
 SPIClass::SPIClass(const std::string& spidev)
-: spiDev(spidev) // ใช้ initializer list
+    : spiDev(spidev)
 {
     spi_dev = new Linux_SPI;
     spi_init();
-//    delay_mSec(100);
+}
 
+SPIClass::~SPIClass()
+{
+    delete spi_dev;
+    spi_dev = nullptr;
 }
 void SPIClass::delay_mSec(int mSec)
  {
@@ -19,51 +23,41 @@ void SPIClass::delay_mSec(int mSec)
 
 void SPIClass::spi_init()
 {
-    int ret = spi_dev->dev_open(spiDev.c_str());
-    if( ret != 0 )
-    {
-        printf("Error: %s\n", spi_dev->strerror(spi_dev->get_errno()));
-        exit(-1);
-    }
-    else
-    {
-        qDebug() << "spi_dev->dev_open(spiDev)" << ret;
+    m_ready = false;
+    if (!spi_dev) {
+        qCritical() << "[SPI] backend object is null for" << QString::fromStdString(spiDev);
+        return;
     }
 
+    const auto fail = [this](const char *stage) {
+        qCritical().noquote() << "[SPI] initialization failed"
+                              << "stage=" << stage
+                              << "device=" << QString::fromStdString(spiDev)
+                              << "error=" << spi_dev->strerror(spi_dev->get_errno())
+                              << "(continuing in degraded audio-DSP mode)";
+        spi_dev->dev_close();
+    };
 
-    if( spi_dev->set_mode(SPI_MODE) != 0 )
-    {
-        printf("Error: %s\n", spi_dev->strerror(spi_dev->get_errno()));
-        exit(-1);
+    if (spi_dev->dev_open(spiDev.c_str()) != 0) {
+        fail("open");
+        return;
     }
-    else
-    {
-        qDebug() << "spi_dev->set_mode(SPI_MODE)" << SPI_MODE;
+    if (spi_dev->set_mode(SPI_MODE) != 0) {
+        fail("mode");
+        return;
     }
-
-
-    if( spi_dev->set_bits_per_word(bits) != 0 )
-    {
-        printf("Error: %s\n", spi_dev->strerror(spi_dev->get_errno()));
-        exit(-1);
+    if (spi_dev->set_bits_per_word(bits) != 0) {
+        fail("bits-per-word");
+        return;
     }
-    else
-    {
-        qDebug() << "spi_dev->set_bits_per_word(bits)" << bits;
-    }
-
-
-    if( spi_dev->set_max_speed_hz(speed) != 0 )
-    {
-        printf("Error: %s\n", spi_dev->strerror(spi_dev->get_errno()));
-        exit(-1);
-    }
-    else
-    {
-        qDebug() << "spi_dev->set_max_speed_hz(speed)" << speed;
+    if (spi_dev->set_max_speed_hz(speed) != 0) {
+        fail("speed");
+        return;
     }
 
-
+    m_ready = true;
+    qInfo() << "[SPI] ready" << QString::fromStdString(spiDev)
+            << "mode=" << SPI_MODE << "bits=" << bits << "speed=" << speed;
 }
 void SPIClass::clear_rx(){
     for (int i = 0; i < 4096; i++){
@@ -73,6 +67,9 @@ void SPIClass::clear_rx(){
 
 int SPIClass::send_byte_data(uint8_t *txByteData,uint8_t *rxByteData, uint32_t len)
 {
+    if (!m_ready || !spi_dev || !txByteData || len == 0)
+        return -1;
+
     struct spi_ioc_transfer mesg[2];
     uint16_t val = 1600;
     int ret, i;

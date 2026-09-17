@@ -186,6 +186,12 @@ public:
 signals:
     // R-LAN4A: RFSoC TCP control-channel connectivity for external LAN3/LAN4.
     void rfsocControlConnectionChanged(bool connected);
+    // Transaction telemetry for DF Server IP Apply/Reconnect. QML may display
+    // this, but the backend remains authoritative for commit/rollback.
+    void dfServerEndpointTransactionChanged(const QString &state,
+                                            const QString &candidateIp,
+                                            const QString &committedIp,
+                                            const QString &detail);
     // Legacy RFSoC IP-config dispatch telemetry. State is DISPATCHED, QUEUED,
     // QUEUED_NO_TARGET, REJECTED, or ERROR. DISPATCHED means the JSON was
     // accepted by QTcpSocket for transmission; it is not a remote apply ACK.
@@ -351,8 +357,8 @@ public slots:
     void sendRfAgcEnable(int ch, bool enable);
     void setLinkStatus(bool linkStatus);
     void connectToDFserver(const QString &ip);
-    void reconnectDFserver();
-    void requestServiceEndpointsState();
+    void reconnectToDFserver();
+    void requestDfServerEndpointSnapshot();
     void setCompassOffset(double offset);
     void onUpdateNetworkDfDevice(const QString &iface,
                                  const QString &dhcp,
@@ -380,6 +386,13 @@ public slots:
 
 
 private slots:
+    void onDfServerEndpointPersisted(const QString &requestedIp,
+                                     qulonglong generation,
+                                     bool ok,
+                                     const QString &storedIp,
+                                     const QString &detail);
+    void onDfServerEndpointSnapshotReady(const QString &ip,
+                                         const QString &detail);
     void remoteGroupsJson(const QString &json);
     void remoteSideRemoteJson(const QString &json);
     void sigGroupsInGroupSetting(const QString &json);
@@ -401,6 +414,28 @@ private slots:
 private:
     bool m_blockUiSync = false;
     QString localIpAddress() const;
+
+    // DF Server endpoint transaction state. Draft lives in QML; candidate is
+    // temporary until TCP connect + DB read-back both succeed.
+    bool isValidDfEndpointIpv4(const QString &ip) const;
+    void handleDfControlConnected();
+    void handleDfControlFailure(const QString &reason);
+    void rollbackDfEndpoint(const QString &reason, qulonglong generation);
+    void applyCommittedDfEndpointSideEffects(const QString &ip);
+    void emitDfEndpointState(const QString &state,
+                             const QString &detail = QString());
+
+    QTimer *m_dfEndpointApplyTimer = nullptr;
+    QString m_dfCommittedIp;
+    QString m_dfLastKnownGoodIp;
+    QString m_dfCandidateIp;
+    QString m_dfActiveIp;
+    qulonglong m_dfEndpointGeneration = 0;
+    qulonglong m_dfPendingCommitGeneration = 0;
+    bool m_dfApplyInProgress = false;
+    bool m_dfAwaitingDbCommit = false;
+    bool m_dfRollbackInProgress = false;
+    int m_dfEndpointApplyTimeoutMs = 3500;
 
     ChatClientDF *chatClient = nullptr;
     QThread    *dbThread;
@@ -508,7 +543,8 @@ private:
         bool   m_rfAgcChEnabled[5] = { true, true, true, true, true };
         double m_rfAgcTargetDb[5]  = { -70.0, -70.0, -70.0, -70.0, -70.0 };
         bool m_linkStatus = false;
-        QString m_ipdfServer = "192.168.10.78";
+        // DB-owned endpoint: never resurrect a compiled-in legacy address.
+        QString m_ipdfServer;
         double m_offset_value = 0.0;
         double m_compass_offset = 0.0;
         int m_maxDoaLine_meters = 0.0;

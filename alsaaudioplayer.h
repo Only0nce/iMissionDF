@@ -15,6 +15,7 @@
 #include <QVector>
 #include <QDebug>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <atomic>
 
 class AlsaAudioPlayer : public QObject {
@@ -69,7 +70,14 @@ private:
     int m_bufferMs = 100;
     int m_periodMs = 20;
     int m_stageMs = 100;
-    int m_maxQueuedChunks = 30;
+    int m_maxQueuedChunks = 8;
+
+    // Live-edge overflow accounting. We intentionally collapse stale backlog
+    // in batches and rate-limit diagnostics so logging cannot amplify an
+    // already overloaded real-time path.
+    quint64 m_droppedQueuedChunks = 0;
+    quint64 m_reportedDroppedQueuedChunks = 0;
+    QElapsedTimer m_overflowReportTimer;
 
     QByteArray audioBuffer;
 

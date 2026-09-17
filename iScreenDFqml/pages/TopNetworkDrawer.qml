@@ -75,6 +75,14 @@ Drawer {
     property string vpnIp: "--"
     property string vpnDetail: ""
 
+    // DF endpoint transaction state. Draft text remains local until backend
+    // confirms TCP + DB commit. Reconnect always uses committed backend state.
+    property string endpointState: "IDLE"
+    property string endpointDetail: ""
+    // Authoritative endpoint comes only from Parameter.id=1.ipdfserver via C++.
+    // Network2.krakenserver is a legacy mirror and must never drive this field.
+    property string committedDfServerIp: ""
+
     // ==========================
     // ✅ BASIC: Switch page (Network/VPN)
     // 0 = Network, 1 = VPN
@@ -278,7 +286,6 @@ Drawer {
         setIfNotEmpty(gwField,   "gw")
         setIfNotEmpty(dns1Field, "dns1")
         setIfNotEmpty(dns2Field, "dns2")
-        setIfNotEmpty(serverField, "server")
     }
 
     onSelectedNicChanged: {
@@ -318,6 +325,8 @@ Drawer {
         if (visible) {
             vpnRefresh()
             requestNetworkRefresh()
+            if (krakenmapval && typeof krakenmapval.requestDfServerEndpointSnapshot === "function")
+                krakenmapval.requestDfServerEndpointSnapshot()
         }
     }
 
@@ -326,8 +335,10 @@ Drawer {
         selectedNic = 1
         basicTab = 0
 
-        // ขอ network ตั้งแต่เริ่ม
+        // ขอ network + DF endpoint snapshot ตั้งแต่เริ่ม
         requestNetworkRefresh()
+        if (krakenmapval && typeof krakenmapval.requestDfServerEndpointSnapshot === "function")
+            krakenmapval.requestDfServerEndpointSnapshot()
         vpnRefresh()
 
         if (mainWindows && mainWindows.updateNetworkToDisplay) {
@@ -483,18 +494,22 @@ Drawer {
             gwField.text   = row.GATEWAY
             dns1Field.text = row.PRIMARY_DNS
             dns2Field.text = row.SECONDARY_DNS
-            _blockServerFieldSignal = true
-            serverField.text = row.krakenserver
-            serverField.originalValue = serverField.text
-            _blockServerFieldSignal = false
             dhcpCombo.currentIndex = (row.DHCP === "off") ? 1 : 0
         }
 
         function onUpdateServeripDfserver(ip) {
+            committedDfServerIp = String(ip || "").trim()
+            if (committedDfServerIp.length === 0) return
+
             _blockServerFieldSignal = true
-            serverField.text = ip
-            serverField.originalValue = serverField.text
+            serverField.text = committedDfServerIp
+            serverField.originalValue = committedDfServerIp
             _blockServerFieldSignal = false
+        }
+
+        function onDfServerEndpointTransactionChanged(state, candidateIp, committedIp, detail) {
+            endpointState = String(state)
+            endpointDetail = String(detail)
         }
 
         function onUpdateGlobalOffsets(offsetValue, compassOffset) {
@@ -1452,7 +1467,8 @@ Drawer {
 
                                     onTextChanged: {
                                         if (_blockServerFieldSignal) return
-                                        s(selectedNic, "server", text)
+                                        // Draft only. Do not write Network2.krakenserver or any
+                                        // runtime cache until the backend transaction commits.
                                     }
 
                                     onCursorVisibleChanged: {
@@ -1472,8 +1488,14 @@ Drawer {
                                 Layout.alignment: Qt.AlignVCenter
                                 Layout.topMargin: 16
                                 text: "Apply"
+                                enabled: endpointState !== "CONNECTING"
+                                         && endpointState !== "TCP_OK_DB_COMMIT"
 
-                                background: Rectangle { radius: 8; color: applySvcBtn.pressed ? Qt.darker(colWarn, 1.2) : colWarn }
+                                background: Rectangle {
+                                    radius: 8
+                                    color: applySvcBtn.pressed ? Qt.darker(colWarn, 1.2) : colWarn
+                                    opacity: applySvcBtn.enabled ? 1.0 : 0.55
+                                }
                                 contentItem: Text {
                                     text: applySvcBtn.text
                                     color: "white"
@@ -1485,9 +1507,8 @@ Drawer {
                                 onClicked: {
                                     if (!krakenmapval) return
                                     try {
-                                        if (mainWindows && typeof mainWindows.setNetworkFormDisplay === "function")
-                                            mainWindows.setNetworkFormDisplay(serverField.text)
-
+                                        // Do not persist/mirror draft here. Backend owns the
+                                        // connect -> verify -> commit/rollback transaction.
                                         if (typeof krakenmapval.connectToDFserver === "function")
                                             krakenmapval.connectToDFserver(serverField.text)
                                     } catch(e) { console.log("[APPLY] call FAILED:", e) }
@@ -1514,15 +1535,24 @@ Drawer {
                                 }
 
                                 onClicked: {
-                                    if (!krakenmapval) return
-                                    // Service Endpoints uses the live DF-server reconnect path.
-                                    // connectToserverKraken() is legacy/commented in the current C++ backend.
-                                    if (typeof krakenmapval.reconnectDFserver === "function")
-                                        krakenmapval.reconnectDFserver()
-                                    else if (typeof krakenmapval.connectToDFserver === "function")
-                                        krakenmapval.connectToDFserver(serverField.text)
+                                    if (krakenmapval && typeof krakenmapval.reconnectToDFserver === "function")
+                                        krakenmapval.reconnectToDFserver()
                                 }
                             }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: endpointState !== "IDLE" && endpointState.length > 0
+                            text: endpointDetail.length > 0
+                                  ? (endpointState + " — " + endpointDetail)
+                                  : endpointState
+                            color: (endpointState === "COMMITTED" || endpointState === "CONNECTED" || endpointState === "ROLLED_BACK")
+                                   ? colOk
+                                   : ((endpointState === "CONNECTING" || endpointState === "TCP_OK_DB_COMMIT" || endpointState === "RECONNECTING")
+                                      ? colInfo : colWarn)
+                            font.pixelSize: 12
+                            wrapMode: Text.Wrap
                         }
 
                         Rectangle { height: 1; Layout.fillWidth: true; color: colBorder }

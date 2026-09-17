@@ -53,14 +53,29 @@ Item {
         return true
     }
 
-    function requestState() {
+    function requestLegacyState() {
         var km = kraken()
         if (!km) {
             statusText = "Service endpoint backend is unavailable"
             return
         }
-        if (typeof km.requestServiceEndpointsState === "function")
-            km.requestServiceEndpointsState()
+
+        // NET-ENDPOINTS1.5: DatabaseDF already loads Parameter.ipdfserver at
+        // application startup through GetIPDFServerFromDB() -> GetIPDFServer().
+        // This page is Loader-created later, so replay that existing cached DB
+        // value first. updateIPServerDF() is an existing iScreenDF function and
+        // emits the existing updateServeripDfserver signal; no new query/API or
+        // persistence path is introduced.
+        if (typeof km.updateIPServerDF === "function")
+            km.updateIPServerDF()
+
+        // Keep the legacy Network2 refresh for LAN/global-offset state. Because
+        // updateServeripDfserver is replayed first, appliedDfServerIp is already
+        // set and Network2.krakenserver cannot overwrite Parameter.ipdfserver.
+        if (typeof km.getNetworkfromDb === "function")
+            km.getNetworkfromDb(1)
+        else if (typeof km.requestNetworkRows === "function")
+            km.requestNetworkRows()
     }
 
     function applyDfServer() {
@@ -91,21 +106,37 @@ Item {
             mainWindows.setNetworkFormDisplay(ip)
 
         km.connectToDFserver(ip)
+
+        // Legacy Apply has no completion/result signal. Keep the field aligned
+        // with the operator-requested value; the existing startup/backend
+        // updateServeripDfserver signal can still overwrite it when emitted.
+        root.appliedDfServerIp = ip
+        root.dfServerIp = ip
         applyDoneTimer.restart()
     }
 
     function reconnectDfServer() {
         closeKeyboard()
         var km = kraken()
-        if (!km || typeof km.reconnectDFserver !== "function") {
-            statusText = "DF Server reconnect backend is unavailable"
+        if (!km || typeof km.connectToDFserver !== "function") {
+            statusText = "DF Server backend is unavailable"
+            requestToast(statusText)
+            return
+        }
+
+        var savedIp = String(root.appliedDfServerIp || "").trim()
+        if (!isValidIpv4(savedIp)) {
+            statusText = "Saved DF Server IP is not available"
             requestToast(statusText)
             return
         }
 
         busy = true
-        statusText = "Reconnecting DF Server " + (appliedDfServerIp.length > 0 ? appliedDfServerIp : "endpoint") + "..."
-        km.reconnectDFserver()
+        statusText = "Reconnecting DF Server " + savedIp + "..."
+
+        // Reuse the original DF-server connection backend. Passing the last
+        // loaded/applied value avoids reconnecting an unsaved TextField draft.
+        km.connectToDFserver(savedIp)
         reconnectDoneTimer.restart()
     }
 
@@ -131,11 +162,50 @@ Item {
         compassDoneTimer.restart()
     }
 
-    Component.onCompleted: requestState()
+    Component.onCompleted: requestLegacyState()
 
     Connections {
         target: root.kraken()
         ignoreUnknownSignals: true
+
+        function onNetworkRowUpdated(row) {
+            if (!row)
+                return
+
+            var serverIp = ""
+
+            // This is the same Network2/krakenserver DB payload consumed by
+            // the legacy TopNetworkDrawer. Prefer the selected row, otherwise
+            // fall back to the first non-empty value from the all-row snapshot.
+            if (row.krakenserver !== undefined && row.krakenserver !== null)
+                serverIp = String(row.krakenserver).trim()
+
+            if (serverIp.length === 0 && row.all) {
+                try {
+                    var obj = JSON.parse(row.all)
+                    var rows = obj.rows || []
+                    for (var i = 0; i < rows.length; ++i) {
+                        var candidate = String(rows[i].krakenserver || "").trim()
+                        if (candidate.length > 0) {
+                            serverIp = candidate
+                            break
+                        }
+                    }
+                } catch (e) {
+                    console.log("[ServiceEndpoints] invalid Network2 snapshot:", e)
+                }
+            }
+
+            // Network2 is the legacy DB fallback used by TopNetworkDrawer.
+            // Do not let a later Network2 refresh overwrite a DF endpoint that
+            // has already been supplied by updateServeripDfserver() or Apply.
+            if (serverIp.length > 0 && root.appliedDfServerIp.length === 0) {
+                root.appliedDfServerIp = serverIp
+                root.dfServerIp = serverIp
+                if (!dfServerField.activeFocus)
+                    dfServerField.text = serverIp
+            }
+        }
 
         function onUpdateServeripDfserver(ip) {
             var normalized = String(ip || "").trim()
@@ -160,7 +230,6 @@ Item {
         onTriggered: {
             root.busy = false
             root.statusText = "DF Server Apply requested"
-            root.requestState()
         }
     }
 
@@ -171,7 +240,6 @@ Item {
         onTriggered: {
             root.busy = false
             root.statusText = "DF Server Reconnect requested"
-            root.requestState()
         }
     }
 
@@ -182,7 +250,6 @@ Item {
         onTriggered: {
             root.busy = false
             root.statusText = "Compass Offset update requested"
-            root.requestState()
         }
     }
 
@@ -216,7 +283,7 @@ Item {
                 }
 
                 Text {
-                    text: "DF control and GPS services use this server endpoint. Apply saves the endpoint; Reconnect reopens the saved endpoint without changing it."
+                    text: "DF control/GPS connect to this RFSoC endpoint. DoA Viewer receives the live data through the local iScan bridge. LAN3 is configured separately."
                     color: c.sub
                     font.pixelSize: 14
                     wrapMode: Text.WordWrap

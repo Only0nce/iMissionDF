@@ -70,8 +70,24 @@ ChatServer::ChatServer(quint16 port, QObject *parent) :
 
 ChatServer::~ChatServer()
 {
-    m_pWebSocketServer->close();
+    if (m_pWebSocketServer)
+        m_pWebSocketServer->close();
+
+    qDeleteAll(softPhoneSocketClient);
+    qDeleteAll(recSocketClient);
+    qDeleteAll(igateGroupMngSocketClient);
+    softPhoneSocketClient.clear();
+    recSocketClient.clear();
+    igateGroupMngSocketClient.clear();
+
+    // m_clients owns each live socket exactly once. Auxiliary lists only
+    // reference those sockets and are cleared before deletion.
+    m_WebSocketClients.clear();
+    m_snmpSocketClients.clear();
+    m_WebSocketVUClients.clear();
+    m_WebSocketRecClients.clear();
     qDeleteAll(m_clients.begin(), m_clients.end());
+    m_clients.clear();
 }
 
 void ChatServer::onNewConnection()
@@ -90,10 +106,12 @@ void ChatServer::onNewConnection()
 }
 
 void ChatServer::broadcastMessage(QString message){
-    Q_FOREACH (QWebSocket *pClient, m_clients)
-    {
+    const auto clientsCopy = m_clients;
+    for (QWebSocket *pClient : clientsCopy) {
+        if (!pClient || pClient->state() != QAbstractSocket::ConnectedState)
+            continue;
         pClient->sendTextMessage(message);
-    }    
+    }
 }
 
 void ChatServer::commandProcess(QString message, QWebSocket *pSender){
@@ -126,6 +144,17 @@ void ChatServer::commandProcess(QString message, QWebSocket *pSender){
     {
          qDebug() << "register_message:" << message;
         int softPhoneID = QJsonValue(command["iGateID"]).toInt();
+        // Replace an existing registration for this exact socket/id instead
+        // of accumulating duplicate wrapper objects across repeated register
+        // messages.
+        for (int i = recSocketClient.size() - 1; i >= 0; --i) {
+            SoftPhoneSocketClient *existing = recSocketClient.at(i);
+            if (!existing || existing->SocketClients.isNull()
+                    || (existing->softPhoneID == softPhoneID && existing->SocketClients == pSender)) {
+                delete existing;
+                recSocketClient.removeAt(i);
+            }
+        }
         SoftPhoneSocketClient *sClient = new SoftPhoneSocketClient;
         sClient->softPhoneID = softPhoneID;
         sClient->SocketClients = pSender;
@@ -191,6 +220,7 @@ void ChatServer::socketDisconnected()
     // ✅ 1) remove from plain socket lists (QList<QWebSocket*>)
     m_clients.removeAll(pClient);
     m_WebSocketClients.removeAll(pClient);
+    m_snmpSocketClients.removeAll(pClient);
     m_WebSocketVUClients.removeAll(pClient);
     m_WebSocketRecClients.removeAll(pClient);
 
@@ -334,27 +364,26 @@ void ChatServer::sendMessageToRecService(const QString& message, int softPhoneID
         if (!sClient) continue;
         if (sClient->softPhoneID != softPhoneID) continue;
 
-        QWebSocket* ws = sClient->SocketClients;   // สมมติ SocketClients เป็น QWebSocket*
-        if (!ws) {
-            qWarning() << "[SEND to REC] ws is null softPhoneID=" << softPhoneID;
+        QPointer<QWebSocket> ws = sClient->SocketClients;
+        if (ws.isNull()) {
+            qWarning() << "[SEND to REC] socket already destroyed softPhoneID=" << softPhoneID;
             continue;
         }
 
-        // ✅ ถ้าไม่ connected ก็ไม่ส่ง
         if (ws->state() != QAbstractSocket::ConnectedState) {
-            qWarning() << "[SEND to REC] not connected state=" << ws->state()
-                       << "softPhoneID=" << softPhoneID;
+            qDebug() << "[SEND to REC] target not connected state=" << ws->state()
+                     << "softPhoneID=" << softPhoneID;
             continue;
         }
 
-        // ✅ ส่งใน thread ของ ws เสมอ
         const QString msg = message;
 
         if (ws->thread() != QThread::currentThread())
         {
-            QMetaObject::invokeMethod(ws, [ws, msg]() {
-                if (ws && ws->state() == QAbstractSocket::ConnectedState)
-                    ws->sendTextMessage(msg);
+            const QPointer<QWebSocket> safeWs = ws;
+            QMetaObject::invokeMethod(ws.data(), [safeWs, msg]() {
+                if (!safeWs.isNull() && safeWs->state() == QAbstractSocket::ConnectedState)
+                    safeWs->sendTextMessage(msg);
             }, Qt::QueuedConnection);
         }
         else
@@ -365,5 +394,8 @@ void ChatServer::sendMessageToRecService(const QString& message, int softPhoneID
         return;
     }
 
-    qWarning() << "[SEND to REC] target softPhoneID not found:" << softPhoneID;
+    if (softPhoneID == 1)
+        qWarning() << "[SEND to REC] primary recorder target softPhoneID not found:" << softPhoneID;
+    else
+        qDebug() << "[SEND to REC] optional target not registered:" << softPhoneID;
 }

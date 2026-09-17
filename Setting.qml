@@ -72,8 +72,12 @@ Item {
         lanApplyConfirmPopup.open()
     }
 
+    // NET-AUTH3: direct/fallback page loads also start least-privileged.
+    // Viewer -> Admin remains available through the in-page password flow.
     // Runtime proof: this must appear when the real Network page is loaded.
     Component.onCompleted: {
+        networkAccessRole = "viewer"
+        console.log("[NET-AUTH3] Network Settings entered in Viewer mode")
         console.log("NETWORK_UI_RUNTIME_PROOF_TABS_LAN_ENDPOINTS_WIFI_5G_VPN_LOADED qrc:/Setting.qml")
         loadLanInterfaces()
     }
@@ -347,7 +351,7 @@ Item {
 
     function lanInfoStatusText(info) {
         if (isExternalLanInfo(info))
-            return externalLanControlConnected ? "TCP Connected" : "TCP Disconnected"
+            return externalLanControlConnected ? "RFSoC Control Connected" : "RFSoC Control Disconnected"
 
         var st = readLanValue(info, ["status", "linkStatus", "link", "state", "operstate"], "")
         if (st.length > 0 && st !== "Unknown")
@@ -358,12 +362,21 @@ Item {
         return "Unknown"
     }
 
+    function lanInfoCompactStatusText(info) {
+        if (isExternalLanInfo(info))
+            return externalLanControlConnected ? "Control Connected" : "Control Disconnected"
+        return lanInfoStatusText(info)
+    }
+
     function lanInfoStatusColor(info) {
         var status = lanInfoStatusText(info).toLowerCase()
-        if (status.indexOf("connected") >= 0 || status.indexOf("up") >= 0 || status.indexOf("configured") >= 0)
-            return ui.accent
+        // Check negative states first: "disconnected" contains the substring
+        // "connected", so the old ordering could paint LAN3/LAN4 disconnected
+        // state with the connected/accent color.
         if (status.indexOf("no cable") >= 0 || status.indexOf("down") >= 0 || status.indexOf("disconnect") >= 0)
             return ui.warning
+        if (status.indexOf("connected") >= 0 || status.indexOf("up") >= 0 || status.indexOf("configured") >= 0)
+            return ui.accent
         return ui.disabled
     }
 
@@ -588,7 +601,27 @@ Item {
             }
 
             if (typeof mainWindows.applyLanSettings === "function") {
-                statusMessage = "Saving and applying LAN configuration..."
+                if (index === 2 || index === 3) {
+                    // Remote LAN status is never inferred from saved IP/config.
+                    // Query the authoritative RFSoC TCP socket immediately before
+                    // sending the network-change JSON.
+                    if (typeof mainWindows.externalLanStatus === "function") {
+                        var tcpState = mainWindows.externalLanStatus(index)
+                        externalLanControlConnected = !!(tcpState && tcpState.connected)
+                        externalLanControlHost = tcpState && tcpState.host ? String(tcpState.host) : ""
+                        externalLanControlPort = tcpState && tcpState.port ? Number(tcpState.port) : 0
+                        if (!externalLanControlConnected) {
+                            statusMessage = (index === 2 ? "LAN3" : "LAN4") +
+                                    ": RFSoC control server disconnected"
+                            return
+                        }
+                    }
+                    statusMessage = "Sending " + (index === 2 ? "LAN3 / end0" : "LAN4 / end1") +
+                            " IP configuration to RFSoC..."
+                } else {
+                    statusMessage = "Saving and applying LAN configuration..."
+                }
+
                 var accepted = mainWindows.applyLanSettings(index,
                                                             mode,
                                                             ipWithCidr,
@@ -596,13 +629,21 @@ Item {
                                                             gateway,
                                                             primaryDns,
                                                             secondaryDns)
-                if (!accepted)
+                if (!accepted && statusMessage.indexOf("disconnected") < 0)
                     statusMessage = "LAN configuration was rejected"
                 return
             }
         }
 
-        // Design/compatibility fallback when Mainwindows is not exposed.
+        // Design/compatibility fallback when Mainwindows is not exposed. Local
+        // LAN1/LAN2 may still use NetworkController directly. Remote end0/end1
+        // must never fall back to a local/network-file-only Apply because the
+        // RFSoC TCP command would be missing.
+        if (index === 2 || index === 3) {
+            statusMessage = "RFSoC control backend is unavailable"
+            return
+        }
+
         var dns = primaryDns + (secondaryDns.length > 0 ? "," + secondaryDns : "")
         NetworkController.applyNetworkConfig(interfaceName,
                                              mode,
@@ -629,10 +670,8 @@ Item {
             var portName = iface === "end0" ? "LAN3" : (iface === "end1" ? "LAN4" : iface)
             if (state === "DISPATCHED") {
                 statusMessage = portName + ": RFSoC IP command dispatched for " + ip
-            } else if (state === "QUEUED") {
-                statusMessage = portName + ": RFSoC offline; IP command queued for reconnect"
-            } else if (state === "QUEUED_NO_TARGET") {
-                statusMessage = portName + ": IP command queued, but RFSoC control server is not configured"
+            } else if (state === "CONTROL_DISCONNECTED") {
+                statusMessage = portName + ": RFSoC control server disconnected - command not sent"
             } else {
                 statusMessage = portName + ": RFSoC IP command failed - " + detail
             }
@@ -1020,7 +1059,7 @@ Item {
                             x: 42
                             y: 34
                             width: parent.width - 54
-                            text: modelData.iface + " · " + lanPortRoleShortLabel(modelData) + " · " + lanInfoStatusText(modelData)
+                            text: modelData.iface + " · " + lanPortRoleShortLabel(modelData) + " · " + lanInfoCompactStatusText(modelData)
                             color: ui.subText
                             font.pixelSize: 12
                             elide: Text.ElideRight
@@ -1057,14 +1096,34 @@ Item {
                 }
 
                 Rectangle {
-                    x: parent.width - 170
+                    id: lanStatusBadge
+                    property int horizontalPadding: 16
+                    property int minBadgeWidth: 130
+                    property int maxBadgeWidth: 280
+
                     y: 30
-                    width: 130
+                    width: Math.max(minBadgeWidth,
+                                    Math.min(maxBadgeWidth, lanStatusLabel.implicitWidth + horizontalPadding * 2))
                     height: 32
+                    x: parent.width - width - 40
+
                     radius: 16
                     color: "#0d302e"
                     border.color: lanStatusColor()
-                    Text { anchors.centerIn: parent; text: lanStatusText(); color: lanStatusColor(); font.pixelSize: 13; font.bold: true }
+
+                    Text {
+                        id: lanStatusLabel
+                        anchors.fill: parent
+                        anchors.leftMargin: lanStatusBadge.horizontalPadding
+                        anchors.rightMargin: lanStatusBadge.horizontalPadding
+                        text: lanStatusText()
+                        color: lanStatusColor()
+                        font.pixelSize: 13
+                        font.bold: true
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        elide: Text.ElideRight
+                    }
                 }
 
                 Row {
@@ -1075,7 +1134,7 @@ Item {
 
                     Repeater {
                         model: [
-                            { label: isExternalLanCurrent() ? "RFSoC TCP" : "Link",
+                            { label: isExternalLanCurrent() ? "RFSoC Control" : "Link",
                               value: isExternalLanCurrent() ? externalLanControlText() : safeText(lanSpeed, "-"),
                               sub: isExternalLanCurrent() ? externalLanTargetText() : safeText(lanDuplex, "Full duplex") },
                             { label: "Mode", value: useDhcp ? "DHCP" : "Static", sub: useDhcp ? "Automatic IPv4" : "Manual IPv4" },
@@ -1422,7 +1481,7 @@ Item {
                                   value: isExternalLanCurrent() ? externalLanConfiguredIpText()
                                                                 : primaryDns + (secondaryDns.length > 0 ? ", " + secondaryDns : "") },
                                 { label: "Status",
-                                  value: isExternalLanCurrent() ? (lanExecutionScopeLabel(currentLanInfo()) + " · TCP " + externalLanControlText())
+                                  value: isExternalLanCurrent() ? (lanExecutionScopeLabel(currentLanInfo()) + " · Control " + externalLanControlText())
                                                                 : (statusMessage.length > 0 ? statusMessage : lanStatusText()) }
                             ]
 
