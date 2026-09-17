@@ -28,6 +28,10 @@ public:
     Q_PROPERTY(QObject* backend READ backend WRITE setBackend NOTIFY backendChanged)
     Q_PROPERTY(Mode mode READ mode WRITE setMode NOTIFY modeChanged)
     Q_PROPERTY(bool renderEnabled READ renderEnabled WRITE setRenderEnabled NOTIFY renderEnabledChanged)
+    // DOA-VIEWER1.4: per-item presentation budget. The shared analyzer
+    // clock may tick faster, but each item only asks Qt Quick to repaint when
+    // it has new data and its own FPS budget allows it.
+    Q_PROPERTY(int targetFps READ targetFps WRITE setTargetFps NOTIFY targetFpsChanged)
     Q_PROPERTY(bool showMaxHold READ showMaxHold WRITE setShowMaxHold NOTIFY showMaxHoldChanged)
     Q_PROPERTY(bool clearBeforeNextPaint READ clearBeforeNextPaint WRITE setClearBeforeNextPaint NOTIFY clearBeforeNextPaintChanged)
     Q_PROPERTY(bool waterfallPaused READ waterfallPaused WRITE setWaterfallPaused NOTIFY waterfallPausedChanged)
@@ -94,6 +98,9 @@ public:
 
     bool renderEnabled() const noexcept { return m_renderEnabled; }
     void setRenderEnabled(bool enabled);
+
+    int targetFps() const noexcept { return m_targetFps; }
+    void setTargetFps(int fps);
 
     bool showMaxHold() const noexcept { return m_showMaxHold; }
     void setShowMaxHold(bool enabled);
@@ -163,6 +170,11 @@ public:
     void presentOnSharedClock();
     Q_INVOKABLE void clearPeaks();
     Q_INVOKABLE void clearHistory();
+    // DOA-VIEWER1.3: allow lightweight analyzer pages to feed native/CUDA
+    // renderer directly without going through JavaScript Canvas drawing loops.
+    // The input is copied once from QML into QVector<float>, then Spectrum and
+    // Waterfall use the existing native paint/CUDA worker path.
+    Q_INVOKABLE bool submitExternalFrame(const QVariantList &values);
 
     void paint(QPainter *painter) override;
 
@@ -170,6 +182,7 @@ signals:
     void backendChanged();
     void modeChanged();
     void renderEnabledChanged();
+    void targetFpsChanged();
     void showMaxHoldChanged();
     void clearBeforeNextPaintChanged();
     void waterfallPausedChanged();
@@ -230,6 +243,7 @@ private:
     void requestHistoryRecolor();
     void submitWaterfallWork(const QVector<float> &frame);
     void refreshPresentationClock();
+    int targetPresentIntervalMsLocked() const;
     void appendProcessedWaterfallRowLocked(const QVector<float> &dbRow,
                                            const QVector<quint32> &argbRow);
     void updateMeasurementsLocked(const QVector<float> &frame, bool force = false);
@@ -244,6 +258,13 @@ private:
     QVector<QMetaObject::Connection> m_backendConnections;
     Mode m_mode = Spectrum;
     bool m_renderEnabled = true;
+    int m_targetFps = 30;
+    bool m_presentDirty = false;
+    qint64 m_lastPresentUpdateMs = 0;
+    quint64 m_presentUpdates = 0;
+    quint64 m_presentSkippedClean = 0;
+    quint64 m_presentSkippedBudget = 0;
+    quint64 m_externalFrames = 0;
     bool m_showMaxHold = true;
     bool m_clearBeforeNextPaint = false;
     bool m_waterfallPaused = false;

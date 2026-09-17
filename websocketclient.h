@@ -23,6 +23,7 @@
 #include <QDebug>
 #include <QElapsedTimer>
 #include <QVector>
+#include <QSet>
 
 typedef QVector<float> Float32BitArray;
 
@@ -39,7 +40,6 @@ class WebSocketClient : public QObject {
 public:
     explicit WebSocketClient(QObject *parent = nullptr);
     ~WebSocketClient() override;
-    void shutdown();
 
     int  m_volumePercent = 25;   // 0–100
     int m_lastVolumeBeforeMute = 100;
@@ -52,6 +52,11 @@ public:
     // FFT UI runtime gate. Audio and the WebSocket connection remain active.
     bool fftUiActive() const noexcept { return m_fftUiActive; }
     Q_INVOKABLE void setFftUiActive(bool active);
+    // Multiple pages can consume the same AstraRX FFT stream. The historical
+    // setFftUiActive() API remains as the Home/Spectrum lease, while new
+    // consumers (for example DoA Viewer RX/CH1) own an independent lease so
+    // one page cannot accidentally suspend another page's FFT source.
+    Q_INVOKABLE void setFftConsumerActive(const QString &consumer, bool active);
 
     // Native max-hold engine. Keeping the O(N) accumulation loop in C++ avoids
     // running a full FFT-sized JavaScript loop inside Canvas::onPaint.
@@ -79,6 +84,9 @@ public:
     Q_INVOKABLE void setSpeakerVolumeMute(bool active);
 
     void connectToServer(const QUrl &url);
+    // Idempotent application-teardown hook. It disables reconnect before
+    // closing the socket so main.cpp can explicitly shut the backend down.
+    Q_INVOKABLE void shutdown();
     static constexpr int COMPRESS_FFT_PAD_N = 10;
     struct rxwsConfig {
         // ---- Audio & Chat Options ----
@@ -240,6 +248,8 @@ signals:
 
 private:
     bool m_fftUiActive = false;
+    QSet<QString> m_fftActiveConsumers;
+    void applyFftConsumerState();
 
     // AstraRX connection recovery state. The UI-facing WebSocket contract stays
     // unchanged; reconnect is entirely backend-owned.
@@ -306,6 +316,9 @@ private:
     int sqlCount = 0;
     bool sqlOn = false;
     bool m_explicitSquelchSeen = false;
+    QElapsedTimer m_squelchLogTimer;
+    int m_squelchLogIntervalMs = 2000;
+    quint64 m_squelchLogSuppressed = 0;
     void resetSQLCount();
     void applyVolumeToPcm16(QVector<qint16> &samples, int volumePercent);
     void applySoftwareVolume(QByteArray &pcm16);

@@ -50,7 +50,7 @@ class AnalyzerPresentationClock final
 public:
     AnalyzerPresentationClock()
     {
-        m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 90, 240);
+        m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 60, 120);
         QScreen *screen = QGuiApplication::primaryScreen();
         const double displayHz = screen ? screen->refreshRate() : 0.0;
         m_effectiveFps = (displayHz >= 30.0)
@@ -171,10 +171,10 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     setRenderTarget(QQuickPaintedItem::Image);
 #endif
 
-    // CUDA1.26/FPS90-SYNC: one shared precise timer invalidates both Spectrum
-    // and Waterfall on the same GUI-thread tick. Independent item timers caused
-    // phase drift and unequal frame pacing even when both were configured to
-    // the same nominal interval.
+    // DOA-VIEWER1.4: one shared low-rate presentation clock coordinates
+    // analyzer items, but each item repaints only when it has fresh data and
+    // its own targetFps budget allows it. This avoids a permanent 90 Hz
+    // update storm on Jetson.
     AnalyzerPresentationClock &presentClock = sharedAnalyzerPresentationClock();
     m_presentIntervalMs = presentClock.intervalMs();
     m_waterfallHistoryMaxBins = envPositiveIntLocal("ISCAN_WATERFALL_DISPLAY_BINS", 2048, 8192);
@@ -208,7 +208,7 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     // frame. The Spectrum item no longer creates an unused CUDA context/thread.
     refreshPresentationClock();
 
-    qInfo() << "[R20.4-SPECTRUM-CUDA1.26-FPS90-LOCKSTEP]"
+    qInfo() << "[DOA-VIEWER1.4-CPU-BUDGET]"
             << "asyncComputeWorker=1"
             << "waterfallRingBuffer=1"
             << "cudaPeakPoolPalette=1"
@@ -217,6 +217,8 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
             << "targetPresentMs=" << m_presentIntervalMs
             << "requestedPresentFps=" << sharedAnalyzerPresentationClock().requestedFps()
             << "effectivePresentFps=" << sharedAnalyzerPresentationClock().effectiveFps()
+            << "eventDrivenDirtyRepaint=1"
+            << "defaultItemFps=" << m_targetFps
             << "waterfallGpuBins=" << m_waterfallHistoryMaxBins
             << "edgeSafeFill=transparent-black"
             << "sceneTextureSmooth=0"
@@ -399,12 +401,34 @@ void FftDisplayItem::setRenderEnabled(bool enabled)
         m_renderEnabled = enabled;
         if (!enabled) {
             m_pendingWaterfallFrame.clear();
+            m_presentDirty = false;
             ++m_colorGeneration; // invalidate any row currently in flight
+        } else {
+            m_presentDirty = true;
         }
     }
     emit renderEnabledChanged();
     refreshPresentationClock();
     update();
+}
+
+int FftDisplayItem::targetPresentIntervalMsLocked() const
+{
+    const int fps = qBound(1, m_targetFps, 120);
+    return qMax(1, static_cast<int>(std::ceil(1000.0 / static_cast<double>(fps))));
+}
+
+void FftDisplayItem::setTargetFps(int fps)
+{
+    fps = qBound(1, fps, 120);
+    {
+        QMutexLocker locker(&m_dataMutex);
+        if (m_targetFps == fps)
+            return;
+        m_targetFps = fps;
+        m_presentDirty = true;
+    }
+    emit targetFpsChanged();
 }
 
 void FftDisplayItem::refreshPresentationClock()
@@ -793,9 +817,28 @@ void FftDisplayItem::presentOnSharedClock()
     bool present = false;
     {
         QMutexLocker locker(&m_dataMutex);
-        present = m_renderEnabled
-                && ((m_mode == Spectrum && !m_spectrumFrame.isEmpty())
-                    || (m_mode == Waterfall && !m_waterfallPaused && m_waterfallValidRows > 0));
+        const bool hasData = (m_mode == Spectrum && !m_spectrumFrame.isEmpty())
+                || (m_mode == Waterfall && !m_waterfallPaused && m_waterfallValidRows > 0);
+        if (!m_renderEnabled || !hasData) {
+            m_presentDirty = false;
+            return;
+        }
+        if (!m_presentDirty) {
+            ++m_presentSkippedClean;
+            return;
+        }
+
+        const qint64 nowMs = monotonicMs();
+        const int intervalMs = targetPresentIntervalMsLocked();
+        if (m_lastPresentUpdateMs > 0 && (nowMs - m_lastPresentUpdateMs) < intervalMs) {
+            ++m_presentSkippedBudget;
+            return;
+        }
+
+        m_lastPresentUpdateMs = nowMs;
+        m_presentDirty = false;
+        ++m_presentUpdates;
+        present = true;
     }
     if (present)
         update();
@@ -843,6 +886,45 @@ void FftDisplayItem::clearHistory()
     update();
 }
 
+bool FftDisplayItem::submitExternalFrame(const QVariantList &values)
+{
+    if (values.size() < 2)
+        return false;
+
+    QVector<float> frame;
+    frame.reserve(values.size());
+    for (const QVariant &value : values) {
+        bool ok = false;
+        const float f = value.toFloat(&ok);
+        frame.append(ok && std::isfinite(f) ? f : static_cast<float>(m_minDb));
+    }
+
+    if (frame.size() < 2)
+        return false;
+
+    {
+        QMutexLocker locker(&m_dataMutex);
+        ++m_externalFrames;
+    }
+
+    // Keep the existing production path: Spectrum stores the newest native
+    // frame; Waterfall dispatches one coalesced row to the CPU/CUDA worker.
+    // This method is intended for UI-side display bridges such as DoA Viewer,
+    // not for RF control or DSP ownership changes.  Route by mode so a Spectrum
+    // item does not start the Waterfall CUDA worker unnecessarily.
+    Mode modeSnapshot = Spectrum;
+    {
+        QMutexLocker locker(&m_dataMutex);
+        modeSnapshot = m_mode;
+    }
+
+    if (modeSnapshot == Spectrum)
+        onSpectrumFrame(frame);
+    else
+        onWaterfallFrame(frame);
+    return true;
+}
+
 void FftDisplayItem::onSpectrumFrame(const QVector<float> &frame)
 {
     CrashDiagnostics::checkpoint(CrashDiagnostics::CpNativeSpectrumFrame);
@@ -873,6 +955,7 @@ void FftDisplayItem::onSpectrumFrame(const QVector<float> &frame)
         m_lastSpectrumArrivalMs = nowMs;
         m_spectrumTransitionStartMs = nowMs;
         m_spectrumFrame = frame;
+        m_presentDirty = true;
 
         if (!m_measurementsValid || !m_measurementTimer.isValid()
                 || m_measurementTimer.elapsed() >= 200) {
@@ -905,6 +988,7 @@ void FftDisplayItem::onMaxHoldFrame(const QVector<float> &frame)
         if (m_mode != Spectrum || !m_renderEnabled)
             return;
         m_maxHoldFrame = frame;
+        m_presentDirty = true;
     }
     // CUDA1.26: Max Hold arrival must not inject Spectrum-only paint bursts.
     // The next shared analyzer tick presents the updated line together with the
@@ -1259,6 +1343,7 @@ void FftDisplayItem::onWaterfallRowReady(quint64 generation,
                 && m_mode == Waterfall && m_renderEnabled && !m_waterfallPaused
                 && !dbRow.isEmpty() && dbRow.size() == argbRow.size()) {
             appendProcessedWaterfallRowLocked(dbRow, argbRow);
+            m_presentDirty = true;
             const qint64 nowMs = monotonicMs();
             if (m_lastWaterfallArrivalMs > 0) {
                 const qint64 rawPeriod = nowMs - m_lastWaterfallArrivalMs;
@@ -1322,6 +1407,7 @@ void FftDisplayItem::onHistoryRecolorReady(quint64 generation,
         if (generation == m_colorGeneration
                 && argbHistory.size() == m_waterfallColorHistory.size()) {
             m_waterfallColorHistory.swap(argbHistory);
+            m_presentDirty = true;
             applied = true;
         } else if (m_waterfallValidRows > 0) {
             m_recolorRequested = true;
@@ -1823,11 +1909,33 @@ void FftDisplayItem::paint(QPainter *painter)
     if (m_paintStatsTimer.elapsed() >= 5000) {
         const double sec = std::max(0.001, m_paintStatsTimer.elapsed() / 1000.0);
         const double fps = static_cast<double>(m_paintStatsFrames) / sec;
-        qInfo() << "[SPECTRUM-RENDER-5S]"
+        quint64 presentUpdates = 0;
+        quint64 skippedClean = 0;
+        quint64 skippedBudget = 0;
+        quint64 externalFrames = 0;
+        int targetFps = 0;
+        {
+            QMutexLocker locker(&m_dataMutex);
+            presentUpdates = m_presentUpdates;
+            skippedClean = m_presentSkippedClean;
+            skippedBudget = m_presentSkippedBudget;
+            externalFrames = m_externalFrames;
+            targetFps = m_targetFps;
+            m_presentUpdates = 0;
+            m_presentSkippedClean = 0;
+            m_presentSkippedBudget = 0;
+            m_externalFrames = 0;
+        }
+        qInfo() << "[DOA-CPU-BUDGET]"
                 << "mode=" << (modeSnapshot == Spectrum ? "spectrum" : "waterfall")
-                << "fps=" << QString::number(fps, 'f', 1)
-                << "targetMs=" << m_presentIntervalMs
-                << "sharedClock=1";
+                << "paintFps=" << QString::number(fps, 'f', 1)
+                << "targetFps=" << targetFps
+                << "clockMs=" << m_presentIntervalMs
+                << "updates=" << presentUpdates
+                << "skipClean=" << skippedClean
+                << "skipBudget=" << skippedBudget
+                << "externalFrames=" << externalFrames
+                << "eventDriven=1";
         m_paintStatsFrames = 0;
         m_paintStatsTimer.restart();
     }

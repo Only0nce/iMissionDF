@@ -23,6 +23,7 @@
 #include "rfdc_nco_client.h"
 #include "alsarecconfigmanager.h"
 #include <QThread>
+#include <QVariantList>
 
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -104,6 +105,10 @@ class iScreenDF;
 class Mainwindows : public QObject
 {
     Q_OBJECT
+    // DoA Viewer logical CH1 reuses AstraRX/Home FFT acquisition but keeps the
+    // DoA Viewer renderer. Qt 5.15.2 on the target has an older moc parser;
+    // expose this snapshot through invokable getters + the existing change
+    // signal instead of adding Q_PROPERTY declarations to this legacy class.
 
 public:
 
@@ -124,13 +129,17 @@ public:
     }
     Q_INVOKABLE QString start_mod() const { return wsClient.rxconfig.start_mod; }
 
+    Q_INVOKABLE QVariantList doaRxFftMagDb() const { return m_doaRxFftMagDb; }
+    Q_INVOKABLE double doaRxCenterHz() const { return m_doaRxCenterHz; }
+    Q_INVOKABLE int doaRxSampleRate() const { return m_doaRxSampleRate; }
+    Q_INVOKABLE qulonglong doaRxFrameSequence() const { return m_doaRxFrameSequence; }
+    Q_INVOKABLE bool doaRxSpectrumActive() const { return m_doaRxSpectrumActive; }
+    Q_INVOKABLE void setDoaRxSpectrumActive(bool active);
+
     // Replayable SQL state for QML. QML reads the current value when the
-    // State replay helpers for QML pages created after backend transitions.
-    // SQL and recorder state are intentionally separate: SQL is an RF condition,
-    // while recorder state comes from the alsarecd LogWatcher.
+    // page is created, then follows sqlActiveChanged(bool) for live updates.
+    // This avoids Q_PROPERTY accessor parsing issues on older Qt5 moc tools.
     Q_INVOKABLE bool getSqlActive() const;
-    Q_INVOKABLE bool getRecActive() const;
-    Q_INVOKABLE QString getRecorderState() const;
 
     Q_INVOKABLE QVariantList getWaterfallColorMap() const {
         QVariantList list;
@@ -318,6 +327,9 @@ public:
     bool setSystemFromHwclock();
 
 signals:
+    void doaRxFftFrameChanged();
+    void doaRxSpectrumActiveChanged(bool active);
+
     // R-LAN4A: notify QML when the RFSoC TCP control channel changes state.
     void externalLanControlStatusChanged(bool connected, const QString &host, int port);
     // Result of dispatching the proven legacy RFSoC setIpConfig packet.
@@ -427,6 +439,19 @@ public slots:
     void vpnRefresh();
 
 private:
+    void onDoaRxSpectrumFrame(const QVector<float> &frame);
+    QVariantList m_doaRxFftMagDb;
+    double m_doaRxCenterHz = 0.0;
+    int m_doaRxSampleRate = 0;
+    qulonglong m_doaRxFrameSequence = 0;
+    bool m_doaRxSpectrumActive = false;
+    QElapsedTimer m_doaRxPublishTimer;
+    // DoA CH1 is a secondary presentation of the Home/RX FFT. Keep it
+    // live-edge and bounded so it cannot compete with the Home view or DF
+    // renderer for QML/Canvas time.
+    int m_doaRxPublishIntervalMs = 40;
+    int m_doaRxDisplayBins = 768;
+
     QString nc_host = "127.0.0.1";
     quint16 nc_port = 6000;
     int recRunningCount = -1;
@@ -488,9 +513,6 @@ private:
     QTimer *squelchOffTimer = nullptr;
     QTimer *startScanCard = nullptr;
     bool isSquelchOffPending = false;
-    // STAB2: log a persistent SHD_AMP read fault once until the GPIO recovers.
-    bool m_shdAmpReadFaultLogged = false;
-    bool m_sqlGpioWriteFaultLogged = false;
 
 
     // newGPIOClass *A_IN = new newGPIOClass(GPIO_A_SW_IN);

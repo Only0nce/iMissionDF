@@ -1,7 +1,7 @@
 TEMPLATE = app
 TARGET = iScanMR10
 
-QT += quick websockets sql widgets multimedia opengl concurrent network
+QT += quick websockets sql widgets multimedia opengl concurrent
 CONFIG += c++17
 contains(CONFIG, static) {
     QT += svg
@@ -103,6 +103,8 @@ else: unix:!android: target.path = /opt/$${TARGET}/bin
 X86_SOURCES += \
     CrashDiagnostics.cpp \
     FftDisplayItem.cpp \
+    FftLineGraphItem.cpp \
+    FftWaterfallTextureItem.cpp \
     SpectrumCudaProcessor.cpp \
     SpectrumCudaWorker.cpp \
     Databases.cpp \
@@ -157,6 +159,8 @@ X86_HEADERS += \
     ChatServer.h \
     CrashDiagnostics.h \
     FftDisplayItem.h \
+    FftLineGraphItem.h \
+    FftWaterfallTextureItem.h \
     SpectrumCudaProcessor.h \
     SpectrumCudaWorker.h \
     Databases.h \
@@ -207,6 +211,8 @@ X86_HEADERS += \
 JETSON_SOURCES += \
     CrashDiagnostics.cpp \
     FftDisplayItem.cpp \
+    FftLineGraphItem.cpp \
+    FftWaterfallTextureItem.cpp \
     SpectrumCudaProcessor.cpp \
     SpectrumCudaWorker.cpp \
     Databases.cpp \
@@ -275,6 +281,8 @@ JETSON_HEADERS += \
     ChatServer.h \
     CrashDiagnostics.h \
     FftDisplayItem.h \
+    FftLineGraphItem.h \
+    FftWaterfallTextureItem.h \
     SpectrumCudaProcessor.h \
     SpectrumCudaWorker.h \
     Databases.h \

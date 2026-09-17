@@ -63,6 +63,8 @@
 #include "ReceiverRecorderConfigManager.h"
 #include "websocketclient.h"
 #include "FftDisplayItem.h"
+#include "FftLineGraphItem.h"
+#include "FftWaterfallTextureItem.h"
 #include "screencapture.h"
 
 // -------- iRecordManage (JETSON ONLY) --------
@@ -362,6 +364,8 @@ int main(int argc, char *argv[])
     qmlRegisterType<ReceiverConfigManager>("Receiver", 1, 0, "ReceiverConfigManager");
     qmlRegisterType<WebSocketClient>("WebSocketClient", 1, 0, "WebSocketClient");
     qmlRegisterType<FftDisplayItem>("iScan.Display", 1, 0, "FftDisplayItem");
+    qmlRegisterType<FftLineGraphItem>("iScan.Display", 1, 0, "FftLineGraphItem");
+    qmlRegisterType<FftWaterfallTextureItem>("iScan.Display", 1, 0, "FftWaterfallTextureItem");
 
     NetworkController* netCtrl = new NetworkController(&app);
     qmlRegisterSingletonInstance("App", 1, 0, "NetworkController", netCtrl);
@@ -421,13 +425,6 @@ int main(int argc, char *argv[])
 #endif
 
     DoaClient doaClient;
-    // NET-ENDPOINTS1.7: the integrated DoA Viewer does not open a second
-    // connection to the RFSoC. iScreenDF owns the remote DF control/data link
-    // at Parameter.ipdfserver:5555 and rebroadcasts received JSON on the local
-    // TcpServerDF bridge. The viewer consumes that live stream locally.
-    doaClient.setHost(QStringLiteral("127.0.0.1"));
-    doaClient.setPort(9000);
-    qInfo().noquote() << "[DOA][BRIDGE] integrated viewer target=127.0.0.1:9000";
     engine->rootContext()->setContextProperty("doaClient", &doaClient);
 
     const QUrl url(QStringLiteral("qrc:/main.qml"));
@@ -523,9 +520,6 @@ int main(int argc, char *argv[])
 #endif
 
     const int exitCode = app.exec();
-
-    qInfo().noquote() << "[SHUTDOWN] stopping AstraRX/audio workers before backend teardown";
-    mainWindows.wsClient.shutdown();
 
     // Explicitly destroy the QML engine while every C++ context backend is
     // still alive. This gives QML destruction callbacks a valid Mainwindows,

@@ -12,6 +12,11 @@ Rectangle {
     width: 1920
     property int rowH: 44
     property int pad: 10
+    property int displayChannel: 1
+    property bool rxSourceAvailable: false
+    property bool rxFftEnabled: true
+    signal displayChannelRequested(int channel)
+    signal rxFftEnabledRequested(bool enabled)
 
     // Target dB ใช้ตัวเดียวสำหรับ CH0..CH4
     property real rfAgcTargetAllDb: -75.0
@@ -24,12 +29,6 @@ Rectangle {
     function dc() {
         return (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
     }
-
-    // In the integrated iScan application Krakenmapval owns the remote RFSoC
-    // connection and rebroadcasts live JSON to localhost:9000. Keep these
-    // fields editable only for the standalone DoaViewer diagnostic program.
-    readonly property bool integratedBridgeMode:
-        (typeof Krakenmapval !== "undefined" && Krakenmapval !== null)
 
     // ========= MHz UI <-> Hz backend helpers =========
     function rfTextToHz(s) {
@@ -301,11 +300,8 @@ Rectangle {
                 Layout.preferredHeight: root.rowH
                 Layout.preferredWidth: 180
                 text: root.dc() ? root.dc().host : ""
-                placeholderText: root.integratedBridgeMode ? "Local bridge" : "IP"
-                readOnly: root.integratedBridgeMode
-                selectByMouse: !root.integratedBridgeMode
+                placeholderText: "IP"
                 onEditingFinished: {
-                    if (root.integratedBridgeMode) return
                     var c = root.dc()
                     if (!c) return
                     c.host = text
@@ -316,12 +312,9 @@ Rectangle {
                 Layout.preferredHeight: root.rowH
                 Layout.preferredWidth: 90
                 inputMethodHints: Qt.ImhDigitsOnly
-                text: root.dc() ? String(root.dc().port) : "9000"
+                text: root.dc() ? String(root.dc().port) : "5555"
                 placeholderText: "Port"
-                readOnly: root.integratedBridgeMode
-                selectByMouse: !root.integratedBridgeMode
                 onEditingFinished: {
-                    if (root.integratedBridgeMode) return
                     var c = root.dc()
                     if (!c) return
                     c.port = parseInt(text)
@@ -423,7 +416,12 @@ Rectangle {
 
             FftControlPanel {
                 Layout.preferredHeight: root.rowH + 20
-                Layout.preferredWidth: 320
+                Layout.preferredWidth: 340
+                displayChannel: root.displayChannel
+                rxSourceAvailable: root.rxSourceAvailable
+                rxFftEnabled: root.rxFftEnabled
+                onDisplayChannelRequested: root.displayChannelRequested(channel)
+                onRxFftEnabledRequested: root.rxFftEnabledRequested(enabled)
             }
 
             Button {

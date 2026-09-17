@@ -81,41 +81,79 @@ WebSocketClient::WebSocketClient(QObject *parent) : QObject(parent)
 WebSocketClient::~WebSocketClient()
 {
     shutdown();
-    delete hdAudioPlayer;
-    hdAudioPlayer = nullptr;
-    delete sdAudioPlayer;
-    sdAudioPlayer = nullptr;
+
+    // These players are created by WebSocketClient in this source tree.
+    // Stop their QThreads before process teardown so Qt never destroys a
+    // running playback thread.
+    if (hdAudioPlayer) {
+        delete hdAudioPlayer;
+        hdAudioPlayer = nullptr;
+    }
+    if (sdAudioPlayer) {
+        delete sdAudioPlayer;
+        sdAudioPlayer = nullptr;
+    }
 }
 
 void WebSocketClient::shutdown()
 {
+    // main.cpp may call this explicitly and the destructor calls it again.
+    // Keep teardown idempotent and, most importantly, suppress reconnects
+    // before QWebSocket::close() can emit disconnected().
     m_shuttingDown = true;
     m_reconnectTimer.stop();
     resetSQL.stop();
-    if (webSocket.state() != QAbstractSocket::UnconnectedState)
-        webSocket.abort();
+    m_targetUrl = QUrl();
+
     if (hdAudioPlayer)
         hdAudioPlayer->stop();
     if (sdAudioPlayer)
         sdAudioPlayer->stop();
+
+    if (webSocket.state() != QAbstractSocket::UnconnectedState)
+        webSocket.close();
 }
 
 void WebSocketClient::setFftUiActive(bool active)
 {
+    // Backward-compatible owner for SpectrumGLPlot/Home.
+    setFftConsumerActive(QStringLiteral("home-spectrum"), active);
+}
+
+void WebSocketClient::setFftConsumerActive(const QString &consumer, bool active)
+{
+    QString owner = consumer.trimmed();
+    if (owner.isEmpty())
+        owner = QStringLiteral("anonymous");
+
+    if (active)
+        m_fftActiveConsumers.insert(owner);
+    else
+        m_fftActiveConsumers.remove(owner);
+
+    applyFftConsumerState();
+}
+
+void WebSocketClient::applyFftConsumerState()
+{
+    const bool active = !m_fftActiveConsumers.isEmpty();
     if (m_fftUiActive == active)
         return;
 
     m_fftUiActive = active;
 
-    // Make the first frame after entering the Spectrum page immediate.
+    // Make the first frame after the first consumer becomes active immediate.
     m_fftUiPublishTimer.invalidate();
     m_analyzerDisplayTimer.invalidate();
     m_fftAutoScaleTimer.invalidate();
     m_fftAutoScaleValid = false;
     emit fftAutoScaleStatsChanged();
 
+    QStringList owners = m_fftActiveConsumers.values();
+    owners.sort();
     qInfo().noquote() << "[FFT Runtime]"
                       << (m_fftUiActive ? "ACTIVE" : "SUSPENDED")
+                      << "consumers=" << owners.join(',')
                       << "(audio remains active)";
     emit fftUiActiveChanged(m_fftUiActive);
 }
@@ -881,7 +919,15 @@ void WebSocketClient::onTextMessageReceived(const QString &message)
             sqlCount = nextSql ? 0 : 3;
             if (sqlOn != nextSql) {
                 sqlOn = nextSql;
-                qInfo() << "[QT5-SQUELCH-RX]" << sqlOn;
+                if (!m_squelchLogTimer.isValid()
+                        || m_squelchLogTimer.elapsed() >= m_squelchLogIntervalMs) {
+                    qInfo() << "[QT5-SQUELCH-RX]" << sqlOn
+                            << "suppressed=" << m_squelchLogSuppressed;
+                    m_squelchLogSuppressed = 0;
+                    m_squelchLogTimer.restart();
+                } else {
+                    ++m_squelchLogSuppressed;
+                }
                 emit onSQLChanged(sqlOn);
             }
         } else if (type == "modes") {
@@ -947,7 +993,6 @@ void WebSocketClient::sendFrequency(quint64 freq) {
 Q_INVOKABLE void WebSocketClient::setSpeakerVolumeMute(bool active)
 {
     qDebug() << "setSpeakerVolumeMute::" << active;
-    const bool previousMuted = m_isMuted;
     if (active) {
         // ----- MUTE -----
         if (!m_isMuted) {
@@ -962,8 +1007,6 @@ Q_INVOKABLE void WebSocketClient::setSpeakerVolumeMute(bool active)
             m_isMuted = false;
         }
     }
-    if (previousMuted != m_isMuted)
-        qInfo().noquote() << "[AUDIO-MUTE] muted=" << m_isMuted;
     emit mutedChanged(m_isMuted);
 }
 

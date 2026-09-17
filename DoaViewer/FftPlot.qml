@@ -1,5 +1,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import iScan.Display 1.0
 
 // ============================================================
 // FftPlot.qml (solid colors, NO gradients / NO rgba alpha)
@@ -25,6 +26,11 @@ Rectangle {
     property bool enabled: true
     property var  freqHz: []
     property var  magDb: []
+    // DOA-VIEWER1.3: native/CUDA renderer path. QML Canvas keeps the grid,
+    // labels, target band and mouse interaction, while the high-rate trace is
+    // drawn by FftLineGraphItem/SceneGraph instead of JavaScript or QPainter loops.
+    property bool nativeRenderEnabled: false
+    property int  frameSequence: 0
     property real bandCenterHz: 0
     property real bandBwHz: 0
 
@@ -74,6 +80,7 @@ Rectangle {
     property bool _dirtyPlot: true
     property bool _dirtyGrid: true
     property bool _dirtyScale: true
+    property int  _lastNativeSubmittedSeq: -1
 
     // Plot padding
     property int padLeft: 64
@@ -283,7 +290,14 @@ Rectangle {
             if (!(root._dirtyScale || root._dirtyGrid || root._dirtyPlot)) return
             if (root._dirtyScale) { root._calcScale(); root._dirtyScale = false }
             if (root._dirtyGrid)  { gridCanvas.requestPaint(); root._dirtyGrid = false }
-            if (root._dirtyPlot)  { plotCanvas.requestPaint(); root._dirtyPlot = false }
+            if (root._dirtyPlot)  {
+                // DOA-VIEWER1.4: native frames are sequence-gated inside
+                // _submitNativeFrame(), so the timer can recover from QML
+                // binding-order edge cases without double-feeding C++.
+                if (root.nativeRenderEnabled) root._submitNativeFrame()
+                else plotCanvas.requestPaint()
+                root._dirtyPlot = false
+            }
             if (root.showOffsetMarker && isFinite(root.offsetMarkerHz)) markerCanvas.requestPaint()
         }
     }
@@ -370,12 +384,60 @@ Rectangle {
     }
 
     // =====================
+    // Native/CUDA FFT trace
+    // =====================
+    FftLineGraphItem {
+        id: nativeSpectrumItem
+        x: root.padLeft
+        y: root.padTop
+        width: root._plotW()
+        height: root._plotH()
+        z: 8
+        visible: root.enabled && root.nativeRenderEnabled
+        renderEnabled: root.enabled && root.visible && root.nativeRenderEnabled
+        targetFps: Math.max(1, root.fftFps)
+        minDb: root._mmin
+        maxDb: root._mmax
+        plotTopInset: 0
+        fullStartFreq: root._fmin
+        viewStartFreq: root._fmin
+        viewStopFreq: root._fmax
+        sampleRate: Math.max(1, root._fmax - root._fmin)
+        spectrumColor: root.cLineA
+        fillColor: Qt.rgba(56 / 255, 189 / 255, 248 / 255, 0.18)
+    }
+
+    function _submitNativeFrame() {
+        if (!root.nativeRenderEnabled || !root.enabled || !root.visible) return
+        if (!_isValidArray(root.magDb)) return
+        if (root.frameSequence === root._lastNativeSubmittedSeq && !root._dirtyScale) return
+        if (root._dirtyScale) {
+            root._calcScale()
+            root._dirtyScale = false
+        }
+        nativeSpectrumItem.minDb = root._mmin
+        nativeSpectrumItem.maxDb = root._mmax
+        nativeSpectrumItem.fullStartFreq = root._fmin
+        nativeSpectrumItem.viewStartFreq = root._fmin
+        nativeSpectrumItem.viewStopFreq = root._fmax
+        nativeSpectrumItem.sampleRate = Math.max(1, root._fmax - root._fmin)
+        nativeSpectrumItem.submitExternalFrame(root.magDb)
+        root._lastNativeSubmittedSeq = root.frameSequence
+    }
+
+    onFrameSequenceChanged: _submitNativeFrame()
+    onNativeRenderEnabledChanged: {
+        _markPlotDirty()
+        _submitNativeFrame()
+    }
+
+    // =====================
     // FFT Plot
     // =====================
     Canvas {
         id: plotCanvas
         anchors.fill: parent
-        visible: root.enabled
+        visible: root.enabled && !root.nativeRenderEnabled
         antialiasing: false
         renderTarget: Canvas.FramebufferObject
 
@@ -436,11 +498,6 @@ Rectangle {
 
         Connections {
             target: (typeof doaClient !== "undefined") ? doaClient : null
-
-            function onFftChanged() {
-                root._markPlotDirty()
-                if (root.yAuto) root._markGridDirty()
-            }
 
             function onDoaOffsetHzChanged() {
                 root._markGridDirty()

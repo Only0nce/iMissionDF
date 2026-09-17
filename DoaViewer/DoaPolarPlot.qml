@@ -19,18 +19,36 @@ Rectangle {
     property real bandPeakDb: -200.0
     property real gateThDb: -65.0
 
-    // ===== repaint triggers (NO Connections needed) =====
-    onThetaChanged:        c.requestPaint()
-    onSpectrumChanged:     c.requestPaint()
-    onPeakDegChanged:      c.requestPaint()
-    onConfChanged:         c.requestPaint()
-    onSignalPresentChanged:c.requestPaint()
-    onSigPowerChanged:     c.requestPaint()
-    onBandPeakDbChanged:   c.requestPaint()
-    onGateThDbChanged:     c.requestPaint()
-    onEnabledChanged:      c.requestPaint()
-    onWidthChanged:        c.requestPaint()
-    onHeightChanged:       c.requestPaint()
+    // Paint scheduler: backend DoAResult can update faster than users can see.
+    // Mark dirty on data changes, then paint on a small bounded clock so Polar
+    // cannot starve FFT/Waterfall rendering during high-rate streams.
+    property int paintFps: 15
+    property bool _paintDirty: true
+
+    function _markDirty() { root._paintDirty = true }
+
+    onThetaChanged:        _markDirty()
+    onSpectrumChanged:     _markDirty()
+    onPeakDegChanged:      _markDirty()
+    onConfChanged:         _markDirty()
+    onSignalPresentChanged:_markDirty()
+    onSigPowerChanged:     _markDirty()
+    onBandPeakDbChanged:   _markDirty()
+    onGateThDbChanged:     _markDirty()
+    onEnabledChanged:      _markDirty()
+    onWidthChanged:        _markDirty()
+    onHeightChanged:       _markDirty()
+
+    Timer {
+        interval: Math.max(33, Math.floor(1000 / Math.max(1, root.paintFps)))
+        running: root.enabled && root.visible
+        repeat: true
+        onTriggered: {
+            if (!root._paintDirty) return
+            root._paintDirty = false
+            c.requestPaint()
+        }
+    }
 
     // ---- badge ----
     Rectangle {
@@ -125,17 +143,6 @@ Rectangle {
                 ctx.fillText("NO SIGNAL (DOA gated)", cx - 105, cy)
                 ctx.fillStyle = "#94A3B8"
                 ctx.font = "12px sans-serif"
-                ctx.fillText("Select offset/BW to hit the tone peak.", cx - 140, cy + 20)
-                return
-            }
-
-            // gated
-            if (!root.signalPresent) {
-                ctx.fillStyle = "#F87171"
-                ctx.font = "16px Sans"
-                ctx.fillText("NO SIGNAL (DOA gated)", cx - 105, cy)
-                ctx.fillStyle = "#94A3B8"
-                ctx.font = "12px Sans"
                 ctx.fillText("Select offset/BW to hit the tone peak.", cx - 140, cy + 20)
                 return
             }

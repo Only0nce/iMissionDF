@@ -1,263 +1,3 @@
-// // WaterfallCanvas.qml (FULL FILE)
-// // - Newest row at TOP (flows top->down)
-// // - Aligns X scale with FftPlot by using same padLeft/padRight
-// // - Scrolls ONLY the plot area (inside padding)
-// // - Pull-based Timer (works even if waterfallRowDb has no NOTIFY)
-// // - Colors: array of 0xRRGGBB (decimal ok)
-
-// import QtQuick 2.15
-
-// Rectangle {
-//     id: root
-//     radius: 12
-//     color: "#060B16"
-//     border.color: "#1F2A44"
-//     border.width: 1
-//     clip: true
-
-//     // ===== Public API =====
-//     property bool enabled: true
-
-//     // 1 row = FFT magnitude dB array (e.g. doaClient.fftMagDb)
-//     property var  waterfallRowDb: []
-
-//     // dB scaling (match FFT)
-//     property real minDb: -150.0
-//     property real maxDb: -50.0
-
-//     // fps + row height
-//     property int  wfFps: 25
-//     property int  rowHeightPx: 1
-
-//     // colormap: array of decimal colors (0xRRGGBB)
-//     property var  waterfallColors: []
-
-//     // ===== IMPORTANT: align with FftPlot padding =====
-//     property int padLeft: 64
-//     property int padRight: 18
-//     property int padTop: 0
-//     property int padBottom: 0
-
-//     // show border of plot area
-//     property bool showFrame: true
-
-//     // debug overlay
-//     property bool showDebug: true
-
-//     // ===== Internal =====
-//     property int _frames: 0
-//     property int _lastLen: 0
-//     property int _sameCount: 0
-
-//     function _isValidArray(a) {
-//         return a !== undefined && a !== null && a.length !== undefined && a.length >= 8
-//     }
-//     function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
-
-//     function _plotX0() { return Math.max(0, root.padLeft) }
-//     function _plotY0() { return Math.max(0, root.padTop) }
-//     function _plotW()  { return Math.max(0, root.width  - root.padLeft - root.padRight) }
-//     function _plotH()  { return Math.max(0, root.height - root.padTop  - root.padBottom) }
-
-//     function _colorIndexFromDb(db) {
-//         var mn = Number(root.minDb)
-//         var mx = Number(root.maxDb)
-//         if (!isFinite(mn)) mn = -150
-//         if (!isFinite(mx)) mx = -50
-//         if (mx <= mn) mx = mn + 1.0
-
-//         var t = (Number(db) - mn) / (mx - mn)
-//         if (!isFinite(t)) t = 0
-//         t = _clamp(t, 0, 1)
-
-//         // ✅ boost brightness (gamma < 1 => brighter)
-//         var gamma = 0.6
-//         t = Math.pow(t, gamma)
-
-//         var L = root.waterfallColors.length
-//         if (L <= 1) return -1
-//         return Math.floor(t * (L - 1) + 0.000001)
-//     }
-
-
-//     function _rgbCssFromColorInt(c) {
-//         var r = (c >> 16) & 255
-//         var g = (c >> 8) & 255
-//         var b = (c) & 255
-//         return "rgb(" + r + "," + g + "," + b + ")"
-//     }
-
-//     // ===== Canvas (persistent surface) =====
-//     Canvas {
-//         id: wfCanvas
-//         anchors.fill: parent
-//         visible: root.enabled
-//         antialiasing: false
-//         renderTarget: Canvas.FramebufferObject
-
-//         property var _pendingRow: null
-//         property bool _inited: false
-
-//         onPaint: {
-//             var ctx = getContext("2d")
-//             ctx.setTransform(1,0,0,1,0,0)
-
-//             var x0 = root._plotX0()
-//             var y0 = root._plotY0()
-//             var W  = root._plotW()
-//             var Hh = root._plotH()
-
-//             // init / reset
-//             if (!wfCanvas._inited) {
-//                 ctx.fillStyle = root.color
-//                 ctx.fillRect(0, 0, width, height)
-
-//                 // optional plot frame
-//                 if (root.showFrame && W > 2 && Hh > 2) {
-//                     ctx.strokeStyle = "rgba(36,49,76,0.9)"
-//                     ctx.lineWidth = 1
-//                     ctx.strokeRect(x0 + 0.5, y0 + 0.5, W - 1, Hh - 1)
-//                 }
-
-//                 wfCanvas._inited = true
-//                 return
-//             }
-
-//             var row = wfCanvas._pendingRow
-//             wfCanvas._pendingRow = null
-//             if (!_isValidArray(row)) return
-//             if (root.waterfallColors.length < 2) return
-//             if (W < 4 || Hh < 4) return
-
-//             var rh = Math.max(1, Math.floor(root.rowHeightPx))
-//             if (rh > Hh) rh = Hh
-
-//             // =========================================
-//             // ✅ SHIFT ONLY plot-area DOWN by rh pixels
-//             // =========================================
-//             // src: (x0, y0) .. (x0+W, y0+Hh-rh)
-//             // dst: (x0, y0+rh) .. (x0+W, y0+Hh)
-//             ctx.drawImage(wfCanvas,
-//                           x0, y0, W, Hh - rh,
-//                           x0, y0 + rh, W, Hh - rh)
-
-//             // clear TOP band inside plot-area for new row
-//             ctx.fillStyle = root.color
-//             ctx.fillRect(x0, y0, W, rh)
-
-//             // =========================================
-//             // ✅ DRAW NEW ROW AT TOP of plot-area
-//             // =========================================
-//             var y = y0
-//             var n = row.length
-
-//             for (var px = 0; px < W; px++) {
-//                 var bi = Math.floor(px * (n - 1) / Math.max(1, (W - 1)))
-//                 var db = Number(row[bi])
-//                 var ci = root._colorIndexFromDb(db)
-//                 if (ci < 0) continue
-//                 var c = root.waterfallColors[ci]
-//                 ctx.fillStyle = root._rgbCssFromColorInt(c)
-//                 ctx.fillRect(x0 + px, y, 1, rh)
-//             }
-
-//             // keep plot frame visible (redraw border lightly)
-//             if (root.showFrame) {
-//                 ctx.strokeStyle = "rgba(36,49,76,0.9)"
-//                 ctx.lineWidth = 1
-//                 ctx.strokeRect(x0 + 0.5, y0 + 0.5, W - 1, Hh - 1)
-//             }
-
-//             root._frames++
-//         }
-//     }
-
-//     function _pushRow(row) {
-//         if (!root.enabled) return
-//         if (!_isValidArray(row)) return
-//         if (root.waterfallColors.length < 2) return
-//         wfCanvas._pendingRow = row
-//         wfCanvas.requestPaint()
-//     }
-
-//     // ===== Pull-based update =====
-//     Timer {
-//         id: tick
-//         interval: Math.max(16, Math.floor(1000 / Math.max(1, root.wfFps)))
-//         running: root.enabled && root.visible
-//         repeat: true
-//         onTriggered: {
-//             var row = root.waterfallRowDb
-//             if (!_isValidArray(row)) { root._lastLen = 0; return }
-
-//             var len = row.length
-//             var a0  = Number(row[0])
-//             var aM  = Number(row[Math.floor(len/2)])
-//             var key = "" + len + "|" + a0.toFixed(2) + "|" + aM.toFixed(2)
-
-//             if (key === tick._lastKey) {
-//                 root._sameCount++
-//                 if (root._sameCount < 3) return
-//             } else {
-//                 root._sameCount = 0
-//                 tick._lastKey = key
-//             }
-
-//             root._lastLen = len
-//             root._pushRow(row)
-//         }
-//         property string _lastKey: ""
-//     }
-
-//     // ===== Debug overlay =====
-//     Rectangle {
-//         anchors.left: parent.left
-//         anchors.top: parent.top
-//         anchors.margins: 8
-//         radius: 8
-//         color: Qt.rgba(2/255, 6/255, 23/255, 0.65)
-//         border.color: "#24314C"
-//         border.width: 1
-//         visible: root.showDebug
-//         width: dbg.paintedWidth + 18
-//         height: 26
-
-//         Text {
-//             id: dbg
-//             anchors.centerIn: parent
-//             color: "#E5E7EB"
-//             font.pixelSize: 12
-//             text: "WF plotW=" + root._plotW()
-//                 + " len=" + root._lastLen
-//                 + " frames=" + root._frames
-//         }
-//     }
-
-//     // Disabled overlay
-//     Item {
-//         anchors.fill: parent
-//         visible: !root.enabled
-//         Rectangle { anchors.fill: parent; color: Qt.rgba(2/255, 6/255, 23/255, 0.55) }
-//         Text {
-//             anchors.centerIn: parent
-//             text: "WATERFALL OFF"
-//             color: "#F87171"
-//             font.pixelSize: 16
-//             font.bold: true
-//         }
-//     }
-
-//     function _reset() {
-//         wfCanvas._inited = false
-//         wfCanvas.requestPaint()
-//     }
-
-//     onWidthChanged:  _reset()
-//     onHeightChanged: _reset()
-//     onEnabledChanged: if (enabled) _reset()
-
-//     Component.onCompleted: _reset()
-// }
 // WaterfallCanvas.qml (FULL FILE)
 // - Pull-based (ไม่ต้องพึ่ง NOTIFY)
 // - New row goes to TOP, history shifts DOWN  ✅ (ไหลบนลงล่าง)
@@ -266,6 +6,7 @@
 // ---------------------------------------------------------------
 
 import QtQuick 2.15
+import iScan.Display 1.0
 
 Rectangle {
     id: root
@@ -280,6 +21,20 @@ Rectangle {
 
     // 1 row = FFT magnitude dB array (e.g. doaClient.fftMagDb)
     property var  waterfallRowDb: []
+
+    // DOA-VIEWER1.6: native GPU texture renderer path. When enabled, rows
+    // are colorized into an event-driven ring texture and presented by Qt
+    // SceneGraph/GPU, avoiding QML Canvas and QPainter waterfall paints.
+    property bool nativeRenderEnabled: false
+    // DOA-VIEWER1.7: use the existing runtime CUDA plugin for row peak-pooling
+    // and colorization when available. Falls back to local CPU row processing.
+    property bool cudaWaterfallEnabled: true
+
+    // Sequence-gated live history. A new waterfall row is appended only when
+    // the producer publishes a new display frame. This avoids fake scrolling
+    // and saves Canvas work when the FFT frame has not changed.
+    property int frameSequence: 0
+    property string sourceKey: ""
 
     // shared with FFT
     property bool autoDb: false
@@ -298,12 +53,16 @@ Rectangle {
     property var  waterfallColors: []
 
     // debug
-    property bool showDebug: true
+    property bool showDebug: false
 
     // internal
     property int _frames: 0
     property int _lastLen: 0
     property int _sameCount: 0
+    property int _lastFrameSequence: -1
+    property string _lastSourceKey: ""
+    property var _cssColors: []
+    property bool _nativeSubmitQueued: false
 
     function _isValidArray(a) {
         return a !== undefined && a !== null && a.length !== undefined && a.length >= 8
@@ -335,6 +94,15 @@ Rectangle {
         return "rgb(" + r + "," + g + "," + b + ")"
     }
 
+    function _rebuildColorCache() {
+        var out = []
+        if (root.waterfallColors) {
+            for (var i = 0; i < root.waterfallColors.length; ++i)
+                out.push(root._rgbCssFromColorInt(root.waterfallColors[i]))
+        }
+        root._cssColors = out
+    }
+
     function _pushRow(row) {
         if (!root.enabled) return
         if (!_isValidArray(row)) return
@@ -356,32 +124,116 @@ Rectangle {
         root._frames++
     }
 
+    // ============ Native GPU waterfall texture surface ============
+    FftWaterfallTextureItem {
+        id: nativeWaterfallItem
+        x: Math.max(0, root.padLeft)
+        y: 0
+        width: Math.max(1, root.width - Math.max(0, root.padLeft) - Math.max(0, root.padRight))
+        height: root.height
+        z: 4
+        visible: root.enabled && root.nativeRenderEnabled
+        renderEnabled: root.enabled && root.visible && root.nativeRenderEnabled
+        targetFps: Math.max(1, root.wfFps)
+        rowHeightPx: Math.max(1, root.rowHeightPx)
+        minDb: root.minDb
+        maxDb: root.maxDb
+        palette: root.waterfallColors
+        backgroundColor: root.color
+        cudaProcessingEnabled: root.cudaWaterfallEnabled
+    }
+
+    function _submitNativeRow() {
+        if (!root.nativeRenderEnabled || !root.enabled || !root.visible) return false
+        if (!_isValidArray(root.waterfallRowDb)) return false
+        root._lastLen = root.waterfallRowDb.length
+        var ok = nativeWaterfallItem.submitExternalFrame(root.waterfallRowDb)
+        if (ok) {
+            root._frames++
+            root._lastFrameSequence = root.frameSequence
+        }
+        return ok
+    }
+
+    function _requestNativeSubmit(reason) {
+        if (!root.nativeRenderEnabled || !root.enabled || !root.visible) return
+        if (root._nativeSubmitQueued) return
+        root._nativeSubmitQueued = true
+        // Let QML bindings settle first. The parent updates displayFftMagDb and
+        // frameSequence in the same function; onFrameSequenceChanged can run
+        // before waterfallRowDb has delivered the new array to this child. A
+        // deferred submit keeps Spectrum and Waterfall on the same visible row.
+        Qt.callLater(function() {
+            root._nativeSubmitQueued = false
+            root._submitNativeRow()
+        })
+    }
+
+    onFrameSequenceChanged: {
+        if (root.nativeRenderEnabled) {
+            if (root.sourceKey !== root._lastSourceKey) {
+                root._lastSourceKey = root.sourceKey
+                root._resetHistory()
+            }
+            if (root.frameSequence !== root._lastFrameSequence)
+                root._requestNativeSubmit("frame-sequence")
+        }
+    }
+
+    onWaterfallRowDbChanged: {
+        if (root.nativeRenderEnabled && root.frameSequence !== root._lastFrameSequence)
+            root._requestNativeSubmit("row-db")
+    }
+
+    onNativeRenderEnabledChanged: {
+        root._resetHistory()
+        if (root.nativeRenderEnabled)
+            root._requestNativeSubmit("native-enabled")
+    }
+
     // ============ Pull-based update (NO NOTIFY needed) ============
     Timer {
         id: tick
         interval: Math.max(16, Math.floor(1000 / Math.max(1, root.wfFps)))
-        running: root.enabled && root.visible
+        running: root.enabled && root.visible && !root.nativeRenderEnabled
         repeat: true
         onTriggered: {
+            if (root.sourceKey !== root._lastSourceKey) {
+                root._lastSourceKey = root.sourceKey
+                root._lastFrameSequence = -1
+                root._sameCount = 0
+                tick._lastKey = ""
+                root._resetHistory()
+            }
+
             var row = root.waterfallRowDb
             if (!_isValidArray(row)) {
                 root._lastLen = 0
                 return
             }
 
+            // Preferred path: use explicit producer sequence. This means the
+            // waterfall is a truthful acquisition/display history: one new
+            // visible FFT frame produces at most one waterfall row.
+            if (root.frameSequence > 0) {
+                if (root.frameSequence === root._lastFrameSequence)
+                    return
+                root._lastFrameSequence = root.frameSequence
+                root._sameCount = 0
+                root._lastLen = row.length
+                root._pushRow(row)
+                return
+            }
+
+            // Compatibility fallback for callers that do not provide a sequence:
+            // append only on actual content change; never keep scrolling the
+            // same row forever.
             var len = row.length
             var a0  = Number(row[0])
             var aM  = Number(row[Math.floor(len/2)])
             var key = "" + len + "|" + a0.toFixed(2) + "|" + aM.toFixed(2)
-
-            if (key === tick._lastKey) {
-                root._sameCount++
-                if (root._sameCount < 3) return
-            } else {
-                root._sameCount = 0
-                tick._lastKey = key
-            }
-
+            if (key === tick._lastKey) return
+            tick._lastKey = key
             root._lastLen = len
             root._pushRow(row)
         }
@@ -392,7 +244,7 @@ Rectangle {
     Canvas {
         id: scrollCanvas
         anchors.fill: parent
-        visible: root.enabled
+        visible: root.enabled && !root.nativeRenderEnabled
         antialiasing: false
         renderTarget: Canvas.FramebufferObject
 
@@ -429,7 +281,7 @@ Rectangle {
     Canvas {
         id: drawCanvas
         anchors.fill: parent
-        visible: root.enabled
+        visible: root.enabled && !root.nativeRenderEnabled
         antialiasing: false
         renderTarget: Canvas.FramebufferObject
 
@@ -461,17 +313,39 @@ Rectangle {
             ctx.fillRect(0, yTop, width, H)
 
             var n = row.length
+            var colors = root._cssColors
+            if (!colors || colors.length !== root.waterfallColors.length)
+                root._rebuildColorCache()
+            colors = root._cssColors
 
-            // draw only inside plot area (left..xR)
+            // Draw only inside plot area (left..xR). Group equal-color pixels
+            // into runs so a row uses far fewer fillStyle/fillRect calls than
+            // one rectangle per pixel. This matters on Jetson Qt Canvas.
+            var runColor = ""
+            var runStart = left
+            var runLen = 0
             for (var px = 0; px < plotW; px++) {
-                var x = left + px
                 var bi = Math.floor(px * (n - 1) / Math.max(1, (plotW - 1)))
                 var db = Number(row[bi])
                 var ci = root._colorIndexFromDb(db)
-                if (ci < 0) continue
-                var c = root.waterfallColors[ci]
-                ctx.fillStyle = root._rgbCssFromColorInt(c)
-                ctx.fillRect(x, yTop, 1, H)
+                var css = (ci >= 0 && ci < colors.length) ? colors[ci] : root.color
+                if (px === 0) {
+                    runColor = css
+                    runStart = left
+                    runLen = 1
+                } else if (css === runColor) {
+                    runLen++
+                } else {
+                    ctx.fillStyle = runColor
+                    ctx.fillRect(runStart, yTop, runLen, H)
+                    runColor = css
+                    runStart = left + px
+                    runLen = 1
+                }
+            }
+            if (runLen > 0) {
+                ctx.fillStyle = runColor
+                ctx.fillRect(runStart, yTop, runLen, H)
             }
 
             // composite into scrollCanvas
@@ -516,8 +390,34 @@ Rectangle {
         }
     }
 
-    Component.onCompleted: {
+    function _resetHistory() {
         scrollCanvas._init = false
+        root._frames = 0
+        root._lastLen = 0
+        root._lastFrameSequence = -1
+        root._nativeSubmitQueued = false
+        drawCanvas._pendingRow = null
+        if (nativeWaterfallItem) nativeWaterfallItem.clearHistory()
         scrollCanvas.requestPaint()
+        if (root.nativeRenderEnabled) root._requestNativeSubmit("reset")
+    }
+
+    // In native SceneGraph mode, geometry changes are handled by the C++ item.
+    // Avoid clearing history from QML on every Layout width/height jitter; that
+    // made the panel look permanently blank on StackView/ColumnLayout resize.
+    onWidthChanged: {
+        if (root.nativeRenderEnabled) root._requestNativeSubmit("width")
+        else root._resetHistory()
+    }
+    onHeightChanged: {
+        if (root.nativeRenderEnabled) root._requestNativeSubmit("height")
+        else root._resetHistory()
+    }
+    onEnabledChanged: if (enabled) _resetHistory()
+    onWaterfallColorsChanged: root._rebuildColorCache()
+
+    Component.onCompleted: {
+        root._rebuildColorCache()
+        root._resetHistory()
     }
 }
