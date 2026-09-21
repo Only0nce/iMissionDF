@@ -11,10 +11,9 @@ Item {
 
     // KP-6JUL2026 : build flag controls only the top-bar drawer tab.
     // The complete Network Settings page remains available regardless of this flag.
-    readonly property bool topNetworkDrawerEnabled:
-        (typeof FeatureTopNetworkDrawer === "undefined")
-        ? false
-        : FeatureTopNetworkDrawer
+    // UX-NAV1: remove the legacy top Network Settings drawer handle.
+    // The full Network Settings page remains available from the normal menu.
+    readonly property bool topNetworkDrawerEnabled: false
 
     // NET-AUTH2.2: transient access level supplied by MainPage when this page is pushed.
     // Direct/fallback loads default to Viewer, the least-privileged role.

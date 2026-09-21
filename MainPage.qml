@@ -27,10 +27,9 @@ Item {
     property bool keyfreqEdit: false
     signal receiverParamsUpdated(string signalStrength, string receiverGain)
     property string currentPageSource: "qrc:/HomeDisplay.qml"
-    readonly property bool topNetworkDrawerEnabled:
-        (typeof FeatureTopNetworkDrawer === "undefined")
-        ? false
-        : FeatureTopNetworkDrawer
+    // UX-NAV1: remove the legacy top Network Settings drawer handle.
+    // Network Settings is still opened from the normal menu.
+    readonly property bool topNetworkDrawerEnabled: false
 
     property var originalVfoConfig: ({
         spectrum: "Single Ch",

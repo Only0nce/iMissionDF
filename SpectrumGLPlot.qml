@@ -186,6 +186,16 @@ Item {
     // alive for the lifetime of SpectrumGLPlot; opening/closing this panel changes
     // presentation only and therefore preserves scan state and waterfall history.
     property bool floatingWorkspaceOpen: false
+    onFloatingWorkspaceOpenChanged: {
+        // UX-POPUP5: when the Scan/Memory popup is open, the gray modal
+        // mouse area owns all outside clicks.  Cancel any active divider drag
+        // and keep the divider MouseArea inactive until the popup closes.
+        if (floatingWorkspaceOpen) {
+            spectrumDividerApplyTimer.stop()
+            spectrumDividerDragActive = false
+            pendingSpectrumRatio = spectrumRatio
+        }
+    }
     readonly property string floatingWorkspaceTitle: widgetView ? "SCAN WORKSPACE" : "MEMORY WORKSPACE"
     // CUDA1.4: reserve a dedicated HUD dock inside the Waterfall. The floating
     // workspace now stops above this dock instead of competing with bandwidth,
@@ -252,12 +262,14 @@ Item {
         // Existing global contract: widgetView=true => Scan, false => Memory.
         widgetView = !!scanMode
         floatingWorkspaceOpen = true
+        floatingWorkspaceLog(scanMode ? "open-scan" : "open-memory")
     }
 
     function toggleFloatingWorkspace(scanMode) {
         const requestedScan = !!scanMode
         if (floatingWorkspaceOpen && widgetView === requestedScan) {
             floatingWorkspaceOpen = false
+            floatingWorkspaceLog(requestedScan ? "toggle-close-scan" : "toggle-close-memory")
             return
         }
         openFloatingWorkspace(requestedScan)
@@ -265,6 +277,12 @@ Item {
 
     function closeFloatingWorkspace() {
         floatingWorkspaceOpen = false
+    }
+
+    function floatingWorkspaceLog(reason) {
+        console.log("[FLOATING-WORKSPACE]", reason,
+                    "open=", floatingWorkspaceOpen,
+                    "mode=", widgetView ? "SCAN" : "MEMORY")
     }
 
     function rebuildWaterfallPalette(colors) {
@@ -1272,9 +1290,12 @@ Item {
         y: Math.round(spectrumCanvas.height - 40)
         width: root.width
         height: 48
-        z: 1000
+        // UX-POPUP5: this drag strip must not sit above the modal Scan/Memory
+        // scrim.  While a popup is open, the scrim catches the click to close
+        // the popup and the divider becomes a lower, inactive layer.
+        z: root.floatingWorkspaceOpen ? 120 : 1000
         visible: root.runtimeActive
-        enabled: root.runtimeActive
+        enabled: root.runtimeActive && !root.floatingWorkspaceOpen
         acceptedButtons: Qt.LeftButton
         hoverEnabled: true
         preventStealing: true
@@ -2214,31 +2235,129 @@ Item {
        - Only geometry/opacity animate; CUDA/FBO/FFT ownership is untouched.
        ============================================================ */
 
-    // CUDA1.6: SCAN/MEMORY are a persistent vertical toggle rail attached
-    // directly below the Waterfall color legend. The rail remains visible while
-    // the floating workspace is open, so the active mode can be toggled closed
-    // or switched without reaching across the display.
+    // UX-POPUP1: modal dim/soft-blur shield for Scan/Memory workspace.
+    // The workspace itself stays alive; this layer only changes presentation.
+    // Clicking outside the panel closes it immediately, while Spectrum/Waterfall
+    // continue running behind the gray frosted background.
+    Item {
+        id: floatingWorkspaceScrim
+        anchors.fill: parent
+        // UX-POPUP5: modal click-catcher sits above all underlying analyzer
+        // controls, including the Scan/Memory launcher, but below the popup.
+        z: 150
+        visible: root.floatingWorkspaceOpen
+        enabled: root.floatingWorkspaceOpen
+        opacity: root.floatingWorkspaceOpen ? 1.0 : 0.0
+
+        Behavior on opacity {
+            NumberAnimation { duration: 150; easing.type: Easing.OutQuad }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            color: "#8A2B3038"
+        }
+
+        // Soft frosted panels create a blur-like visual separation without
+        // adding a heavy fullscreen QtGraphicalEffects pass over the live GL
+        // Spectrum/Waterfall renderer.
+        Rectangle {
+            anchors.fill: parent
+            color: "#223A4655"
+            opacity: 0.38
+            layer.enabled: true
+            smooth: true
+        }
+
+        Rectangle {
+            width: Math.max(parent.width * 0.42, 420)
+            height: Math.max(parent.height * 0.26, 220)
+            radius: width / 2
+            x: parent.width * 0.06
+            y: parent.height * 0.10
+            color: "#305B6C78"
+            opacity: 0.35
+        }
+
+        Rectangle {
+            width: Math.max(parent.width * 0.36, 360)
+            height: Math.max(parent.height * 0.22, 190)
+            radius: width / 2
+            x: parent.width * 0.56
+            y: parent.height * 0.48
+            color: "#30474F5C"
+            opacity: 0.30
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            acceptedButtons: Qt.LeftButton | Qt.RightButton
+            onPressed: mouse.accepted = true
+            onClicked: {
+                root.floatingWorkspaceLog("outside-click-close")
+                root.closeFloatingWorkspace()
+            }
+        }
+    }
+
+    // CUDA1.6/UX-POPUP3: SCAN/MEMORY launcher stays horizontal in normal use.
+    // It follows the Waterfall legend while there is room.  Only when that normal
+    // location would disappear behind the bottom HUD / Intensity Scale area do we
+    // move it to the safe area above-left of the Intensity Scale card.
     Item {
         id: floatingWorkspaceLauncher
-        width: root.waterfallRightToggleWidth
-        height: root.waterfallRightToggleHeight
-        // Keep the larger touch targets on the same right edge as the color
-        // legend so they read as one continuous Waterfall utility rail.
-        x: waterfallLegend.x + waterfallLegend.width - width
-        y: waterfallLegend.y + waterfallLegend.height + 5
-        z: 113
+        readonly property real launcherSafeMargin: 10
+        readonly property real buttonGap: 6
+        readonly property real buttonWidth: 92
+        readonly property real buttonHeight: 44
+
+        width: (buttonWidth * 2) + buttonGap
+        height: buttonHeight
+
+        readonly property real normalX: waterfallLegend.x + waterfallLegend.width - width
+        readonly property real normalY: waterfallLegend.y + waterfallLegend.height + 5
+
+        readonly property real intensityCardGlobalLeft: waterfallHudLayer.x
+                                                      + waterfallRightHudPod.x
+                                                      + waterfallScaleHudCard.x
+        readonly property real intensityCardGlobalTop: waterfallHudLayer.y
+                                                     + waterfallRightHudPod.y
+                                                     + waterfallScaleHudCard.y
+
+        readonly property real bottomSafeY: Math.min(waterfallCanvas.y + waterfallCanvas.height - 8,
+                                                     intensityCardGlobalTop - launcherSafeMargin)
+        readonly property bool normalPositionVisible: (normalY + height) <= bottomSafeY
+
+        readonly property real fallbackX: intensityCardGlobalLeft - width - launcherSafeMargin
+        readonly property real fallbackY: intensityCardGlobalTop - height - launcherSafeMargin
+
+        x: Math.round(Math.max(root.waterfallHudSideMargin,
+                               Math.min(root.width - width - root.waterfallHudSideMargin,
+                                        normalPositionVisible ? normalX : fallbackX)))
+
+        y: Math.round(Math.max(waterfallCanvas.y + 8,
+                               Math.min(waterfallCanvas.y + waterfallCanvas.height - height - 8,
+                                        normalPositionVisible ? normalY : fallbackY)))
+
+        // Below the modal scrim while a popup is open, so the gray mouse area
+        // catches outside clicks and closes the popup instead of letting these
+        // launcher buttons receive input.
+        z: 130
         visible: root.runtimeActive
         opacity: visible ? 0.96 : 0.0
 
         Behavior on opacity { NumberAnimation { duration: 120 } }
+        Behavior on x { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+        Behavior on y { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
 
-        Column {
+        Row {
             anchors.fill: parent
-            spacing: 4
+            spacing: floatingWorkspaceLauncher.buttonGap
 
             Rectangle {
-                width: parent.width
-                height: (parent.height - parent.spacing) / 2
+                width: floatingWorkspaceLauncher.buttonWidth
+                height: floatingWorkspaceLauncher.buttonHeight
                 radius: 8
                 color: root.floatingWorkspaceOpen && widgetView
                        ? "#F0189286"
@@ -2270,8 +2389,8 @@ Item {
             }
 
             Rectangle {
-                width: parent.width
-                height: (parent.height - parent.spacing) / 2
+                width: floatingWorkspaceLauncher.buttonWidth
+                height: floatingWorkspaceLauncher.buttonHeight
                 radius: 8
                 color: root.floatingWorkspaceOpen && !widgetView
                        ? "#F0189286"
@@ -2312,7 +2431,9 @@ Item {
         y: root.floatingWorkspaceOpen
            ? root.height - height - root.floatingWorkspaceBottomMargin
            : root.height + 24
-        z: 120
+        // Popup panel is the top-most layer. It remains fully clickable while
+        // the gray mouse area below blocks every control behind it.
+        z: 170
         enabled: root.floatingWorkspaceOpen
         opacity: root.floatingWorkspaceOpen ? 1.0 : 0.0
 
