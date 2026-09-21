@@ -25,6 +25,79 @@ bool Mainwindows::getSqlActive() const
     return currentSQLValue;
 }
 
+void Mainwindows::emitRecorderUiState(const QString &reason)
+{
+    const bool expectedActive = recEnable && currentSQLValue;
+
+    qInfo().noquote() << "[REC-UI-STATE]"
+                      << "reason=" << reason
+                      << "expected=" << expectedActive
+                      << "actual=" << m_lastRecIsRecord
+                      << "sql=" << currentSQLValue
+                      << "recEnable=" << recEnable
+                      << "state=" << m_lastRecState;
+
+    emit recorderUiStateChanged(expectedActive, m_lastRecIsRecord, m_lastRecState);
+}
+
+void Mainwindows::reassertRecorderState(const QString &reason, bool force)
+{
+    const qint64 minIntervalMs = 1500;
+    if (!force
+            && m_lastRecReassertTimer.isValid()
+            && m_lastRecReassertTimer.elapsed() < minIntervalMs) {
+        return;
+    }
+
+    m_lastRecReassertTimer.restart();
+
+    qInfo().noquote() << "[REC-REASSERT]"
+                      << "reason=" << reason
+                      << "sql=" << currentSQLValue
+                      << "expected=" << (recEnable && currentSQLValue)
+                      << "actual=" << m_lastRecIsRecord
+                      << "state=" << m_lastRecState
+                      << "recEnable=" << recEnable;
+
+    sendSquelchStatus(currentSQLValue);
+    emitRecorderUiState(QStringLiteral("reassert:") + reason);
+}
+
+void Mainwindows::evaluateRecorderWatchdog(const QString &reason)
+{
+    const bool expectedActive = recEnable && currentSQLValue;
+    const bool actualRecord = m_lastRecIsRecord;
+    const bool logStale = !m_lastRecLogTimer.isValid()
+            || m_lastRecLogTimer.elapsed() > 5000;
+
+    if (expectedActive && (!actualRecord || logStale)) {
+        qInfo().noquote() << "[REC-WATCHDOG]"
+                          << "reason=" << reason
+                          << "action=reassert-on"
+                          << "expected=" << expectedActive
+                          << "actual=" << actualRecord
+                          << "sql=" << currentSQLValue
+                          << "recEnable=" << recEnable
+                          << "logStale=" << logStale
+                          << "logAgeMs=" << (m_lastRecLogTimer.isValid()
+                                               ? m_lastRecLogTimer.elapsed()
+                                               : -1);
+        reassertRecorderState(QStringLiteral("watchdog:") + reason);
+        return;
+    }
+
+    if (!currentSQLValue && actualRecord) {
+        qInfo().noquote() << "[REC-WATCHDOG]"
+                          << "reason=" << reason
+                          << "action=reassert-off"
+                          << "expected=" << expectedActive
+                          << "actual=" << actualRecord
+                          << "sql=" << currentSQLValue
+                          << "recEnable=" << recEnable;
+        reassertRecorderState(QStringLiteral("watchdog-stop:") + reason);
+    }
+}
+
 void Mainwindows::setDoaRxSpectrumActive(bool active)
 {
     if (m_doaRxSpectrumActive == active)
@@ -292,6 +365,28 @@ Mainwindows::Mainwindows(NetworkController *networkController,
     // 300 ms behavior with a QObject-owned QTimer instead.
     m_lastRecIsRecord = false;
     m_lastRecState = "UNKNOWN";
+    m_lastRecLogTimer.invalidate();
+    m_lastRecReassertTimer.invalidate();
+    emitRecorderUiState(QStringLiteral("startup-init"));
+
+    m_recorderWatchdogTimer = new QTimer(this);
+    m_recorderWatchdogTimer->setObjectName(QStringLiteral("RecorderAutoRearmWatchdog"));
+    m_recorderWatchdogTimer->setInterval(1000);
+    connect(m_recorderWatchdogTimer, &QTimer::timeout, this, [this]() {
+        evaluateRecorderWatchdog(QStringLiteral("periodic"));
+    });
+    m_recorderWatchdogTimer->start();
+
+    QTimer::singleShot(2200, this, [this]() {
+        qInfo().noquote() << "[REC-STARTUP-REPLAY]"
+                          << "sql=" << currentSQLValue
+                          << "expected=" << (recEnable && currentSQLValue)
+                          << "actual=" << m_lastRecIsRecord
+                          << "state=" << m_lastRecState;
+        reassertRecorderState(QStringLiteral("startup-replay"), true);
+        evaluateRecorderWatchdog(QStringLiteral("startup-replay"));
+    });
+
     m_sqlWatcherTimer = new QTimer(this);
     m_sqlWatcherTimer->setObjectName(QStringLiteral("SqlWatcherTimer"));
     m_sqlWatcherTimer->setInterval(300);
@@ -330,10 +425,16 @@ Mainwindows::Mainwindows(NetworkController *networkController,
 
         m_lastRecState = state;
         m_lastRecIsRecord = (state == "RECORD");
+        m_lastRecLogTimer.restart();
         recRunningCount = 0;
 
         qDebug() << "[LogWatcher] emit onRecStatusChanged =" << m_lastRecIsRecord;
         emit onRecStatusChanged(m_lastRecIsRecord);
+        emitRecorderUiState(QStringLiteral("logwatcher:" ) + state);
+
+        if (recEnable && currentSQLValue && !m_lastRecIsRecord) {
+            evaluateRecorderWatchdog(QStringLiteral("logwatcher-paused-while-expected"));
+        }
     });
 
     watcher->startWatching("/tmp/alsarecd_id_1.log");
@@ -931,10 +1032,16 @@ void Mainwindows::onSQLChanged(bool sqlVal)
         emit sqlActiveChanged(currentSQLValue);
     }
 
+    emitRecorderUiState(QStringLiteral("sql-update"));
+
     // Backend state replay frequently repeats the same SQL value. Avoid
-    // synchronous SHD_AMP/HS_MUTE/LED IO when no logical state changed.
-    if (!sqlChanged)
+    // synchronous SHD_AMP/HS_MUTE/LED IO when no logical state changed. The
+    // recorder path is level-triggered by the watchdog/reassert path below, so
+    // repeated SQL=true can still recover alsarecd without replaying GPIO.
+    if (!sqlChanged) {
+        evaluateRecorderWatchdog(QStringLiteral("sql-repeat"));
         return;
+    }
 
 #ifdef PLATFORM_JETSON
     bool current = false;
@@ -972,6 +1079,10 @@ void Mainwindows::onSQLChanged(bool sqlVal)
         }
     }
 #endif
+
+    evaluateRecorderWatchdog(sqlVal
+                             ? QStringLiteral("sql-open")
+                             : QStringLiteral("sql-closed"));
 }
 
 //void Mainwindows::sendSquelchStatus(bool sqlVal)

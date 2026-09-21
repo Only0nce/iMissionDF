@@ -141,6 +141,15 @@ public:
     // This avoids Q_PROPERTY accessor parsing issues on older Qt5 moc tools.
     Q_INVOKABLE bool getSqlActive() const;
 
+    // Replayable recorder state for QML. The recorder indicator must follow
+    // LogWatcher/Mainwindows recorder state directly, not scan-page runtime
+    // activity. Keeping these as invokable getters avoids changing this
+    // legacy class into a wider Q_PROPERTY refactor.
+    Q_INVOKABLE bool getRecActive() const { return m_lastRecIsRecord; }
+    Q_INVOKABLE QString getRecorderState() const { return m_lastRecState; }
+    Q_INVOKABLE bool getRecExpectedActive() const { return recEnable && currentSQLValue; }
+    Q_INVOKABLE bool getRecArming() const { return getRecExpectedActive() && !m_lastRecIsRecord; }
+
     Q_INVOKABLE QVariantList getWaterfallColorMap() const {
         QVariantList list;
         for (int color : wsClient.rxconfig.waterfall_colors)
@@ -369,6 +378,7 @@ signals:
     void spectrumUpdated(QVariantList spectrumData);
     void onTemperatureChanged(double value);
     void onRecStatusChanged(bool recStatus);
+    void recorderUiStateChanged(bool expectedActive, bool actualRecord, QString state);
     void sqlActiveChanged(bool active);
     void waterfallUpdated(QVariantList spectrumData);
     void smeterValueUpdated(double smeterValue);
@@ -639,6 +649,9 @@ private:
     QTimer *m_sqlWatcherTimer = nullptr;
     QString m_lastRecState;     // เช่น "RECORD", "PAUSE"
     bool m_lastRecIsRecord = false;
+    QTimer *m_recorderWatchdogTimer = nullptr;
+    QElapsedTimer m_lastRecLogTimer;
+    QElapsedTimer m_lastRecReassertTimer;
     bool m_emittedRecStatusOnRecord = false;
 
 
@@ -705,6 +718,10 @@ private:
 
     // helper: choose rtc devices that exist
     QStringList existingRtcDevs() const;
+
+    void emitRecorderUiState(const QString &reason);
+    void reassertRecorderState(const QString &reason, bool force = false);
+    void evaluateRecorderWatchdog(const QString &reason);
 
 private slots:
     void startScanCardFn();

@@ -775,13 +775,40 @@ Item {
                 // recording policy, but it is not itself proof that alsarecd is
                 // currently in RECORD state.
                 property bool scanRecOn: false
+                property bool recActualOn: false
+                property bool recExpectedOn: false
                 property bool blinkPhaseOn: true
+                property string recorderStateText: "UNKNOWN"
+
+                function applyRecorderUiState(expectedOn, actualOn, stateText) {
+                    recExpectedOn = expectedOn
+                    recActualOn = actualOn
+                    recorderStateText = stateText
+
+                    var visibleActive = expectedOn || actualOn
+                    if (scanRecOn !== visibleActive) {
+                        scanRecOn = visibleActive
+                        console.log("[REC-UI] expected=", expectedOn,
+                                    "actual=", actualOn,
+                                    "state=", stateText)
+                    }
+                }
 
                 function syncRecorderState() {
                     if (typeof mainWindows !== "undefined"
-                            && mainWindows
-                            && typeof mainWindows.getRecActive === "function") {
-                        scanRecOn = mainWindows.getRecActive()
+                            && mainWindows) {
+                        var actualOn = false
+                        var expectedOn = false
+                        var stateText = recorderStateText
+
+                        if (typeof mainWindows.getRecActive === "function")
+                            actualOn = mainWindows.getRecActive()
+                        if (typeof mainWindows.getRecExpectedActive === "function")
+                            expectedOn = mainWindows.getRecExpectedActive()
+                        if (typeof mainWindows.getRecorderState === "function")
+                            stateText = mainWindows.getRecorderState()
+
+                        applyRecorderUiState(expectedOn, actualOn, stateText)
                     }
                 }
 
@@ -793,13 +820,29 @@ Item {
                             : null
 
                     function onOnRecStatusChanged(active) {
-                        if (toolButtonRec.scanRecOn !== active) {
-                            toolButtonRec.scanRecOn = active
-                            var stateText = "UNKNOWN"
-                            if (typeof mainWindows.getRecorderState === "function")
-                                stateText = mainWindows.getRecorderState()
-                            console.log("[REC-UI] active =", active, "state =", stateText)
-                        }
+                        // Backward-compatible actual-recorder signal. The main UI
+                        // signal below carries both expected and actual state, but
+                        // older builds may still emit only this one. Keep expected
+                        // active from the current getter so SQL-open audio still
+                        // shows as ARMED while the watchdog reasserts alsarecd.
+                        var stateText = toolButtonRec.recorderStateText
+                        var expectedOn = toolButtonRec.recExpectedOn
+                        if (typeof mainWindows.getRecorderState === "function")
+                            stateText = mainWindows.getRecorderState()
+                        if (typeof mainWindows.getRecExpectedActive === "function")
+                            expectedOn = mainWindows.getRecExpectedActive()
+
+                        toolButtonRec.applyRecorderUiState(expectedOn,
+                                                           active,
+                                                           stateText)
+                    }
+
+                    function onRecorderUiStateChanged(expectedActive,
+                                                       actualRecord,
+                                                       state) {
+                        toolButtonRec.applyRecorderUiState(expectedActive,
+                                                           actualRecord,
+                                                           state)
                     }
                 }
 
@@ -809,10 +852,18 @@ Item {
                 }
 
                 Rectangle {
-                    color: "#aa009688"
+                    color: toolButtonRec.recActualOn
+                           ? (toolButtonRec.blinkPhaseOn ? "#ccbf1b1b" : "#aa009688")
+                           : (toolButtonRec.recExpectedOn
+                              ? (toolButtonRec.blinkPhaseOn ? "#cc7a4a00" : "#aa009688")
+                              : "#aa009688")
                     radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                    border.color: toolButtonRec.recActualOn
+                                  ? (toolButtonRec.blinkPhaseOn ? "#ffff4444" : "#55ff4444")
+                                  : (toolButtonRec.recExpectedOn
+                                     ? (toolButtonRec.blinkPhaseOn ? "#ffffaa33" : "#55ffaa33")
+                                     : "#ffffff")
+                    border.width: toolButtonRec.scanRecOn ? 2 : 0
                     anchors.fill: parent
 
                     Image {
@@ -827,15 +878,49 @@ Item {
                                 : "images/recOff.png"
                         fillMode: Image.PreserveAspectFit
                         opacity: toolButtonRec.scanRecOn
-                                 ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.25)
+                                 ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.45)
                                  : 0.6
+                    }
+
+                    Rectangle {
+                        id: recLiveDot
+                        width: 10
+                        height: 10
+                        radius: 5
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 4
+                        anchors.rightMargin: 4
+                        color: toolButtonRec.recActualOn ? "#ff2b2b" : "#ffaa33"
+                        border.color: "white"
+                        border.width: 1
+                        visible: toolButtonRec.scanRecOn
+                        opacity: toolButtonRec.blinkPhaseOn ? 1.0 : 0.20
+                    }
+
+                    Text {
+                        id: recLiveText
+                        anchors.left: parent.left
+                        anchors.bottom: parent.bottom
+                        anchors.leftMargin: 5
+                        anchors.bottomMargin: 3
+                        visible: toolButtonRec.scanRecOn
+                        text: toolButtonRec.recActualOn ? "REC" : "ARM"
+                        color: "white"
+                        font.pixelSize: 9
+                        font.bold: true
+                        opacity: toolButtonRec.blinkPhaseOn ? 1.0 : 0.35
                     }
 
                     Timer {
                         id: blinkTimer
                         interval: 500
                         repeat: true
-                        running: toolButtonRec.scanRecOn && scanpage.runtimeActive
+                        // Recorder feedback follows actual recorder state. Do not gate
+                        // this by scanpage.runtimeActive; runtimeActive is page/scan
+                        // ownership state and can be false while alsarecd is correctly
+                        // recording and audio remains normal.
+                        running: toolButtonRec.scanRecOn && scanpage.visible
                         onTriggered: {
                             toolButtonRec.blinkPhaseOn =
                                     !toolButtonRec.blinkPhaseOn
