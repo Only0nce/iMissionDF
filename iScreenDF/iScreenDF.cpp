@@ -32,11 +32,16 @@ iScreenDF::iScreenDF(ImageProviderDF *imageProvider, QObject *parent)
     m_dfEndpointApplyTimer = new QTimer(this);
     m_dfEndpointApplyTimer->setSingleShot(true);
     connect(m_dfEndpointApplyTimer, &QTimer::timeout, this, [this]() {
-        if (!m_dfApplyInProgress || m_dfAwaitingDbCommit)
+        // NET-ENDPOINTS2.2: DF Server IP Apply is direct and sticky.
+        // A timeout is only a connection-status event; it must never rollback
+        // the endpoint to an old address. TcpClientDF owns bounded reconnects
+        // to the currently selected target.
+        if (!m_dfApplyInProgress)
             return;
 
-        const qulonglong generation = m_dfEndpointGeneration;
-        rollbackDfEndpoint(QStringLiteral("candidate connect timeout"), generation);
+        m_dfApplyInProgress = false;
+        emitDfEndpointState(QStringLiteral("CONNECT_RETRY"),
+                            QStringLiteral("target connect timeout; endpoint retained and reconnect watchdog continues"));
     });
 
     keepAliveTimer = new QTimer(this);

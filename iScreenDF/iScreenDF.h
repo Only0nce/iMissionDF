@@ -186,8 +186,8 @@ public:
 signals:
     // R-LAN4A: RFSoC TCP control-channel connectivity for external LAN3/LAN4.
     void rfsocControlConnectionChanged(bool connected);
-    // Transaction telemetry for DF Server IP Apply/Reconnect. QML may display
-    // this, but the backend remains authoritative for commit/rollback.
+    // Direct-apply telemetry for DF Server IP Apply/Reconnect. QML may display
+    // this, but the selected endpoint is retained even when TCP is unreachable.
     void dfServerEndpointTransactionChanged(const QString &state,
                                             const QString &candidateIp,
                                             const QString &committedIp,
@@ -415,11 +415,14 @@ private:
     bool m_blockUiSync = false;
     QString localIpAddress() const;
 
-    // DF Server endpoint transaction state. Draft lives in QML; candidate is
-    // temporary until TCP connect + DB read-back both succeed.
+    // DF Server endpoint state. DF Server IP is intentionally separate from
+    // LAN3/end0 IP configuration: Apply sticks to the selected target, persists
+    // Parameter.ipdfserver asynchronously, and never rolls back on TCP failure.
     bool isValidDfEndpointIpv4(const QString &ip) const;
     void handleDfControlConnected();
     void handleDfControlFailure(const QString &reason);
+    // Kept as a safe no-op compatibility hook for older timeout/error paths;
+    // DF Server IP Apply is sticky and this must not restore an old endpoint.
     void rollbackDfEndpoint(const QString &reason, qulonglong generation);
     void applyCommittedDfEndpointSideEffects(const QString &ip);
     void emitDfEndpointState(const QString &state,

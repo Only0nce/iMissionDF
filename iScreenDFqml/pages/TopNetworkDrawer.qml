@@ -82,6 +82,8 @@ Drawer {
     // Authoritative endpoint comes only from Parameter.id=1.ipdfserver via C++.
     // Network2.krakenserver is a legacy mirror and must never drive this field.
     property string committedDfServerIp: ""
+    property string pendingDfServerIp: ""
+    property bool endpointApplyInProgress: false
 
     // ==========================
     // ✅ BASIC: Switch page (Network/VPN)
@@ -498,18 +500,59 @@ Drawer {
         }
 
         function onUpdateServeripDfserver(ip) {
-            committedDfServerIp = String(ip || "").trim()
-            if (committedDfServerIp.length === 0) return
+            var incoming = String(ip || "").trim()
+            if (incoming.length === 0) return
+
+            if (endpointApplyInProgress && pendingDfServerIp.length > 0 &&
+                    incoming !== pendingDfServerIp) {
+                console.log("[TopNetworkDrawer] ignore stale DF endpoint while apply is active:",
+                            incoming, "pending=", pendingDfServerIp)
+                return
+            }
+
+            if (serverField.activeFocus && serverField.text.trim() !== incoming &&
+                    !endpointApplyInProgress) {
+                console.log("[TopNetworkDrawer] keep DF endpoint draft while editing; incoming=", incoming)
+                return
+            }
+
+            committedDfServerIp = incoming
 
             _blockServerFieldSignal = true
             serverField.text = committedDfServerIp
             serverField.originalValue = committedDfServerIp
             _blockServerFieldSignal = false
+
+            if (incoming === pendingDfServerIp) {
+                pendingDfServerIp = ""
+                endpointApplyInProgress = false
+            }
         }
 
         function onDfServerEndpointTransactionChanged(state, candidateIp, committedIp, detail) {
             endpointState = String(state)
             endpointDetail = String(detail)
+
+            var committed = String(committedIp || "").trim()
+            if (committed.length > 0) {
+                if (!endpointApplyInProgress || pendingDfServerIp.length === 0 ||
+                        committed === pendingDfServerIp) {
+                    committedDfServerIp = committed
+                    _blockServerFieldSignal = true
+                    if (!serverField.activeFocus || committed === pendingDfServerIp)
+                        serverField.text = committedDfServerIp
+                    serverField.originalValue = committedDfServerIp
+                    _blockServerFieldSignal = false
+                }
+            }
+
+            if (pendingDfServerIp.length > 0 && committed === pendingDfServerIp &&
+                    (endpointState === "COMMITTED" || endpointState === "CONNECTED" ||
+                     endpointState === "CONNECT_RETRY" || endpointState === "DB_SAVE_FAILED" ||
+                     endpointState === "DB_SAVE_QUEUE_FAILED")) {
+                pendingDfServerIp = ""
+                endpointApplyInProgress = false
+            }
         }
 
         function onUpdateGlobalOffsets(offsetValue, compassOffset) {
@@ -1507,11 +1550,22 @@ Drawer {
                                 onClicked: {
                                     if (!krakenmapval) return
                                     try {
-                                        // Do not persist/mirror draft here. Backend owns the
-                                        // connect -> verify -> commit/rollback transaction.
+                                        var target = String(serverField.text || "").trim()
+                                        pendingDfServerIp = target
+                                        endpointApplyInProgress = true
+                                        committedDfServerIp = target
+                                        serverField.originalValue = target
+                                        endpointState = "APPLYING"
+                                        endpointDetail = "DF Server IP selected; saving Parameter.ipdfserver"
+
+                                        // DF Server IP is separate from LAN3/end0.
+                                        // Apply keeps this target and reconnects to it; no rollback.
                                         if (typeof krakenmapval.connectToDFserver === "function")
-                                            krakenmapval.connectToDFserver(serverField.text)
-                                    } catch(e) { console.log("[APPLY] call FAILED:", e) }
+                                            krakenmapval.connectToDFserver(target)
+                                    } catch(e) {
+                                        endpointApplyInProgress = false
+                                        console.log("[APPLY] call FAILED:", e)
+                                    }
                                 }
                             }
 
@@ -1547,9 +1601,9 @@ Drawer {
                             text: endpointDetail.length > 0
                                   ? (endpointState + " — " + endpointDetail)
                                   : endpointState
-                            color: (endpointState === "COMMITTED" || endpointState === "CONNECTED" || endpointState === "ROLLED_BACK")
+                            color: (endpointState === "COMMITTED" || endpointState === "CONNECTED" || endpointState === "STARTUP_CONNECT")
                                    ? colOk
-                                   : ((endpointState === "CONNECTING" || endpointState === "TCP_OK_DB_COMMIT" || endpointState === "RECONNECTING")
+                                   : ((endpointState === "CONNECTING" || endpointState === "RECONNECTING" || endpointState === "CONNECT_RETRY" || endpointState === "SNAPSHOT_IGNORED")
                                       ? colInfo : colWarn)
                             font.pixelSize: 12
                             wrapMode: Text.Wrap

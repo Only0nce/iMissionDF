@@ -132,6 +132,20 @@ void DoaClient::setFftChannel(int v)
     m_fftChannel = v;
     emit fftChannelChanged();
 
+    // DOA-FFT-LIFE1: local display cache belongs to the previous physical ADC
+    // channel.  Clear it immediately on channel switch so QML cannot publish a
+    // cached old-channel FFT while waiting for the first new server frame.
+    if (!m_fftFreqHz.isEmpty() || !m_fftMagDb.isEmpty()) {
+        m_fftFreqHz.clear();
+        m_fftMagDb.clear();
+        m_fftFminHz = 0.0;
+        m_fftFmaxHz = 0.0;
+        m_fftMminDb = 0.0;
+        m_fftMmaxDb = 0.0;
+        emit fftChanged();
+        emit fftScaleChanged();
+    }
+
     QVariantMap m;
     m["menuID"] = "setAdcChannel";
     m["channel"] = v;

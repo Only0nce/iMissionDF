@@ -100,6 +100,19 @@ Rectangle {
     property int displayFrameSequence: 0
     property bool _rxPendingFrame: false
     property bool _dfPendingFrame: false
+
+    // DOA-FFT-LIFE1: channel/source switch transaction state.  A channel
+    // change must be a single ordered transaction: choose expected source,
+    // switch backend, clear presentation once, then accept the first valid
+    // frame from the selected source.  Do not let property-change handlers
+    // perform a second clear in the middle of the transaction.
+    property int _channelSwitchEpoch: 0
+    property bool _channelSwitchActive: false
+    property bool _suppressDisplayChannelHandler: false
+    property bool _waitingForFirstFrame: false
+    property string _expectedSourceKey: "RX"
+    property string _lastClearKey: ""
+
     property int _perfFrames: 0
     property int _perfCoalesced: 0
     property int _perfLastSeq: 0
@@ -109,13 +122,34 @@ Rectangle {
     }
 
     readonly property bool rxSourceAvailable: mw() !== null
-    // CH1/RX FFT presentation gate. This is intentionally separate from
-    // doaClient.spectrumEnabled, which belongs to the RFSoC DF FFT path.
-    property bool rxFftEnabled: true
+    // Single FFT gate for the selected logical channel.  This replaces the old
+    // split CH1/RX vs DF-channel state: one UI toggle controls whichever
+    // channel is currently selected.  When the page is hidden, all FFT sources
+    // are suspended regardless of this remembered UI state.
+    property bool fftEnabled: false
 
     function logicalSourceName() {
-        if (displayChannel === 1) return "RX"
-        return "DF" + (displayChannel - 1)
+        return root.sourceKeyForChannel(root.displayChannel)
+    }
+
+    function sourceKeyForChannel(channel) {
+        var ch = Math.max(1, Math.min(6, Number(channel)))
+        if (ch === 1) return "RX"
+        return "DF" + (ch - 1)
+    }
+
+    function physicalDfChannelForDisplay(channel) {
+        var ch = Math.max(1, Math.min(6, Number(channel)))
+        return Math.max(0, Math.min(4, ch - 2))
+    }
+
+    function _setDisplayChannelGuarded(channel) {
+        var ch = Math.max(1, Math.min(6, Number(channel)))
+        if (root.displayChannel === ch)
+            return
+        root._suppressDisplayChannelHandler = true
+        root.displayChannel = ch
+        root._suppressDisplayChannelHandler = false
     }
 
     function spectrumTitle() {
@@ -123,9 +157,8 @@ Rectangle {
     }
 
     function syncRxConsumer() {
-        var m = mw()
-        if (!m || m.setDoaRxSpectrumActive === undefined) return
-        m.setDoaRxSpectrumActive(root.visible && root.rxDisplaySelected && root.rxFftEnabled)
+        // Backward-compatible helper retained for old signal paths.
+        root.syncFftResources("sync-rx-consumer")
     }
 
     function rebuildRxFrequencyAxis() {
@@ -162,28 +195,59 @@ Rectangle {
         root.rxAxisSampleRate = rate
     }
 
+    function _noteFirstFrameAccepted(reason, bins) {
+        if (!root._waitingForFirstFrame)
+            return
+        root._waitingForFirstFrame = false
+        console.log("[DOA-FIRST-FRAME]"
+                    + " epoch=" + root._channelSwitchEpoch
+                    + " channel=CH" + root.displayChannel
+                    + " source=" + root.logicalSourceName()
+                    + " expected=" + root._expectedSourceKey
+                    + " bins=" + bins
+                    + " reason=" + reason
+                    + " accepted=1")
+    }
+
     function publishSelectedFrame(reason) {
-        if (!root.visible) return
+        if (!root.visible || !root.fftEnabled) return
+
+        var source = root.logicalSourceName()
+        if (root._waitingForFirstFrame && source !== root._expectedSourceKey) {
+            console.log("[DOA-FIRST-FRAME]"
+                        + " epoch=" + root._channelSwitchEpoch
+                        + " channel=CH" + root.displayChannel
+                        + " source=" + source
+                        + " expected=" + root._expectedSourceKey
+                        + " reason=" + reason
+                        + " accepted=0 stale-source=1")
+            return
+        }
 
         var seqBefore = root.displayFrameSequence
+        var bins = 0
 
         if (root.rxDisplaySelected) {
-            if (!root.rxSourceAvailable || !root.rxFftEnabled) return
+            if (!root.fftEnabled || !root.rxSourceAvailable) return
             root.rebuildRxFrequencyAxis()
             if (!root.rxFftMagDb || root.rxFftMagDb.length < 8) return
             root.displayFftFreqHz = root.rxFftFreqHz
             root.displayFftMagDb = root.rxFftMagDb
+            bins = root.rxFftMagDb.length
         } else {
             if (typeof(doaClient) === "undefined" || doaClient === null) return
             if (!doaClient.fftMagDb || doaClient.fftMagDb.length < 8) return
             root.displayFftFreqHz = doaClient.fftFreqHz
             root.displayFftMagDb = doaClient.fftMagDb
+            bins = doaClient.fftMagDb.length
         }
 
         root.displayFrameSequence++
         root._perfFrames++
         if (root.displayFrameSequence > seqBefore + 1)
             root._perfCoalesced += (root.displayFrameSequence - seqBefore - 1)
+
+        root._noteFirstFrameAccepted(reason, bins)
     }
 
     Timer {
@@ -192,11 +256,11 @@ Rectangle {
         // without replaying old FFT frames. Hidden/unselected sources only cache
         // the latest backend frame.
         interval: root._schedulerIntervalMs()
-        running: root.visible
+        running: root.visible && root.fftEnabled
         repeat: true
         onTriggered: {
+            if (!root.fftEnabled) return
             if (root.rxDisplaySelected) {
-                if (!root.rxFftEnabled) return
                 if (!root._rxPendingFrame) return
                 root._rxPendingFrame = false
             } else {
@@ -210,7 +274,7 @@ Rectangle {
     Timer {
         id: perfLogTimer
         interval: 5000
-        running: root.visible
+        running: root.visible && root.fftEnabled
         repeat: true
         onTriggered: {
             var deltaSeq = root.displayFrameSequence - root._perfLastSeq
@@ -251,51 +315,216 @@ Rectangle {
         }
     }
 
-    function selectDisplayChannel(channel) {
+    Timer {
+        id: hiddenSuspendTimer
+        interval: 1200
+        repeat: false
+        onTriggered: {
+            // StackView/Layout transitions can pulse visible=false briefly. Do not
+            // convert that pulse into user FFT OFF. Only suspend backend consumers
+            // after the page has stayed hidden for the debounce window; the
+            // remembered root.fftEnabled state is preserved and will re-arm on
+            // visible=true.
+            if (root.visible || !root.fftEnabled)
+                return
+            root.stopAllFftResources("hidden-debounce")
+            console.log("[DOA-FFT-SYNC]"
+                        + " reason=hidden-debounce"
+                        + " epoch=" + root._channelSwitchEpoch
+                        + " source=" + root.logicalSourceName()
+                        + " rxConsumer=0"
+                        + " dfSpectrumEnabled=0"
+                        + " active=0"
+                        + " userFftEnabled=" + root.fftEnabled)
+        }
+    }
+
+    function clearFftDisplayBuffers(reason, force) {
+        // DOA-FFT-LIFE1: presentation-only clear.  This must not disable FFT,
+        // disconnect the IQ/TCP source, stop the CUDA worker, or change the
+        // selected backend.  Channel switch transactions call this once after
+        // the expected source/backend has been selected.
+        var why = reason || "unknown"
+        var key = root._channelSwitchEpoch + "|" + root.displayChannel + "|" + why
+        if (!force && root._lastClearKey === key)
+            return
+        root._lastClearKey = key
+
+        root.displayFftFreqHz = []
+        root.displayFftMagDb = []
+        root.displayFrameSequence++
+        root._rxPendingFrame = false
+        root._dfPendingFrame = false
+
+        if (typeof fftPlot !== "undefined" && fftPlot &&
+                typeof fftPlot.clearPlotHistory === "function")
+            fftPlot.clearPlotHistory(why)
+
+        if (typeof wf !== "undefined" && wf &&
+                typeof wf.clearHistory === "function")
+            wf.clearHistory(why)
+
+        console.log("[DOA-FFT-CLEAR]"
+                    + " reason=" + why
+                    + " epoch=" + root._channelSwitchEpoch
+                    + " logical=CH" + root.displayChannel
+                    + " source=" + root.logicalSourceName()
+                    + " fftEnabled=" + root.fftEnabled
+                    + " runtimeActive=" + (root.visible && root.fftEnabled)
+                    + " sourceDisconnected=0"
+                    + " seq=" + root.displayFrameSequence)
+    }
+
+    function selectDisplayChannel(channel, reason) {
+        var why = reason || "user"
         var ch = Math.max(1, Math.min(6, Number(channel)))
-        if (root.displayChannel !== ch)
-            root.displayChannel = ch
+        var oldCh = root.displayChannel
+        var oldSource = root.logicalSourceName()
+        var newSource = root.sourceKeyForChannel(ch)
+        var changed = (oldCh !== ch)
+
+        if (!changed && why === "init") {
+            root._expectedSourceKey = newSource
+            root.syncFftResources("init")
+            return
+        }
+
+        root._channelSwitchEpoch++
+        root._channelSwitchActive = true
+        root._expectedSourceKey = newSource
+        root._waitingForFirstFrame = root.visible && root.fftEnabled
+        root._lastClearKey = ""
+
+        console.log("[DOA-CHANNEL-SWITCH]"
+                    + " old=CH" + oldCh
+                    + " new=CH" + ch
+                    + " oldSource=" + oldSource
+                    + " newSource=" + newSource
+                    + " epoch=" + root._channelSwitchEpoch
+                    + " fftEnabled=" + root.fftEnabled
+                    + " runtimeActive=" + (root.visible && root.fftEnabled)
+                    + " changed=" + changed
+                    + " reason=" + why)
+
+        root._setDisplayChannelGuarded(ch)
 
         if (ch >= 2 && typeof(doaClient) !== "undefined" && doaClient !== null) {
-            var physicalDfChannel = ch - 2
+            var physicalDfChannel = root.physicalDfChannelForDisplay(ch)
             console.log("[DOA-DISPLAY-SOURCE] logical=CH" + ch
                         + " source=DF" + (ch - 1)
-                        + " physical_adc=" + physicalDfChannel)
+                        + " physical_adc=" + physicalDfChannel
+                        + " epoch=" + root._channelSwitchEpoch)
             if (doaClient.fftChannel !== physicalDfChannel)
                 doaClient.fftChannel = physicalDfChannel
         } else if (ch === 1) {
-            console.log("[DOA-DISPLAY-SOURCE] logical=CH1 source=ASTRARX_HOME no_setAdcChannel=1")
+            console.log("[DOA-DISPLAY-SOURCE] logical=CH1 source=ASTRARX_HOME no_setAdcChannel=1"
+                        + " epoch=" + root._channelSwitchEpoch)
         }
 
-        syncRxConsumer()
-        if (ch === 1 && root.rxFftEnabled) rebuildRxFrequencyAxis()
+        root.syncFftResources("channel-switch")
+        root.clearFftDisplayBuffers(changed ? "channel-change" : "channel-reselect", true)
+        root._perfLastSeq = root.displayFrameSequence
+        root._channelSwitchActive = false
+
+        // Do not publish immediately on channel change.  The previous source's
+        // last FFT array may still be cached in doaClient/mainWindows.  Waiting
+        // for the next source-specific frame prevents one-frame stale leaks.
     }
 
-    function setRxFftEnabled(enabled) {
-        var v = !!enabled
-        if (root.rxFftEnabled === v)
+    function stopAllFftResources(reason) {
+        var m = mw()
+        if (m && m.setDoaRxSpectrumActive !== undefined)
+            m.setDoaRxSpectrumActive(false)
+
+        var c = (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
+        if (c && c.spectrumEnabled !== undefined && c.spectrumEnabled)
+            c.spectrumEnabled = false
+
+        root._rxPendingFrame = false
+        root._dfPendingFrame = false
+    }
+
+    function syncFftResources(reason) {
+        var c = (typeof(doaClient) !== "undefined" && doaClient !== null) ? doaClient : null
+
+        if (!root.fftEnabled) {
+            hiddenSuspendTimer.stop()
+            root.stopAllFftResources(reason)
+            console.log("[DOA-FFT-SYNC]"
+                        + " reason=" + reason
+                        + " epoch=" + root._channelSwitchEpoch
+                        + " source=" + root.logicalSourceName()
+                        + " rxConsumer=0"
+                        + " dfSpectrumEnabled=0"
+                        + " active=0"
+                        + " userFftEnabled=0")
             return
-
-        root.rxFftEnabled = v
-        uiSettings.rxFftEnabled = v
-        syncRxConsumer()
-
-        if (root.rxDisplaySelected) {
-            root.displayFftFreqHz = []
-            root.displayFftMagDb = []
-            root.displayFrameSequence++
-            root._rxPendingFrame = v
-            if (v)
-                root.publishSelectedFrame("rx-fft-enabled")
         }
 
-        console.log("[DOA-RX-FFT]", v ? "ON" : "OFF", "logical=CH1 source=ASTRARX_HOME")
+        if (!root.visible) {
+            if (!hiddenSuspendTimer.running)
+                hiddenSuspendTimer.restart()
+            console.log("[DOA-FFT-SYNC]"
+                        + " reason=" + reason
+                        + " epoch=" + root._channelSwitchEpoch
+                        + " source=" + root.logicalSourceName()
+                        + " rxConsumer=" + (root.rxDisplaySelected ? 1 : 0)
+                        + " dfSpectrumEnabled=" + ((!root.rxDisplaySelected && c) ? 1 : 0)
+                        + " active=0"
+                        + " hiddenDeferred=1"
+                        + " userFftEnabled=1")
+            return
+        }
+
+        hiddenSuspendTimer.stop()
+
+        var m = mw()
+        if (m && m.setDoaRxSpectrumActive !== undefined)
+            m.setDoaRxSpectrumActive(root.rxDisplaySelected)
+
+        var wantDfFft = !root.rxDisplaySelected
+        if (c && c.spectrumEnabled !== undefined) {
+            if (c.spectrumEnabled !== wantDfFft)
+                c.spectrumEnabled = wantDfFft
+        }
+
+        console.log("[DOA-FFT-SYNC]"
+                    + " reason=" + reason
+                    + " epoch=" + root._channelSwitchEpoch
+                    + " source=" + root.logicalSourceName()
+                    + " rxConsumer=" + (root.rxDisplaySelected ? 1 : 0)
+                    + " dfSpectrumEnabled=" + ((!root.rxDisplaySelected && c) ? 1 : 0)
+                    + " active=1"
+                    + " userFftEnabled=1")
+    }
+
+    function setFftEnabled(enabled) {
+        var v = !!enabled
+        if (root.fftEnabled === v)
+            return
+
+        root.fftEnabled = v
+        root.syncFftResources("toggle")
+
+        root.clearFftDisplayBuffers(v ? "fft-enabled" : "fft-disabled", true)
+        if (v) {
+            if (root.rxDisplaySelected) {
+                root._rxPendingFrame = true
+                root.publishSelectedFrame("fft-enabled-rx")
+            } else {
+                // Wait for the first DF FFT frame after the selected channel is
+                // active; do not draw stale cached DF data.
+                root._dfPendingFrame = false
+            }
+        }
+
+        console.log("[DOA-FFT]", v ? "ON" : "OFF", "logical=CH" + root.displayChannel, "source=" + root.logicalSourceName())
     }
 
     Connections {
         target: root.mw()
         function onDoaRxFftFrameChanged() {
-            if (root.rxDisplaySelected && root.rxFftEnabled)
+            if (root.visible && root.fftEnabled && root.rxDisplaySelected)
                 root._rxPendingFrame = true
         }
     }
@@ -305,31 +534,56 @@ Rectangle {
         function onFftChannelChanged() {
             // Preserve CH1/RX selection. If a DF channel is currently selected,
             // reflect authoritative backend changes using the logical +1 offset.
-            if (root.displayChannel >= 2)
-                root.displayChannel = Math.max(2, Math.min(6, doaClient.fftChannel + 2))
+            if (root.displayChannel >= 2) {
+                var logical = Math.max(2, Math.min(6, doaClient.fftChannel + 2))
+                if (logical !== root.displayChannel && !root._channelSwitchActive)
+                    root.selectDisplayChannel(logical, "backend")
+            }
         }
         function onFftChanged() {
-            if (!root.rxDisplaySelected)
+            if (root.visible && root.fftEnabled && !root.rxDisplaySelected)
                 root._dfPendingFrame = true
         }
     }
 
     onDisplayChannelChanged: {
-        syncRxConsumer()
-        root.displayFftFreqHz = []
-        root.displayFftMagDb = []
-        root.displayFrameSequence++
-        root._rxPendingFrame = root.rxDisplaySelected && root.rxFftEnabled
-        root._dfPendingFrame = !root.rxDisplaySelected
-        root.publishSelectedFrame("source-change")
+        if (!root._suppressDisplayChannelHandler) {
+            // External/property-driven changes are normalized through the same
+            // transaction path so they cannot clear/re-arm resources twice.
+            root.selectDisplayChannel(root.displayChannel, "property-change")
+        }
     }
     onVisibleChanged: {
-        syncRxConsumer()
         if (visible) {
-            root._rxPendingFrame = root.rxDisplaySelected && root.rxFftEnabled
-            root._dfPendingFrame = !root.rxDisplaySelected
-            root.publishSelectedFrame("visible")
+            hiddenSuspendTimer.stop()
+            root.syncFftResources("visible")
+            if (root.fftEnabled) {
+                if (root.rxDisplaySelected) {
+                    root._rxPendingFrame = true
+                    root.publishSelectedFrame("visible-rx")
+                } else {
+                    // Wait for a real DF frame from the selected source. Do not
+                    // replay stale cached data on StackView return.
+                    root._dfPendingFrame = false
+                }
+            }
+            console.log("[DOA-VISIBLE] visible=1 fftEnabled=" + root.fftEnabled
+                        + " source=" + root.logicalSourceName()
+                        + " epoch=" + root._channelSwitchEpoch)
+            return
         }
+
+        // Presentation pause only. Keep the user's FFT toggle value. A delayed
+        // backend suspend may run if the page remains hidden, but visible=true
+        // will re-arm it without requiring the user to toggle FFT again.
+        root._rxPendingFrame = false
+        root._dfPendingFrame = false
+        if (root.fftEnabled)
+            hiddenSuspendTimer.restart()
+        console.log("[DOA-VISIBLE] visible=0 fftEnabled=" + root.fftEnabled
+                    + " source=" + root.logicalSourceName()
+                    + " epoch=" + root._channelSwitchEpoch
+                    + " hiddenSuspendDelayMs=" + hiddenSuspendTimer.interval)
     }
 
     // =========================
@@ -342,7 +596,6 @@ Rectangle {
         property bool yAuto: false
         property int  yMinDbUser: -120   // ✅ เก็บเป็น int ให้ตรงกับ SpinBox
         property int  yMaxDbUser: -60
-        property bool rxFftEnabled: true
         property bool adaptiveQualityEnabled: true
         property int  renderQualityLevel: 1
     }
@@ -359,9 +612,13 @@ Rectangle {
         root.yAuto = uiSettings.yAuto
         root.yMinDbUser = uiSettings.yMinDbUser
         root.yMaxDbUser = uiSettings.yMaxDbUser
-        root.rxFftEnabled = uiSettings.rxFftEnabled
+        // Start with FFT OFF every time the DoA page is created. The FFT toggle
+        // is intentionally session/page-local so CH1 does not stay running from
+        // an older persisted setting.
+        root.fftEnabled = false
         root.adaptiveQualityEnabled = uiSettings.adaptiveQualityEnabled
         root.renderQualityLevel = Math.max(0, Math.min(2, Number(uiSettings.renderQualityLevel)))
+        root._expectedSourceKey = root.logicalSourceName()
 
         // กันค่าพัง
         if (root.yMaxDbUser <= root.yMinDbUser + 1)
@@ -369,15 +626,14 @@ Rectangle {
 
         // New logical CH1 is the shared Home/RX source. No setAdcChannel is
         // emitted here; physical DF selection remains untouched until CH2..CH6.
-        root.selectDisplayChannel(1)
-        root._rxPendingFrame = root.rxFftEnabled
-        root.publishSelectedFrame("completed")
+        root.selectDisplayChannel(1, "init")
+        root._rxPendingFrame = false
+        root._dfPendingFrame = false
     }
 
     Component.onDestruction: {
-        var m = root.mw()
-        if (m && m.setDoaRxSpectrumActive !== undefined)
-            m.setDoaRxSpectrumActive(false)
+        hiddenSuspendTimer.stop()
+        root.stopAllFftResources("destruction")
     }
 
     function saveDbSettings() {
@@ -395,10 +651,7 @@ Rectangle {
     onYAutoChanged: saveDbSettings()
     onYMinDbUserChanged: saveDbSettings()
     onYMaxDbUserChanged: saveDbSettings()
-    onRxFftEnabledChanged: {
-        uiSettings.rxFftEnabled = root.rxFftEnabled
-        syncRxConsumer()
-    }
+    onFftEnabledChanged: root.syncFftResources("fft-enabled-property")
     onAdaptiveQualityEnabledChanged: uiSettings.adaptiveQualityEnabled = root.adaptiveQualityEnabled
     onRenderQualityLevelChanged: {
         var q = Math.max(0, Math.min(2, Number(root.renderQualityLevel)))
@@ -424,9 +677,9 @@ Rectangle {
             fftPlotTarget: fftPlot
             displayChannel: root.displayChannel
             rxSourceAvailable: root.rxSourceAvailable
-            rxFftEnabled: root.rxFftEnabled
+            fftEnabled: root.fftEnabled
             onDisplayChannelRequested: root.selectDisplayChannel(channel)
-            onRxFftEnabledRequested: root.setRxFftEnabled(enabled)
+            onFftEnabledRequested: root.setFftEnabled(enabled)
         }
 
         RowLayout {
@@ -548,12 +801,14 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.preferredHeight: parent.height * 0.55
+                        Layout.minimumHeight: 220
 
-                        enabled: root.rxDisplaySelected ? (root.rxSourceAvailable && root.rxFftEnabled) : doaClient.spectrumEnabled
+                        enabled: root.fftEnabled && (root.rxDisplaySelected ? root.rxSourceAvailable : doaClient.connected)
                         freqHz: root.displayFftFreqHz
                         magDb: root.displayFftMagDb
                         fftFps: root._spectrumFps()
                         frameSequence: root.displayFrameSequence
+                        sourceKey: root.logicalSourceName()
                         nativeRenderEnabled: true
 
                         // DOA target overlay belongs to the DF domain only. CH1/RX
@@ -589,9 +844,11 @@ Rectangle {
                     WaterfallCanvas {
                         id: wf
                         Layout.fillWidth: true
+                        Layout.fillHeight: true
                         Layout.preferredHeight: parent.height * 0.35
+                        Layout.minimumHeight: 160
 
-                        enabled: root.rxDisplaySelected ? (root.rxSourceAvailable && root.rxFftEnabled) : doaClient.spectrumEnabled
+                        enabled: root.fftEnabled && (root.rxDisplaySelected ? root.rxSourceAvailable : doaClient.connected)
                         waterfallRowDb: root.displayFftMagDb
                         frameSequence: root.displayFrameSequence
                         sourceKey: root.logicalSourceName()

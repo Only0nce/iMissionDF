@@ -401,14 +401,36 @@ void iScreenDF::GetIPDFServer(const QString &ip)
         return;
     }
 
-    if (!localDFclient) {
-        qWarning() << "[LAN][RFSoC-TCP] TCP client unavailable; target=" << host << 5555;
-        return;
-    }
-
     if (!isValidDfEndpointIpv4(host)) {
         qWarning() << "[DF-ENDPOINT] startup DB endpoint is not IPv4; preserving legacy connect attempt:"
                    << host;
+    }
+
+    const QString runtime = m_dfCommittedIp.trimmed();
+    if (!runtime.isEmpty() && runtime != host) {
+        // A delayed startup DB replay must not overwrite a DF Server IP that the
+        // operator has already selected in this runtime.  request snapshot / DB
+        // commit handlers use the same sticky owner model.
+        qInfo() << "[DF-ENDPOINT] startup DB endpoint ignored; runtime endpoint retained"
+                << "db=" << host
+                << "runtime=" << runtime
+                << "apply_in_progress=" << m_dfApplyInProgress
+                << "awaiting_db=" << m_dfAwaitingDbCommit;
+        emitDfEndpointState(QStringLiteral("STARTUP_SNAPSHOT_IGNORED"),
+                            QStringLiteral("db=%1 runtime=%2").arg(host, runtime));
+        emit updateServeripDfserver(runtime);
+        return;
+    }
+
+    if (!localDFclient) {
+        m_dfCommittedIp = host;
+        if (!m_parameter.isEmpty() && m_parameter.first())
+            m_parameter.first()->m_ipdfServer = host;
+        emit updateServeripDfserver(host);
+        qWarning() << "[LAN][RFSoC-TCP] TCP client unavailable; endpoint retained=" << host << 5555;
+        emitDfEndpointState(QStringLiteral("STARTUP_CLIENT_UNAVAILABLE"),
+                            QStringLiteral("endpoint retained; RFSoC TCP client unavailable"));
+        return;
     }
 
     m_dfCommittedIp = host;
@@ -467,19 +489,24 @@ void iScreenDF::onDfServerEndpointSnapshotReady(const QString &ip,
         return;
     }
 
-    // Never let an asynchronous snapshot alter an in-flight candidate/rollback.
-    // Once the transaction is idle, Parameter.ipdfserver is authoritative and
-    // the UI/runtime cache are reconciled to exactly what is stored in DB.
-    if (m_dfApplyInProgress || m_dfAwaitingDbCommit || m_dfRollbackInProgress) {
-        qInfo() << "[DF-ENDPOINT] DB snapshot deferred by active transaction"
+    // NET-ENDPOINTS2.2: runtime DF Server IP is sticky after Apply.  A delayed
+    // DB snapshot must not resurrect an older endpoint while the operator has
+    // already selected a new target.  This keeps DF Server IP separate from
+    // LAN3/end0 configuration and removes the old rollback behaviour.
+    if (!m_dfCommittedIp.trimmed().isEmpty() && stored != m_dfCommittedIp.trimmed()) {
+        qInfo() << "[DF-ENDPOINT] DB snapshot ignored; runtime endpoint retained"
                 << "stored=" << stored
-                << "candidate=" << m_dfCandidateIp
+                << "runtime=" << m_dfCommittedIp
                 << "detail=" << detail;
+        emitDfEndpointState(QStringLiteral("SNAPSHOT_IGNORED"),
+                            QStringLiteral("stored=%1 runtime=%2")
+                                .arg(stored, m_dfCommittedIp));
         return;
     }
 
     m_dfCommittedIp = stored;
-    m_dfLastKnownGoodIp = stored;
+    if (m_dfLastKnownGoodIp.isEmpty())
+        m_dfLastKnownGoodIp = stored;
     if (!m_parameter.isEmpty() && m_parameter.first())
         m_parameter.first()->m_ipdfServer = stored;
 
@@ -491,12 +518,13 @@ void iScreenDF::onDfServerEndpointSnapshotReady(const QString &ip,
 
 void iScreenDF::connectToDFserver(const QString &ip)
 {
-    // QML Apply enters here. The draft is never written to Parameter/DB yet.
-    // It first becomes a candidate and is committed only after TCP connected()
-    // plus DB read-back verification.
-    const QString candidate = ip.trimmed();
-    if (!isValidDfEndpointIpv4(candidate)) {
-        m_dfCandidateIp = candidate;
+    // NET-ENDPOINTS2.2: DF Server IP is not LAN3/end0 configuration.
+    // Apply means "use this DF control target now": update the runtime target,
+    // persist Parameter.ipdfserver asynchronously, and keep trying to connect to
+    // that target.  No TCP timeout or socket error rolls back to an old IP.
+    const QString target = ip.trimmed();
+    if (!isValidDfEndpointIpv4(target)) {
+        m_dfCandidateIp = target;
         emitDfEndpointState(QStringLiteral("REJECTED"),
                             QStringLiteral("invalid IPv4 address"));
         m_dfCandidateIp.clear();
@@ -505,26 +533,11 @@ void iScreenDF::connectToDFserver(const QString &ip)
     }
 
     if (!localDFclient) {
-        m_dfCandidateIp = candidate;
-        emitDfEndpointState(QStringLiteral("FAILED"),
-                            QStringLiteral("RFSoC TCP client unavailable"));
+        m_dfCommittedIp = target;
         m_dfCandidateIp.clear();
-        return;
-    }
-
-    if (m_dfCommittedIp.isEmpty()) {
-        if (!m_parameter.isEmpty() && m_parameter.first())
-            m_dfCommittedIp = m_parameter.first()->m_ipdfServer.trimmed();
-        if (m_dfCommittedIp.isEmpty() && localDFclient->hasTarget())
-            m_dfCommittedIp = localDFclient->targetHost().trimmed();
-        if (m_dfLastKnownGoodIp.isEmpty())
-            m_dfLastKnownGoodIp = m_dfCommittedIp;
-    }
-
-    if (!m_dfCommittedIp.isEmpty() && candidate == m_dfCommittedIp) {
-        qInfo() << "[DF-ENDPOINT] Apply matches committed endpoint; reconnect only"
-                << candidate;
-        reconnectToDFserver();
+        emit updateServeripDfserver(target);
+        emitDfEndpointState(QStringLiteral("FAILED"),
+                            QStringLiteral("RFSoC TCP client unavailable; endpoint retained"));
         return;
     }
 
@@ -532,28 +545,50 @@ void iScreenDF::connectToDFserver(const QString &ip)
         m_dfEndpointApplyTimer->stop();
 
     ++m_dfEndpointGeneration;
-    m_dfCandidateIp = candidate;
-    m_dfApplyInProgress = true;
-    m_dfAwaitingDbCommit = false;
+    m_dfCommittedIp = target;
+    m_dfCandidateIp.clear();
     m_dfRollbackInProgress = false;
-    m_dfPendingCommitGeneration = 0;
+    m_dfApplyInProgress = true;
+    m_dfAwaitingDbCommit = true;
+    m_dfPendingCommitGeneration = m_dfEndpointGeneration;
+
+    // Update the UI/runtime immediately.  This intentionally does not touch
+    // LAN3/LAN4 Network2 rows or RFSoC end0/end1 IP configuration.
+    applyCommittedDfEndpointSideEffects(target);
 
     emitDfEndpointState(QStringLiteral("CONNECTING"),
-                        QStringLiteral("candidate not committed"));
+                        QStringLiteral("DF Server IP applied directly; LAN3/end0 unchanged"));
+
+    bool queued = false;
+    if (db) {
+        queued = QMetaObject::invokeMethod(
+            db,
+            "persistDfServerEndpoint",
+            Qt::QueuedConnection,
+            Q_ARG(QString, target),
+            Q_ARG(qulonglong, m_dfPendingCommitGeneration));
+    }
+
+    if (!queued) {
+        m_dfAwaitingDbCommit = false;
+        m_dfPendingCommitGeneration = 0;
+        emitDfEndpointState(QStringLiteral("DB_SAVE_QUEUE_FAILED"),
+                            QStringLiteral("endpoint retained in runtime; DB commit was not queued"));
+    }
 
     if (m_dfEndpointApplyTimer)
         m_dfEndpointApplyTimer->start(m_dfEndpointApplyTimeoutMs);
 
-    localDFclient->connectToServer(candidate, 5555);
+    qInfo() << "[DF-ENDPOINT] direct apply target retained; connecting"
+            << target << 5555;
+    localDFclient->connectToServer(target, 5555);
 }
 
 void iScreenDF::reconnectToDFserver()
 {
-    // Reconnect intentionally ignores the current QML draft. It always uses
-    // committed/last-known-good state so a bad edit cannot lock the operator out.
+    // Reconnect uses the current DF Server IP only.  It intentionally does not
+    // fall back to last-known-good, because Apply is now sticky/no-rollback.
     QString target = m_dfCommittedIp.trimmed();
-    if (target.isEmpty())
-        target = m_dfLastKnownGoodIp.trimmed();
     if (target.isEmpty() && !m_parameter.isEmpty() && m_parameter.first())
         target = m_parameter.first()->m_ipdfServer.trimmed();
     if (target.isEmpty() && localDFclient && localDFclient->hasTarget())
@@ -561,7 +596,7 @@ void iScreenDF::reconnectToDFserver()
 
     if (target.isEmpty()) {
         emitDfEndpointState(QStringLiteral("RECONNECT_FAILED"),
-                            QStringLiteral("no committed endpoint"));
+                            QStringLiteral("no DF Server IP target"));
         return;
     }
 
@@ -574,17 +609,17 @@ void iScreenDF::reconnectToDFserver()
     if (m_dfEndpointApplyTimer && m_dfEndpointApplyTimer->isActive())
         m_dfEndpointApplyTimer->stop();
 
-    // Invalidates any delayed DB callback from an Apply the operator cancelled.
     ++m_dfEndpointGeneration;
+    m_dfCommittedIp = target;
     m_dfApplyInProgress = false;
     m_dfAwaitingDbCommit = false;
     m_dfPendingCommitGeneration = 0;
     m_dfRollbackInProgress = false;
     m_dfCandidateIp.clear();
 
-    emit updateServeripDfserver(target);
+    applyCommittedDfEndpointSideEffects(target);
     emitDfEndpointState(QStringLiteral("RECONNECTING"),
-                        QStringLiteral("committed endpoint only"));
+                        QStringLiteral("current DF Server IP target only"));
     localDFclient->connectToServer(target, 5555);
 }
 
@@ -596,51 +631,24 @@ void iScreenDF::handleDfControlConnected()
     const QString host = localDFclient->targetHost().trimmed();
     m_dfActiveIp = host;
 
-    if (m_dfApplyInProgress && host == m_dfCandidateIp) {
-        if (m_dfEndpointApplyTimer && m_dfEndpointApplyTimer->isActive())
-            m_dfEndpointApplyTimer->stop();
+    if (m_dfEndpointApplyTimer && m_dfEndpointApplyTimer->isActive())
+        m_dfEndpointApplyTimer->stop();
 
-        if (m_dfAwaitingDbCommit)
-            return;
+    if (m_dfCommittedIp.isEmpty())
+        m_dfCommittedIp = host;
 
-        m_dfAwaitingDbCommit = true;
-        m_dfPendingCommitGeneration = m_dfEndpointGeneration;
-        emitDfEndpointState(QStringLiteral("TCP_OK_DB_COMMIT"),
-                            QStringLiteral("candidate connected; verifying DB commit"));
-
-        const bool queued = QMetaObject::invokeMethod(
-            db,
-            "persistDfServerEndpoint",
-            Qt::QueuedConnection,
-            Q_ARG(QString, m_dfCandidateIp),
-            Q_ARG(qulonglong, m_dfPendingCommitGeneration));
-
-        if (!queued) {
-            m_dfAwaitingDbCommit = false;
-            rollbackDfEndpoint(QStringLiteral("failed to queue DB commit"),
-                               m_dfEndpointGeneration);
-        }
+    if (host == m_dfCommittedIp) {
+        m_dfLastKnownGoodIp = host;
+        m_dfApplyInProgress = false;
+        m_dfRollbackInProgress = false;
+        emitDfEndpointState(QStringLiteral("CONNECTED"),
+                            QStringLiteral("current DF Server IP target connected"));
         return;
     }
 
-    if (m_dfRollbackInProgress) {
-        const QString rollbackTarget = !m_dfLastKnownGoodIp.isEmpty()
-            ? m_dfLastKnownGoodIp : m_dfCommittedIp;
-        if (host == rollbackTarget) {
-            m_dfRollbackInProgress = false;
-            m_dfLastKnownGoodIp = host;
-            applyCommittedDfEndpointSideEffects(m_dfCommittedIp);
-            emitDfEndpointState(QStringLiteral("ROLLED_BACK"),
-                                QStringLiteral("last-known-good connection restored"));
-            return;
-        }
-    }
-
-    if (!m_dfCommittedIp.isEmpty() && host == m_dfCommittedIp)
-        m_dfLastKnownGoodIp = host;
-
-    emitDfEndpointState(QStringLiteral("CONNECTED"),
-                        QStringLiteral("control channel connected"));
+    emitDfEndpointState(QStringLiteral("CONNECTED_OTHER_TARGET"),
+                        QStringLiteral("connected=%1 committed=%2")
+                            .arg(host, m_dfCommittedIp));
 }
 
 void iScreenDF::handleDfControlFailure(const QString &reason)
@@ -650,22 +658,12 @@ void iScreenDF::handleDfControlFailure(const QString &reason)
 
     const QString host = localDFclient->targetHost().trimmed();
 
-    // Once TCP connected and DB commit was queued, socket loss is no longer a
-    // reason to reverse the database transaction. TcpClientDF may reconnect the
-    // candidate while DB verification completes. This avoids split-brain if the
-    // DB write has already committed when the socket drops.
-    if (m_dfApplyInProgress && host == m_dfCandidateIp) {
-        if (m_dfAwaitingDbCommit) {
-            emitDfEndpointState(QStringLiteral("DB_COMMITTING_LINK_LOST"), reason);
-            return;
-        }
-
-        rollbackDfEndpoint(reason, m_dfEndpointGeneration);
-        return;
-    }
-
-    if (m_dfRollbackInProgress) {
-        emitDfEndpointState(QStringLiteral("ROLLBACK_RETRY"), reason);
+    // No rollback: remain on the selected DF Server IP and let TcpClientDF keep
+    // trying bounded reconnects.  LAN3/end0 IP configuration is a separate path.
+    if (!m_dfCommittedIp.isEmpty() && host == m_dfCommittedIp) {
+        emitDfEndpointState(QStringLiteral("CONNECT_RETRY"),
+                            QStringLiteral("target=%1 reason=%2; endpoint retained")
+                                .arg(host, reason));
         return;
     }
 
@@ -674,43 +672,23 @@ void iScreenDF::handleDfControlFailure(const QString &reason)
 
 void iScreenDF::rollbackDfEndpoint(const QString &reason, qulonglong generation)
 {
-    if (generation != m_dfEndpointGeneration) {
-        qInfo() << "[DF-ENDPOINT] stale rollback ignored"
-                << "requested_generation=" << generation
-                << "current_generation=" << m_dfEndpointGeneration;
-        return;
-    }
-
+    Q_UNUSED(generation)
+    // NET-ENDPOINTS2.3: compatibility no-op.  Older call sites may still call
+    // this function after a timeout/error, but DF Server IP is now a direct,
+    // sticky target.  Do not restore last-known-good and do not change the
+    // current runtime/DB-intended endpoint.
     if (m_dfEndpointApplyTimer && m_dfEndpointApplyTimer->isActive())
         m_dfEndpointApplyTimer->stop();
 
-    const QString failedCandidate = m_dfCandidateIp;
-    QString rollbackTarget = m_dfLastKnownGoodIp.trimmed();
-    if (rollbackTarget.isEmpty())
-        rollbackTarget = m_dfCommittedIp.trimmed();
-
-    // Invalidate callbacks from the failed transaction before touching socket.
-    ++m_dfEndpointGeneration;
     m_dfApplyInProgress = false;
     m_dfAwaitingDbCommit = false;
     m_dfPendingCommitGeneration = 0;
+    m_dfRollbackInProgress = false;
     m_dfCandidateIp.clear();
 
-    if (rollbackTarget.isEmpty()) {
-        m_dfRollbackInProgress = false;
-        emitDfEndpointState(QStringLiteral("FAILED_NO_ROLLBACK_TARGET"), reason);
-        return;
-    }
-
-    m_dfRollbackInProgress = true;
-    emit updateServeripDfserver(m_dfCommittedIp);
-
-    const QString detail = QStringLiteral("candidate=%1 reason=%2 rollback=%3")
-                               .arg(failedCandidate, reason, rollbackTarget);
-    emitDfEndpointState(QStringLiteral("ROLLBACK"), detail);
-
-    if (localDFclient)
-        localDFclient->connectToServer(rollbackTarget, 5555);
+    emitDfEndpointState(QStringLiteral("LEGACY_TIMEOUT_IGNORED"),
+                        QStringLiteral("%1; selected DF Server IP retained=%2")
+                            .arg(reason, m_dfCommittedIp));
 }
 
 void iScreenDF::onDfServerEndpointPersisted(const QString &requestedIp,
@@ -719,37 +697,43 @@ void iScreenDF::onDfServerEndpointPersisted(const QString &requestedIp,
                                             const QString &storedIp,
                                             const QString &detail)
 {
-    if (!m_dfApplyInProgress ||
-        !m_dfAwaitingDbCommit ||
-        generation != m_dfPendingCommitGeneration ||
+    const QString requested = requestedIp.trimmed();
+    const QString runtime = m_dfCommittedIp.trimmed();
+
+    if (generation != m_dfPendingCommitGeneration ||
         generation != m_dfEndpointGeneration ||
-        requestedIp.trimmed() != m_dfCandidateIp) {
+        requested != runtime) {
         qInfo() << "[DF-ENDPOINT] stale DB result ignored"
                 << "requested=" << requestedIp
                 << "generation=" << generation
-                << "current_generation=" << m_dfEndpointGeneration;
+                << "current_generation=" << m_dfEndpointGeneration
+                << "runtime=" << runtime;
         return;
     }
 
-    if (!ok || storedIp.trimmed() != requestedIp.trimmed()) {
-        m_dfAwaitingDbCommit = false;
-        rollbackDfEndpoint(QStringLiteral("DB commit failed: %1").arg(detail),
-                           generation);
-        return;
-    }
-
-    const QString committed = storedIp.trimmed();
-    m_dfCommittedIp = committed;
-    m_dfLastKnownGoodIp = committed;
-    m_dfCandidateIp.clear();
-    m_dfApplyInProgress = false;
     m_dfAwaitingDbCommit = false;
-    m_dfRollbackInProgress = false;
     m_dfPendingCommitGeneration = 0;
 
-    applyCommittedDfEndpointSideEffects(committed);
+    if (!ok || storedIp.trimmed() != requested) {
+        m_dfApplyInProgress = false;
+        emitDfEndpointState(QStringLiteral("DB_SAVE_FAILED"),
+                            QStringLiteral("%1; endpoint retained=%2")
+                                .arg(detail, runtime));
+        return;
+    }
+
+    m_dfCommittedIp = requested;
+    if (!m_parameter.isEmpty() && m_parameter.first())
+        m_parameter.first()->m_ipdfServer = requested;
+
+    emit updateServeripDfserver(requested);
+
+    m_dfApplyInProgress = false;
+    m_dfRollbackInProgress = false;
+    m_dfCandidateIp.clear();
+
     emitDfEndpointState(QStringLiteral("COMMITTED"),
-                        QStringLiteral("TCP connected + DB read-back verified"));
+                        QStringLiteral("Parameter.ipdfserver saved; reconnect remains on selected target"));
 }
 
 void iScreenDF::applyRfsocParameterToServer(bool needAck)

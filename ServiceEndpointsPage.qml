@@ -10,6 +10,8 @@ Item {
     property string compassOffsetText: ""
     property string statusText: ""
     property bool busy: false
+    property string pendingDfServerIp: ""
+    property bool dfEndpointApplyInProgress: false
 
     signal requestToast(string text)
 
@@ -60,18 +62,20 @@ Item {
             return
         }
 
-        // NET-ENDPOINTS1.5: DatabaseDF already loads Parameter.ipdfserver at
-        // application startup through GetIPDFServerFromDB() -> GetIPDFServer().
-        // This page is Loader-created later, so replay that existing cached DB
-        // value first. updateIPServerDF() is an existing iScreenDF function and
-        // emits the existing updateServeripDfserver signal; no new query/API or
-        // persistence path is introduced.
+        // Parameter.ipdfserver is authoritative for DF Server IP.  Ask C++ for
+        // the DB-backed snapshot first; updateIPServerDF() is only a fast cache
+        // replay and must not become the owner of this field.
+        if (typeof km.requestDfServerEndpointSnapshot === "function")
+            km.requestDfServerEndpointSnapshot()
+        else if (typeof km.updateIPServerDF === "function")
+            km.updateIPServerDF()
+
         if (typeof km.updateIPServerDF === "function")
             km.updateIPServerDF()
 
-        // Keep the legacy Network2 refresh for LAN/global-offset state. Because
-        // updateServeripDfserver is replayed first, appliedDfServerIp is already
-        // set and Network2.krakenserver cannot overwrite Parameter.ipdfserver.
+        // Keep the legacy Network2 refresh for LAN/global-offset state only.
+        // Network2.krakenserver is a mirror/fallback and must never overwrite a
+        // DF endpoint Apply that is in progress.
         if (typeof km.getNetworkfromDb === "function")
             km.getNetworkfromDb(1)
         else if (typeof km.requestNetworkRows === "function")
@@ -95,23 +99,18 @@ Item {
         }
 
         busy = true
+        root.pendingDfServerIp = ip
+        root.dfEndpointApplyInProgress = true
         statusText = "Applying DF Server IP and reconnecting..."
 
-        // NET-ENDPOINTS1.2: preserve the proven legacy TopNetworkDrawer Apply
-        // bridge before invoking the real iScreenDF mutation owner. The current
-        // Mainwindows hook is compatibility/logging-only, while connectToDFserver()
-        // persists Parameter.ipdfserver and reconnects DF TCP/GPSD.
-        if (typeof mainWindows !== "undefined" && mainWindows &&
-                typeof mainWindows.setNetworkFormDisplay === "function")
-            mainWindows.setNetworkFormDisplay(ip)
-
-        km.connectToDFserver(ip)
-
-        // Legacy Apply has no completion/result signal. Keep the field aligned
-        // with the operator-requested value; the existing startup/backend
-        // updateServeripDfserver signal can still overwrite it when emitted.
+        // DF Server IP is separate from LAN3/end0 and from Network2 LAN rows.
+        // Do not call the legacy Mainwindows network hook here; connectToDFserver()
+        // owns Parameter.ipdfserver persistence and the TCP reconnect attempt.
         root.appliedDfServerIp = ip
         root.dfServerIp = ip
+        dfServerField.text = ip
+
+        km.connectToDFserver(ip)
         applyDoneTimer.restart()
     }
 
@@ -134,8 +133,8 @@ Item {
         busy = true
         statusText = "Reconnecting DF Server " + savedIp + "..."
 
-        // Reuse the original DF-server connection backend. Passing the last
-        // loaded/applied value avoids reconnecting an unsaved TextField draft.
+        // Reconnect to the last applied DF Server IP, not to an unsaved TextField
+        // draft and not to LAN3/end0 configuration.
         km.connectToDFserver(savedIp)
         reconnectDoneTimer.restart()
     }
@@ -196,9 +195,12 @@ Item {
                 }
             }
 
-            // Network2 is the legacy DB fallback used by TopNetworkDrawer.
-            // Do not let a later Network2 refresh overwrite a DF endpoint that
-            // has already been supplied by updateServeripDfserver() or Apply.
+            // Network2 is only a legacy fallback.  During/after Apply the UI is
+            // sticky to the operator-selected DF endpoint; a delayed Network2
+            // refresh must not roll the field back to a boot/default value.
+            if (root.dfEndpointApplyInProgress)
+                return
+
             if (serverIp.length > 0 && root.appliedDfServerIp.length === 0) {
                 root.appliedDfServerIp = serverIp
                 root.dfServerIp = serverIp
@@ -209,10 +211,53 @@ Item {
 
         function onUpdateServeripDfserver(ip) {
             var normalized = String(ip || "").trim()
+            if (normalized.length === 0)
+                return
+
+            if (root.dfEndpointApplyInProgress &&
+                    root.pendingDfServerIp.length > 0 &&
+                    normalized !== root.pendingDfServerIp) {
+                console.log("[ServiceEndpoints] ignore stale DF endpoint while apply is active:",
+                            normalized, "pending=", root.pendingDfServerIp)
+                return
+            }
+
             root.appliedDfServerIp = normalized
             root.dfServerIp = normalized
-            if (!dfServerField.activeFocus)
+            if (!dfServerField.activeFocus || normalized === root.pendingDfServerIp)
                 dfServerField.text = normalized
+
+            if (normalized === root.pendingDfServerIp) {
+                root.pendingDfServerIp = ""
+                root.dfEndpointApplyInProgress = false
+            }
+        }
+
+        function onDfServerEndpointTransactionChanged(state, candidateIp, committedIp, detail) {
+            var st = String(state || "")
+            var committed = String(committedIp || "").trim()
+            if (committed.length > 0) {
+                if (!root.dfEndpointApplyInProgress ||
+                        root.pendingDfServerIp.length === 0 ||
+                        committed === root.pendingDfServerIp) {
+                    root.appliedDfServerIp = committed
+                    root.dfServerIp = committed
+                    if (!dfServerField.activeFocus || committed === root.pendingDfServerIp)
+                        dfServerField.text = committed
+                }
+            }
+
+            if (root.pendingDfServerIp.length > 0 && committed === root.pendingDfServerIp &&
+                    (st === "COMMITTED" || st === "CONNECTED" || st === "CONNECT_RETRY" ||
+                     st === "DB_SAVE_FAILED" || st === "DB_SAVE_QUEUE_FAILED")) {
+                root.pendingDfServerIp = ""
+                root.dfEndpointApplyInProgress = false
+            }
+
+            if (detail && String(detail).length > 0)
+                root.statusText = st + " — " + String(detail)
+            else if (st.length > 0)
+                root.statusText = st
         }
 
         function onUpdateGlobalOffsets(offsetValue, compassOffset) {

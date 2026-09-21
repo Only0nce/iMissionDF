@@ -63,6 +63,7 @@ Rectangle {
     property string _lastSourceKey: ""
     property var _cssColors: []
     property bool _nativeSubmitQueued: false
+    property string _lastResetSignature: ""
 
     function _isValidArray(a) {
         return a !== undefined && a !== null && a.length !== undefined && a.length >= 8
@@ -173,7 +174,7 @@ Rectangle {
         if (root.nativeRenderEnabled) {
             if (root.sourceKey !== root._lastSourceKey) {
                 root._lastSourceKey = root.sourceKey
-                root._resetHistory()
+                root._resetHistory("source-key", false)
             }
             if (root.frameSequence !== root._lastFrameSequence)
                 root._requestNativeSubmit("frame-sequence")
@@ -186,7 +187,7 @@ Rectangle {
     }
 
     onNativeRenderEnabledChanged: {
-        root._resetHistory()
+        root._resetHistory("native-enabled", true)
         if (root.nativeRenderEnabled)
             root._requestNativeSubmit("native-enabled")
     }
@@ -203,7 +204,7 @@ Rectangle {
                 root._lastFrameSequence = -1
                 root._sameCount = 0
                 tick._lastKey = ""
-                root._resetHistory()
+                root._resetHistory("source-key", false)
             }
 
             var row = root.waterfallRowDb
@@ -390,7 +391,23 @@ Rectangle {
         }
     }
 
-    function _resetHistory() {
+    function clearHistory(reason) {
+        var why = reason || "manual"
+        // Parent/controller already knows the selected source when it requests a
+        // clear. Mark it as current so the next frameSequence change does not
+        // perform a second source-key reset for the same transaction.
+        root._lastSourceKey = root.sourceKey
+        root._resetHistory(why, true)
+        if (root.showDebug)
+            console.log("[DOA-WATERFALL-CLEAR] reason=" + why + " source=" + root.sourceKey)
+    }
+
+    function _resetHistory(reason, force) {
+        var why = reason || "unknown"
+        var sig = root.sourceKey + "|" + root.frameSequence + "|" + why
+        if (!force && root._lastResetSignature === sig)
+            return
+        root._lastResetSignature = sig
         scrollCanvas._init = false
         root._frames = 0
         root._lastLen = 0
@@ -399,7 +416,8 @@ Rectangle {
         drawCanvas._pendingRow = null
         if (nativeWaterfallItem) nativeWaterfallItem.clearHistory()
         scrollCanvas.requestPaint()
-        if (root.nativeRenderEnabled) root._requestNativeSubmit("reset")
+        if (root.nativeRenderEnabled && root.visible && root.enabled)
+            root._requestNativeSubmit("reset")
     }
 
     // In native SceneGraph mode, geometry changes are handled by the C++ item.
@@ -407,17 +425,17 @@ Rectangle {
     // made the panel look permanently blank on StackView/ColumnLayout resize.
     onWidthChanged: {
         if (root.nativeRenderEnabled) root._requestNativeSubmit("width")
-        else root._resetHistory()
+        else root._resetHistory("width", true)
     }
     onHeightChanged: {
         if (root.nativeRenderEnabled) root._requestNativeSubmit("height")
-        else root._resetHistory()
+        else root._resetHistory("height", true)
     }
-    onEnabledChanged: if (enabled) _resetHistory()
+    onEnabledChanged: if (enabled) _resetHistory("enabled", true)
     onWaterfallColorsChanged: root._rebuildColorCache()
 
     Component.onCompleted: {
         root._rebuildColorCache()
-        root._resetHistory()
+        root._resetHistory("completed", true)
     }
 }

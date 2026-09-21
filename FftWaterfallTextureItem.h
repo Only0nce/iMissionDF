@@ -89,6 +89,8 @@ private:
     void rebuildPaletteLocked();
     QVector<quint32> paletteLutLocked() const;
     void ensureHistoryLocked(int width, int rows);
+    void copyVisibleRowsToNewHistoryLocked(QImage &newHistory, int newWidth, int newRows,
+                                           int rowsToCopy) const;
     void appendFrameLocked(const QVector<float> &frame, int outputWidth);
     void appendArgbRowLocked(const QVector<quint32> &argbRow, int outputWidth);
     void appendTestPatternRowLocked(int outputWidth);
@@ -160,6 +162,7 @@ private:
     quint64 m_bootstrapCpuRows = 0;
     quint64 m_deferredSubmits = 0;
     quint64 m_widthNormalizedRows = 0;
+    quint64 m_geometryPreservedRows = 0;
     quint64 m_streamTextureFrames = 0;
     quint64 m_recreatedTextureFrames = 0;
     bool m_streamTextureUpload = true;

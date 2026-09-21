@@ -462,6 +462,37 @@ QRgb FftWaterfallTextureItem::colorForDbLocked(float value) const
     return m_paletteRgb.value(idx, qRgb(0, 0, 0));
 }
 
+void FftWaterfallTextureItem::copyVisibleRowsToNewHistoryLocked(QImage &newHistory,
+                                                               int newWidth,
+                                                               int newRows,
+                                                               int rowsToCopy) const
+{
+    if (newHistory.isNull() || m_historyImage.isNull()
+            || m_historyWidth <= 0 || m_historyRows <= 0
+            || newWidth <= 0 || newRows <= 0 || rowsToCopy <= 0)
+        return;
+
+    rowsToCopy = qBound(0, rowsToCopy, qMin(newRows, m_validRows));
+    for (int y = 0; y < rowsToCopy; ++y) {
+        const int srcRow = (m_headRow + y) % m_historyRows;
+        const QRgb *src = reinterpret_cast<const QRgb *>(m_historyImage.constScanLine(srcRow));
+        QRgb *dst = reinterpret_cast<QRgb *>(newHistory.scanLine(y));
+
+        if (newWidth == m_historyWidth) {
+            std::memcpy(dst, src, static_cast<size_t>(newWidth) * sizeof(QRgb));
+            continue;
+        }
+
+        for (int x = 0; x < newWidth; ++x) {
+            const int sx = qBound(0,
+                                  static_cast<int>((static_cast<qint64>(x) * m_historyWidth)
+                                                   / qMax(1, newWidth)),
+                                  m_historyWidth - 1);
+            dst[x] = src[sx];
+        }
+    }
+}
+
 void FftWaterfallTextureItem::ensureHistoryLocked(int width, int rows)
 {
     width = qMax(1, width);
@@ -470,23 +501,48 @@ void FftWaterfallTextureItem::ensureHistoryLocked(int width, int rows)
             && !m_historyImage.isNull())
         return;
 
+    const int oldWidth = m_historyWidth;
+    const int oldRows = m_historyRows;
+    const int oldValidRows = m_validRows;
+    const bool canPreserve = !m_historyImage.isNull()
+            && oldWidth > 0 && oldRows > 0 && oldValidRows > 0;
+
+    QImage newHistory(width, rows, QImage::Format_ARGB32);
+    QImage newPresent(width, rows, QImage::Format_ARGB32);
+    const QRgb bg = m_backgroundColor.rgb();
+    newHistory.fill(bg);
+    newPresent.fill(bg);
+
+    int preservedRows = 0;
+    if (canPreserve) {
+        preservedRows = qMin(oldValidRows, rows);
+        copyVisibleRowsToNewHistoryLocked(newHistory, width, rows, preservedRows);
+        m_geometryPreservedRows += static_cast<quint64>(preservedRows);
+    }
+
     m_historyWidth = width;
     m_historyRows = rows;
     m_headRow = 0;
-    m_validRows = 0;
-
-    m_historyImage = QImage(m_historyWidth, m_historyRows, QImage::Format_ARGB32);
-    m_presentImage = QImage(m_historyWidth, m_historyRows, QImage::Format_ARGB32);
-    const QRgb bg = m_backgroundColor.rgb();
-    m_historyImage.fill(bg);
-    m_presentImage.fill(bg);
+    m_validRows = preservedRows;
+    m_historyImage = newHistory;
+    m_presentImage = newPresent;
     m_dirty = true;
+
+    if ((oldWidth > 0 || oldRows > 0) && (oldWidth != width || oldRows != rows)) {
+        qInfo() << "[DOA-WF-HISTORY-RESIZE]"
+                << "old=" << QString::number(oldWidth) + "x" + QString::number(oldRows)
+                << "new=" << QString::number(width) + "x" + QString::number(rows)
+                << "oldValidRows=" << oldValidRows
+                << "preservedRows=" << preservedRows;
+    }
 }
 
 void FftWaterfallTextureItem::appendFrameLocked(const QVector<float> &frame, int outputWidth)
 {
+    Q_UNUSED(outputWidth)
     const int rows = qMax(1, static_cast<int>(std::ceil(height())));
-    ensureHistoryLocked(outputWidth, rows);
+    const int desiredWidth = qMax(1, static_cast<int>(std::ceil(width())));
+    ensureHistoryLocked(desiredWidth, rows);
     if (m_historyImage.isNull() || m_historyWidth <= 0 || frame.size() < 2)
         return;
 
@@ -526,8 +582,10 @@ void FftWaterfallTextureItem::appendFrameLocked(const QVector<float> &frame, int
 
 void FftWaterfallTextureItem::appendArgbRowLocked(const QVector<quint32> &argbRow, int outputWidth)
 {
+    Q_UNUSED(outputWidth)
     const int rows = qMax(1, static_cast<int>(std::ceil(height())));
-    ensureHistoryLocked(outputWidth, rows);
+    const int desiredWidth = qMax(1, static_cast<int>(std::ceil(width())));
+    ensureHistoryLocked(desiredWidth, rows);
     if (m_historyImage.isNull() || m_historyWidth <= 0 || argbRow.isEmpty())
         return;
 
@@ -747,9 +805,7 @@ void FftWaterfallTextureItem::onWaterfallRowReady(quint64 generation,
 
     {
         QMutexLocker locker(&m_mutex);
-        const int desiredOutputWidth = qMax(1, m_inFlightOutputWidth > 0
-                                      ? m_inFlightOutputWidth
-                                      : static_cast<int>(std::ceil(width())));
+        const int desiredOutputWidth = qMax(1, static_cast<int>(std::ceil(width())));
         if (generation < m_cancelBeforeGeneration || !m_renderEnabled) {
             ++m_staleRows;
         } else if (!argbRow.isEmpty()) {
@@ -910,8 +966,12 @@ void FftWaterfallTextureItem::clearHistory()
         m_pendingFrame.clear();
         m_inFlightOutputWidth = 0;
         m_rowInFlight = false;
-        m_cancelBeforeGeneration = m_generation + 1;
+        m_cancelBeforeGeneration = ++m_generation;
         ++m_clearCount;
+        qInfo() << "[DOA-WF-CLEAR]"
+                << "size=" << QString::number(m_historyWidth) + "x" + QString::number(m_historyRows)
+                << "generation=" << m_generation
+                << "clearCount=" << m_clearCount;
     }
     scheduleUpdate(true);
 }
@@ -980,6 +1040,7 @@ QSGNode *FftWaterfallTextureItem::updatePaintNode(QSGNode *oldNode,
     quint64 bootstrapCpuRows = 0;
     quint64 deferredSubmits = 0;
     quint64 widthNormalizedRows = 0;
+    quint64 geometryPreservedRows = 0;
     quint64 streamTextureFrames = 0;
     quint64 recreatedTextureFrames = 0;
     bool streamTextureUpload = true;
@@ -1049,6 +1110,7 @@ QSGNode *FftWaterfallTextureItem::updatePaintNode(QSGNode *oldNode,
         bootstrapCpuRows = m_bootstrapCpuRows;
         deferredSubmits = m_deferredSubmits;
         widthNormalizedRows = m_widthNormalizedRows;
+        geometryPreservedRows = m_geometryPreservedRows;
         streamTextureFrames = m_streamTextureFrames;
         recreatedTextureFrames = m_recreatedTextureFrames;
         streamTextureUpload = m_streamTextureUpload;
@@ -1130,6 +1192,7 @@ QSGNode *FftWaterfallTextureItem::updatePaintNode(QSGNode *oldNode,
                 << "bootstrapCpuRows=" << bootstrapCpuRows
                 << "deferredSubmits=" << deferredSubmits
                 << "widthNormalizedRows=" << widthNormalizedRows
+                << "geometryPreservedRows=" << geometryPreservedRows
                 << "uploadMode=" << uploadMode
                 << "streamTextureUpload=" << streamTextureUpload
                 << "streamFrames=" << streamTextureFrames
@@ -1157,6 +1220,7 @@ QSGNode *FftWaterfallTextureItem::updatePaintNode(QSGNode *oldNode,
         m_bootstrapCpuRows = 0;
         m_deferredSubmits = 0;
         m_widthNormalizedRows = 0;
+        m_geometryPreservedRows = 0;
         m_streamTextureFrames = 0;
         m_recreatedTextureFrames = 0;
         m_lastArgbInputWidth = 0;
@@ -1181,22 +1245,22 @@ void FftWaterfallTextureItem::geometryChanged(const QRectF &newGeometry,
 
     {
         QMutexLocker locker(&m_mutex);
-        // Do not destroy and return a null SceneGraph node on transient layout
-        // changes. Recreate the backing image only for real, valid texture-size
-        // changes; keep the old image visible during zero-size StackView phases.
+        // Do not destroy stream lifecycle on layout jitter.  Geometry changes
+        // resize/preserve the backing ring and let any in-flight CUDA row land;
+        // appendArgbRowLocked() resamples late rows to the current item width.
         if (newW > 1 && newH > 1) {
             ensureHistoryLocked(newW, newH);
             m_dirty = true;
         }
         m_updatePending = false;
-        m_pendingFrame.clear();
-        m_inFlightOutputWidth = 0;
-        m_rowInFlight = false;
-        m_cancelBeforeGeneration = ++m_generation;
         qInfo() << "[DOA-WF-GEOM]"
                 << "old=" << QString::number(oldW) + "x" + QString::number(oldH)
                 << "new=" << QString::number(newW) + "x" + QString::number(newH)
-                << "validRows=" << m_validRows;
+                << "validRows=" << m_validRows
+                << "historyRows=" << m_historyRows
+                << "rowInFlight=" << m_rowInFlight
+                << "generation=" << m_generation
+                << "lifecycleReset=0";
     }
     scheduleUpdate(true);
 }

@@ -611,34 +611,45 @@ void iScreenDF::getNetworkfromDb(int id)
 
 void iScreenDF::updateNetworkfromDisplayIndex(int index,const QString &dhcp,const QString &ip,const QString &mask,const QString &gw,const QString &dns1,const QString &dns2)
 {
-    // NET-ENDPOINTS2.0: every caller, including the legacy TopNetworkDrawer,
-    // must respect the real RFSoC TCP session for LAN3/end0 and LAN4/end1.
-    // Reject before queuing the DB update so a disconnected remote Apply cannot
-    // persist a value that was never sent to the server.
-    if (index == 2 || index == 3) {
-        const QString iface = (index == 2) ? QStringLiteral("end0")
-                                           : QStringLiteral("end1");
-        if (!isRfsocControlConnected()) {
-            const QString host = rfsocControlHost();
-            const int port = static_cast<int>(rfsocControlPort());
-            const QString target = (!host.trimmed().isEmpty() && port > 0)
-                ? QStringLiteral("%1:%2").arg(host).arg(port)
-                : QStringLiteral("not-configured");
-            const QString detail = QStringLiteral("control=%1 target-ip=%2")
-                                       .arg(target, ip);
+    const bool remoteLan = (index == 2 || index == 3);
+    const QString iface = (index == 2) ? QStringLiteral("end0")
+                         : (index == 3) ? QStringLiteral("end1")
+                                        : QString();
 
-            qWarning().noquote() << "[LAN][RFSoC][DB] CONTROL_DISCONNECTED"
-                                 << "iface=" << iface
-                                 << detail;
+    // NET-LAN-PERSIST1: Apply is persistence-first.  LAN3/LAN4 Network2 rows
+    // must be updated even when the RFSoC control TCP link is disconnected.
+    // DatabaseDF::updateNetworkfromDisplay() emits updateNetworkDfDevice() only
+    // after the DB UPDATE succeeds; the TCP send/queue path is therefore a
+    // best-effort follow-up and cannot roll back the saved IP.
+    if (!db) {
+        const QString detail = QStringLiteral("DatabaseDF backend is unavailable; target-ip=%1")
+                                   .arg(ip);
+        qWarning().noquote() << "[LAN][RFSoC][DB] DB_UNAVAILABLE"
+                             << "index=" << index
+                             << "iface=" << (iface.isEmpty() ? QStringLiteral("local") : iface)
+                             << detail;
+        if (remoteLan)
             emit rfsocIpConfigDispatchResult(iface, ip,
-                                              QStringLiteral("CONTROL_DISCONNECTED"),
+                                              QStringLiteral("DB_UNAVAILABLE"),
                                               detail);
-            return;
-        }
+        return;
     }
 
-    QTimer::singleShot(0, db, [db = db, index , dhcp ,ip,mask,gw,dns1,dns2]() {
-        db->updateNetworkfromDisplay(index,dhcp,ip,mask,gw,dns1,dns2);
+    if (remoteLan && !isRfsocControlConnected()) {
+        const QString host = rfsocControlHost();
+        const int port = static_cast<int>(rfsocControlPort());
+        const QString target = (!host.trimmed().isEmpty() && port > 0)
+            ? QStringLiteral("%1:%2").arg(host).arg(port)
+            : QStringLiteral("not-configured");
+
+        qWarning().noquote() << "[LAN][RFSoC][DB] PERSIST_WITH_CONTROL_DISCONNECTED"
+                             << "iface=" << iface
+                             << "control=" << target
+                             << "target-ip=" << ip;
+    }
+
+    QTimer::singleShot(0, db, [db = db, index, dhcp, ip, mask, gw, dns1, dns2]() {
+        db->updateNetworkfromDisplay(index, dhcp, ip, mask, gw, dns1, dns2);
     });
 }
 

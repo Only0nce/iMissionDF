@@ -31,6 +31,9 @@ Rectangle {
     // drawn by FftLineGraphItem/SceneGraph instead of JavaScript or QPainter loops.
     property bool nativeRenderEnabled: false
     property int  frameSequence: 0
+    // Logical source key (RX/DF1..DF5). Clear native trace immediately when
+    // the selected channel/source changes so stale FFT data is never shown.
+    property string sourceKey: ""
     property real bandCenterHz: 0
     property real bandBwHz: 0
 
@@ -83,10 +86,15 @@ Rectangle {
     property int  _lastNativeSubmittedSeq: -1
 
     // Plot padding
-    property int padLeft: 64
-    property int padRight: 18
+    // DOA-FFT-GEOM1: padLeft/padRight now describe the DATA rectangle,
+    // not a reserved axis-label gutter. The dB/MHz labels are overlay pills
+    // drawn inside the plot, so the live Spectrum/Waterfall should start close
+    // to the card border instead of wasting a large blank strip on the left.
+    property int padLeft: 8
+    property int padRight: 8
     property int padTop: 16
     property int padBottom: 40
+    property int labelInsetX: 10
 
     // Style (SOLID only)
     property color cBg0:    "#060B16"
@@ -407,9 +415,43 @@ Rectangle {
         fillColor: Qt.rgba(56 / 255, 189 / 255, 248 / 255, 0.18)
     }
 
+    function _requestCanvasPaintSafe(canvas, name) {
+        if (canvas && typeof canvas.requestPaint === "function") {
+            canvas.requestPaint()
+            return true
+        }
+        if (root.showDebug)
+            console.log("[DOA-SPECTRUM-PAINT-SKIP] missing=" + name + " source=" + root.sourceKey)
+        return false
+    }
+
+    function clearPlotHistory(reason) {
+        // DOA-FFT-LIFE2: keep this routine exception-free. Older code called
+        // overlayCanvas even though this component has gridCanvas/plotCanvas/
+        // markerCanvas only; the ReferenceError aborted clear transactions and
+        // left the renderer half-reset.
+        root._lastNativeSubmittedSeq = -1
+        root._n = 0
+        root._dirtyPlot = true
+        root._dirtyScale = true
+        if (nativeSpectrumItem && typeof nativeSpectrumItem.clearFrame === "function")
+            nativeSpectrumItem.clearFrame()
+        root._requestCanvasPaintSafe(gridCanvas, "gridCanvas")
+        root._requestCanvasPaintSafe(plotCanvas, "plotCanvas")
+        root._requestCanvasPaintSafe(markerCanvas, "markerCanvas")
+        if (root.showDebug)
+            console.log("[DOA-SPECTRUM-CLEAR] reason=" + reason + " source=" + root.sourceKey)
+    }
+
     function _submitNativeFrame() {
         if (!root.nativeRenderEnabled || !root.enabled || !root.visible) return
-        if (!_isValidArray(root.magDb)) return
+        if (!_isValidArray(root.magDb)) {
+            if (root.frameSequence !== root._lastNativeSubmittedSeq) {
+                root.clearPlotHistory("empty-frame")
+                root._lastNativeSubmittedSeq = root.frameSequence
+            }
+            return
+        }
         if (root.frameSequence === root._lastNativeSubmittedSeq && !root._dirtyScale) return
         if (root._dirtyScale) {
             root._calcScale()
@@ -426,7 +468,10 @@ Rectangle {
     }
 
     onFrameSequenceChanged: _submitNativeFrame()
+    onSourceKeyChanged: root.clearPlotHistory("source-key")
+    onEnabledChanged: if (!root.enabled) root.clearPlotHistory("disabled")
     onNativeRenderEnabledChanged: {
+        root.clearPlotHistory("native-mode")
         _markPlotDirty()
         _submitNativeFrame()
     }
@@ -539,7 +584,7 @@ Rectangle {
     Rectangle {
         id: yMaxPill
         visible: root.enabled && root._n >= 8
-        x: 10
+        x: root.labelInsetX
         y: root.padTop - 2
         radius: 10
         color: "#0F172A"
@@ -563,7 +608,7 @@ Rectangle {
     Rectangle {
         id: yMinPill
         visible: root.enabled && root._n >= 8
-        x: 10
+        x: root.labelInsetX
         y: root.padTop + root._plotH() - 18
         radius: 10
         color: "#0F172A"
@@ -587,7 +632,7 @@ Rectangle {
     Rectangle {
         id: xMinPill
         visible: root.enabled && root._n >= 8
-        x: root.padLeft
+        x: root.labelInsetX
         y: root.height - 30
         radius: 10
         color: "#0F172A"
@@ -619,7 +664,7 @@ Rectangle {
         opacity: 0.85
         height: 22
         width: xMaxText.paintedWidth + 16
-        x: root.padLeft + root._plotW() - width
+        x: root.width - root.padRight - width
         Text {
             id: xMaxText
             anchors.verticalCenter: parent.verticalCenter

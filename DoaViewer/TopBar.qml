@@ -14,9 +14,9 @@ Rectangle {
     property int pad: 10
     property int displayChannel: 1
     property bool rxSourceAvailable: false
-    property bool rxFftEnabled: true
+    property bool fftEnabled: false
     signal displayChannelRequested(int channel)
-    signal rxFftEnabledRequested(bool enabled)
+    signal fftEnabledRequested(bool enabled)
 
     // Target dB ใช้ตัวเดียวสำหรับ CH0..CH4
     property real rfAgcTargetAllDb: -75.0
@@ -419,9 +419,9 @@ Rectangle {
                 Layout.preferredWidth: 340
                 displayChannel: root.displayChannel
                 rxSourceAvailable: root.rxSourceAvailable
-                rxFftEnabled: root.rxFftEnabled
+                fftEnabled: root.fftEnabled
                 onDisplayChannelRequested: root.displayChannelRequested(channel)
-                onRxFftEnabledRequested: root.rxFftEnabledRequested(enabled)
+                onFftEnabledRequested: root.fftEnabledRequested(enabled)
             }
 
             Button {

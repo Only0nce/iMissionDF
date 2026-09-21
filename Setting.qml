@@ -602,22 +602,19 @@ Item {
 
             if (typeof mainWindows.applyLanSettings === "function") {
                 if (index === 2 || index === 3) {
-                    // Remote LAN status is never inferred from saved IP/config.
-                    // Query the authoritative RFSoC TCP socket immediately before
-                    // sending the network-change JSON.
+                    // Remote LAN Apply is now persistence-first.  The desired
+                    // Network2/JSON state must be saved even when the RFSoC
+                    // control TCP link is down; reconnect/dispatch is only a
+                    // best-effort follow-up and must never roll the form back.
                     if (typeof mainWindows.externalLanStatus === "function") {
                         var tcpState = mainWindows.externalLanStatus(index)
                         externalLanControlConnected = !!(tcpState && tcpState.connected)
                         externalLanControlHost = tcpState && tcpState.host ? String(tcpState.host) : ""
                         externalLanControlPort = tcpState && tcpState.port ? Number(tcpState.port) : 0
-                        if (!externalLanControlConnected) {
-                            statusMessage = (index === 2 ? "LAN3" : "LAN4") +
-                                    ": RFSoC control server disconnected"
-                            return
-                        }
                     }
-                    statusMessage = "Sending " + (index === 2 ? "LAN3 / end0" : "LAN4 / end1") +
-                            " IP configuration to RFSoC..."
+
+                    statusMessage = "Saving " + (index === 2 ? "LAN3 / end0" : "LAN4 / end1") +
+                            " IP configuration; RFSoC reconnect will continue if needed..."
                 } else {
                     statusMessage = "Saving and applying LAN configuration..."
                 }
@@ -669,11 +666,17 @@ Item {
 
             var portName = iface === "end0" ? "LAN3" : (iface === "end1" ? "LAN4" : iface)
             if (state === "DISPATCHED") {
-                statusMessage = portName + ": RFSoC IP command dispatched for " + ip
+                statusMessage = portName + ": IP saved; RFSoC command dispatched for " + ip
+            } else if (state === "QUEUED") {
+                statusMessage = portName + ": IP saved; RFSoC command queued until control reconnects"
+            } else if (state === "QUEUED_NO_TARGET") {
+                statusMessage = portName + ": IP saved; RFSoC control target is not configured yet"
             } else if (state === "CONTROL_DISCONNECTED") {
-                statusMessage = portName + ": RFSoC control server disconnected - command not sent"
+                statusMessage = portName + ": IP saved; RFSoC control server disconnected"
+            } else if (state === "DB_UNAVAILABLE") {
+                statusMessage = portName + ": database backend unavailable - IP was not saved"
             } else {
-                statusMessage = portName + ": RFSoC IP command failed - " + detail
+                statusMessage = portName + ": RFSoC IP command failed after save - " + detail
             }
         }
     }
