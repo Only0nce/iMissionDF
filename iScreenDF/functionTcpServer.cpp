@@ -35,6 +35,25 @@ bool iScreenDF::sendRfsocJsonLine(const QJsonObject &obj, bool addNewline)
     return localDFclient->sendLine(payload, addNewline);
 }
 
+bool iScreenDF::sendIqSampleRateToRfsoc(double rateMsps, bool needAck)
+{
+    if (!std::isfinite(rateMsps) || rateMsps <= 0.0) {
+        qWarning() << "[iScreenDF][RFSoC] invalid setIqSampleRate rate_msps:" << rateMsps;
+        return false;
+    }
+
+    QJsonObject obj;
+    obj[QStringLiteral("menuID")] = QStringLiteral("setIqSampleRate");
+    obj[QStringLiteral("rate_msps")] = rateMsps;
+    obj[QStringLiteral("needAck")] = needAck;
+
+    const bool dispatched = sendRfsocJsonLine(obj, true);
+    qInfo() << "[iScreenDF][RFSoC-IQ-RATE-TX]"
+            << QJsonDocument(obj).toJson(QJsonDocument::Compact).trimmed()
+            << "dispatched=" << dispatched;
+    return dispatched;
+}
+
 static int maskToPrefix(const QString &mask)
 {
     const auto parts = mask.split('.', Qt::SkipEmptyParts);

@@ -852,6 +852,21 @@ void WebSocketClient::onTextMessageReceived(const QString &message)
     if (!parseError.error && doc.isObject()) {
         QJsonObject obj = doc.object();
 
+        const QString menuId = obj.value(QStringLiteral("menuID")).toString();
+        if (menuId == QStringLiteral("setIqSampleRate")) {
+            const double rateMsps = obj.value(QStringLiteral("rate_msps")).toDouble(0.0);
+            const bool needAck = obj.value(QStringLiteral("needAck")).toBool(true);
+            if (std::isfinite(rateMsps) && rateMsps > 0.0) {
+                qInfo() << "[ASTRARX-QT5-IQ-RATE-RX]"
+                        << "rate_msps=" << rateMsps
+                        << "needAck=" << needAck;
+                emit iqSampleRateCommandReceived(rateMsps, needAck);
+            } else {
+                qWarning() << "[ASTRARX-QT5-IQ-RATE-RX] invalid rate_msps:" << message;
+            }
+            return;
+        }
+
         QString type = obj.value("type").toString();
         QJsonValue value = obj.value("value");
         // qDebug() << "onTextMessageReceived" << obj;

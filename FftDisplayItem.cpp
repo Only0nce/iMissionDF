@@ -50,15 +50,20 @@ class AnalyzerPresentationClock final
 public:
     AnalyzerPresentationClock()
     {
-        m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 60, 120);
+        m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 100, 120);
         QScreen *screen = QGuiApplication::primaryScreen();
         const double displayHz = screen ? screen->refreshRate() : 0.0;
-        m_effectiveFps = (displayHz >= 30.0)
-                ? qMin(m_requestedFps, qMax(30, qRound(displayHz)))
-                : m_requestedFps;
+        Q_UNUSED(displayHz);
+        // R20.4-ASTRARX-SMOOTH100:
+        // Do not cap the presentation clock to the physical display refresh.
+        // Qt Quick/vsync still coalesces actual screen flips, but running the
+        // shared analyzer clock at 100 Hz gives Spectrum interpolation and
+        // Waterfall row-phase scrolling enough ticks to stay smooth when the
+        // AstraRX FFT source cadence falls at 7.68/15.36/30.72 MSPS.
+        m_effectiveFps = m_requestedFps;
         // Run slightly ahead of the requested cadence and let Qt Quick/vsync
         // coalesce onto the physical refresh boundary. This avoids choosing a
-        // 17 ms timer for a 60 Hz panel (58.8 Hz) while keeping 90 Hz at 11 ms.
+        // 17 ms timer for a 60 Hz panel (58.8 Hz) while keeping 100 Hz at 10 ms.
         m_intervalMs = qMax(1, static_cast<int>(std::floor(1000.0
                                          / static_cast<double>(m_effectiveFps))));
         m_timer.setTimerType(Qt::PreciseTimer);
@@ -217,7 +222,7 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
             << "targetPresentMs=" << m_presentIntervalMs
             << "requestedPresentFps=" << sharedAnalyzerPresentationClock().requestedFps()
             << "effectivePresentFps=" << sharedAnalyzerPresentationClock().effectiveFps()
-            << "eventDrivenDirtyRepaint=1"
+            << "continuousCleanFramePresent=1"
             << "defaultItemFps=" << m_targetFps
             << "waterfallGpuBins=" << m_waterfallHistoryMaxBins
             << "edgeSafeFill=transparent-black"
@@ -823,14 +828,40 @@ void FftDisplayItem::presentOnSharedClock()
             m_presentDirty = false;
             return;
         }
-        if (!m_presentDirty) {
+        const qint64 nowMs = monotonicMs();
+
+        // SMOOTH100-FULLRATE:
+        // The shared analyzer clock is already the global presentation budget.
+        // Do not require a fresh RF frame for every paint: Spectrum uses live
+        // interpolation between previous/current frames, and Waterfall uses a
+        // fractional row-scroll phase between real rows.  The old one-source-
+        // period clean-frame window caused 7.68/15.36 MSPS to paint at only
+        // ~38-41 FPS even while the display clock was ticking at ~60 Hz.
+        // Keep presenting while the RF stream is live, but stop after a short
+        // stale window so a disconnected stream does not burn CPU forever.
+        bool streamRecentlyLive = m_presentDirty;
+        if (!streamRecentlyLive) {
+            if (m_mode == Spectrum && m_lastSpectrumArrivalMs > 0) {
+                const qint64 ageMs = std::max<qint64>(0, nowMs - m_lastSpectrumArrivalMs);
+                streamRecentlyLive = ageMs <= 500;
+            } else if (m_mode == Waterfall && m_lastWaterfallArrivalMs > 0) {
+                const qint64 ageMs = std::max<qint64>(0, nowMs - m_lastWaterfallArrivalMs);
+                streamRecentlyLive = ageMs <= 500;
+            }
+        }
+        if (!streamRecentlyLive) {
             ++m_presentSkippedClean;
             return;
         }
 
-        const qint64 nowMs = monotonicMs();
+        // The QTimer can fire with small jitter around the 10 ms target.  A
+        // strict per-item 10 ms gate skipped every early tick and effectively
+        // divided the analyzer cadence down to ~40 FPS.  Use the shared clock
+        // interval with a small tolerance; Qt Quick/vsync still performs the
+        // final display-rate coalescing.
         const int intervalMs = targetPresentIntervalMsLocked();
-        if (m_lastPresentUpdateMs > 0 && (nowMs - m_lastPresentUpdateMs) < intervalMs) {
+        const int clockBudgetMs = qMax(1, qMin(intervalMs, qMax(1, m_presentIntervalMs - 2)));
+        if (m_lastPresentUpdateMs > 0 && (nowMs - m_lastPresentUpdateMs) < clockBudgetMs) {
             ++m_presentSkippedBudget;
             return;
         }
@@ -1734,7 +1765,7 @@ void FftDisplayItem::paintSpectrum(QPainter *painter)
     if (previousFrame.size() == currentFrame.size() && transitionStartMs > 0) {
         const qint64 ageMs = std::max<qint64>(0, monotonicMs() - transitionStartMs);
         const double interpolationMs = std::max(static_cast<double>(m_presentIntervalMs),
-                                                std::min(33.0, sourcePeriodMs * 0.75));
+                                                std::min(120.0, sourcePeriodMs * 0.98));
         blend = std::max(0.0, std::min(1.0, static_cast<double>(ageMs) / interpolationMs));
         // Smoothstep removes the small constant-velocity jerk at frame boundaries.
         blend = blend * blend * (3.0 - 2.0 * blend);
@@ -1935,7 +1966,8 @@ void FftDisplayItem::paint(QPainter *painter)
                 << "skipClean=" << skippedClean
                 << "skipBudget=" << skippedBudget
                 << "externalFrames=" << externalFrames
-                << "eventDriven=1";
+                << "eventDriven=0"
+                << "continuousPresent=1";
         m_paintStatsFrames = 0;
         m_paintStatsTimer.restart();
     }

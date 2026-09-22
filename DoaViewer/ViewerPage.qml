@@ -43,36 +43,24 @@ Rectangle {
     }
 
     function _schedulerIntervalMs() {
-        if (root.rxDisplaySelected) {
-            if (root.renderQualityLevel <= 0) return 33
-            if (root.renderQualityLevel >= 2) return 66
-            return 40
-        }
-        if (root.renderQualityLevel <= 0) return 40
-        if (root.renderQualityLevel >= 2) return 80
-        return 50
+        // R20.4-ASTRARX-SMOOTH100: keep the selected-source publish clock fast.
+        // It still publishes only the latest real backend frame; native renderers
+        // do the smooth visual interpolation/scrolling between RF snapshots.
+        if (root.renderQualityLevel <= 0) return 10
+        if (root.renderQualityLevel >= 2) return 16
+        return 12
     }
 
     function _spectrumFps() {
-        if (root.rxDisplaySelected) {
-            if (root.renderQualityLevel <= 0) return 30
-            if (root.renderQualityLevel >= 2) return 15
-            return 24
-        }
-        if (root.renderQualityLevel <= 0) return 24
-        if (root.renderQualityLevel >= 2) return 12
-        return 20
+        if (root.renderQualityLevel <= 0) return 100
+        if (root.renderQualityLevel >= 2) return 60
+        return 90
     }
 
     function _waterfallFps() {
-        if (root.rxDisplaySelected) {
-            if (root.renderQualityLevel <= 0) return 22
-            if (root.renderQualityLevel >= 2) return 10
-            return 18
-        }
-        if (root.renderQualityLevel <= 0) return 18
-        if (root.renderQualityLevel >= 2) return 8
-        return 15
+        if (root.renderQualityLevel <= 0) return 100
+        if (root.renderQualityLevel >= 2) return 60
+        return 90
     }
 
     function _polarFps() {

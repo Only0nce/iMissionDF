@@ -1690,24 +1690,53 @@ Item {
         }
     }
 
-    // AB8-style data-driven waterfall scale. The gradient uses the exact same
-    // palette stops as the C++ renderer; P/N are live visible-spectrum values.
+    // AB8-style data-driven waterfall scale. Normally it stays vertical on the
+    // right edge, but when the bottom-right HUD gets too close we rotate it to a
+    // compact horizontal strip just above the Intensity Scale card.
     Item {
         id: waterfallLegend
-        width: 66
-        // CUDA1.6: extend the color legend through most of the Waterfall while
-        // reserving deterministic space for the vertical SCAN/MEMORY toggles
-        // and the bottom HUD dock. The lower edge can therefore never overlap
-        // S-meter / intensity cards.
-        height: Math.max(180, waterfallCanvas.height
-                              - root.waterfallHudDockHeight
-                              - root.waterfallRightToggleHeight
-                              - 58)
-        anchors.right: waterfallCanvas.right
-        anchors.rightMargin: 6
-        anchors.top: waterfallCanvas.top
-        anchors.topMargin: 38
+        readonly property real intensityCardGlobalLeft: waterfallHudLayer.x
+                                                      + waterfallRightHudPod.x
+                                                      + waterfallScaleHudCard.x
+        readonly property real intensityCardGlobalTop: waterfallHudLayer.y
+                                                     + waterfallRightHudPod.y
+                                                     + waterfallScaleHudCard.y
+        readonly property real preferredTop: waterfallCanvas.y + 38
+        readonly property real safeBottomForVertical: Math.min(waterfallCanvas.y + waterfallCanvas.height - 8,
+                                                               intensityCardGlobalTop - 10)
+        readonly property real verticalAvailable: safeBottomForVertical - preferredTop
+        readonly property bool compactHorizontal: verticalAvailable < 210
+        readonly property real compactWidth: Math.max(170, waterfallScaleHudCard.width)
+        readonly property real compactHeight: 34
+        readonly property real verticalWidth: 66
+        readonly property real verticalHeight: Math.max(180, verticalAvailable)
+
+        width: compactHorizontal ? compactWidth : verticalWidth
+        height: compactHorizontal ? compactHeight : verticalHeight
+        x: compactHorizontal
+           ? Math.max(root.waterfallHudSideMargin,
+                      Math.min(root.width - compactWidth - root.waterfallHudSideMargin,
+                               intensityCardGlobalLeft))
+           : (waterfallCanvas.x + waterfallCanvas.width - verticalWidth - 6)
+        y: compactHorizontal
+           ? Math.max(waterfallCanvas.y + 8,
+                      Math.min(waterfallCanvas.y + waterfallCanvas.height - compactHeight - 8,
+                               intensityCardGlobalTop - compactHeight - 8))
+           : preferredTop
         z: 112
+
+        function levelRatio(dbValue) {
+            const minDb = root.waterfallMinDb
+            const maxDb = Math.max(minDb + 0.001, root.waterfallMaxDb)
+            const clamped = Math.max(minDb, Math.min(maxDb, Number(dbValue)))
+            return (clamped - minDb) / (maxDb - minDb)
+        }
+        function levelY(dbValue) {
+            return waterfallScaleCanvas.y + (1.0 - levelRatio(dbValue)) * waterfallScaleCanvas.height
+        }
+        function levelX(dbValue) {
+            return waterfallCompactScale.x + levelRatio(dbValue) * waterfallCompactScale.width
+        }
 
         Rectangle {
             anchors.fill: parent
@@ -1716,59 +1745,139 @@ Item {
             border.color: "#70577B86"
         }
 
-        Canvas {
-            id: waterfallScaleCanvas
-            x: 8
-            y: 16
-            width: 12
-            height: Math.max(20, parent.height - 34)
-            antialiasing: false
-            onHeightChanged: requestPaint()
-            onPaint: {
-                const ctx = getContext("2d")
-                ctx.clearRect(0, 0, width, height)
-                const gradient = ctx.createLinearGradient(0, 0, 0, height)
-                const colors = root.waterfallColorMap || []
-                if (!colors.length) return
-                for (let i = 0; i < colors.length; ++i) {
-                    const packed = Number(colors[colors.length - 1 - i]) >>> 0
-                    const hex = "#" + ("000000" + packed.toString(16)).slice(-6)
-                    gradient.addColorStop(i / Math.max(1, colors.length - 1), hex)
+        Item {
+            visible: !waterfallLegend.compactHorizontal
+            anchors.fill: parent
+
+            Canvas {
+                id: waterfallScaleCanvas
+                x: 8
+                y: 16
+                width: 12
+                height: Math.max(20, parent.height - 34)
+                antialiasing: false
+                onHeightChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+                    const gradient = ctx.createLinearGradient(0, 0, 0, height)
+                    const colors = root.waterfallColorMap || []
+                    if (!colors.length) return
+                    for (let i = 0; i < colors.length; ++i) {
+                        const packed = Number(colors[colors.length - 1 - i]) >>> 0
+                        const hex = "#" + ("000000" + packed.toString(16)).slice(-6)
+                        gradient.addColorStop(i / Math.max(1, colors.length - 1), hex)
+                    }
+                    ctx.fillStyle = gradient
+                    ctx.fillRect(0, 0, width, height)
                 }
-                ctx.fillStyle = gradient
-                ctx.fillRect(0, 0, width, height)
+                Connections {
+                    target: root
+                    function onWaterfallColorMapChanged() { waterfallScaleCanvas.requestPaint() }
+                }
             }
-            Connections {
-                target: root
-                function onWaterfallColorMapChanged() { waterfallScaleCanvas.requestPaint() }
+
+            Text { x: 25; y: 5; text: root.waterfallMaxDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { x: 25; anchors.verticalCenter: parent.verticalCenter; text: ((root.waterfallMinDb + root.waterfallMaxDb) * 0.5).toFixed(0); color: root.hudSecondaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 13; text: root.waterfallMinDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
+            Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 2; text: "dBFS"; color: root.hudSecondaryText; font.pixelSize: 9; font.bold: true }
+
+            Rectangle {
+                visible: spectrumCanvas.measurementsValid
+                x: 2; y: waterfallLegend.levelY(spectrumCanvas.peakDb) - 7
+                width: 18; height: 14; radius: 3
+                color: "#E6F6A53A"
+                Text { anchors.centerIn: parent; text: "P"; color: "#081018"; font.pixelSize: 9; font.bold: true }
+            }
+            Rectangle {
+                visible: spectrumCanvas.measurementsValid
+                x: 2; y: waterfallLegend.levelY(spectrumCanvas.noiseFloorDb) - 7
+                width: 18; height: 14; radius: 3
+                color: "#E635D5BD"
+                Text { anchors.centerIn: parent; text: "N"; color: "#081018"; font.pixelSize: 9; font.bold: true }
             }
         }
 
-        function levelY(dbValue) {
-            const minDb = root.waterfallMinDb
-            const maxDb = Math.max(minDb + 0.001, root.waterfallMaxDb)
-            const clamped = Math.max(minDb, Math.min(maxDb, Number(dbValue)))
-            return waterfallScaleCanvas.y + (1.0 - (clamped - minDb) / (maxDb - minDb)) * waterfallScaleCanvas.height
-        }
+        Item {
+            visible: waterfallLegend.compactHorizontal
+            anchors.fill: parent
 
-        Text { x: 25; y: 5; text: root.waterfallMaxDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-        Text { x: 25; anchors.verticalCenter: parent.verticalCenter; text: ((root.waterfallMinDb + root.waterfallMaxDb) * 0.5).toFixed(0); color: root.hudSecondaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-        Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 13; text: root.waterfallMinDb.toFixed(0); color: root.hudPrimaryText; font.pixelSize: 10; font.bold: true; font.family: "monospace" }
-        Text { x: 25; anchors.bottom: parent.bottom; anchors.bottomMargin: 2; text: "dBFS"; color: root.hudSecondaryText; font.pixelSize: 9; font.bold: true }
+            Text {
+                x: 10
+                y: 2
+                text: root.waterfallMinDb.toFixed(0)
+                color: root.hudPrimaryText
+                font.pixelSize: 10
+                font.bold: true
+                font.family: "monospace"
+            }
+            Text {
+                anchors.right: parent.right
+                anchors.rightMargin: 10
+                y: 2
+                text: root.waterfallMaxDb.toFixed(0)
+                color: root.hudPrimaryText
+                font.pixelSize: 10
+                font.bold: true
+                font.family: "monospace"
+            }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: 2
+                text: "dBFS"
+                color: root.hudSecondaryText
+                font.pixelSize: 9
+                font.bold: true
+            }
 
-        Rectangle {
-            visible: spectrumCanvas.measurementsValid
-            x: 2; y: waterfallLegend.levelY(spectrumCanvas.peakDb) - 7
-            width: 18; height: 14; radius: 3
-            color: "#E6F6A53A"
-            Text { anchors.centerIn: parent; text: "P"; color: "#081018"; font.pixelSize: 9; font.bold: true }
-        }
-        Rectangle {
-            visible: spectrumCanvas.measurementsValid
-            x: 2; y: waterfallLegend.levelY(spectrumCanvas.noiseFloorDb) - 7
-            width: 18; height: 14; radius: 3
-            color: "#E635D5BD"
-            Text { anchors.centerIn: parent; text: "N"; color: "#081018"; font.pixelSize: 9; font.bold: true }
+            Canvas {
+                id: waterfallCompactScale
+                x: 14
+                y: 16
+                width: Math.max(80, parent.width - 28)
+                height: 10
+                antialiasing: false
+                onWidthChanged: requestPaint()
+                onPaint: {
+                    const ctx = getContext("2d")
+                    ctx.clearRect(0, 0, width, height)
+                    const gradient = ctx.createLinearGradient(0, 0, width, 0)
+                    const colors = root.waterfallColorMap || []
+                    if (!colors.length) return
+                    for (let i = 0; i < colors.length; ++i) {
+                        const packed = Number(colors[i]) >>> 0
+                        const hex = "#" + ("000000" + packed.toString(16)).slice(-6)
+                        gradient.addColorStop(i / Math.max(1, colors.length - 1), hex)
+                    }
+                    ctx.fillStyle = gradient
+                    ctx.fillRect(0, 0, width, height)
+                }
+                Connections {
+                    target: root
+                    function onWaterfallColorMapChanged() { waterfallCompactScale.requestPaint() }
+                }
+            }
+
+            Rectangle {
+                visible: spectrumCanvas.measurementsValid
+                x: Math.max(0, Math.min(parent.width - width, waterfallLegend.levelX(spectrumCanvas.peakDb) - width / 2))
+                y: 13
+                width: 18; height: 18; radius: 4
+                color: "#E6F6A53A"
+                border.width: 1
+                border.color: "#80FFF1A0"
+                Text { anchors.centerIn: parent; text: "P"; color: "#081018"; font.pixelSize: 10; font.bold: true }
+            }
+            Rectangle {
+                visible: spectrumCanvas.measurementsValid
+                x: Math.max(0, Math.min(parent.width - width, waterfallLegend.levelX(spectrumCanvas.noiseFloorDb) - width / 2))
+                y: 13
+                width: 18; height: 18; radius: 4
+                color: "#E635D5BD"
+                border.width: 1
+                border.color: "#803DEDD6"
+                Text { anchors.centerIn: parent; text: "N"; color: "#081018"; font.pixelSize: 10; font.bold: true }
+            }
         }
     }
 
@@ -2329,16 +2438,29 @@ Item {
                                                      intensityCardGlobalTop - launcherSafeMargin)
         readonly property bool normalPositionVisible: (normalY + height) <= bottomSafeY
 
+        // Vertical legend: move SCAN / MEMORY to the open slot directly left of
+        // the legend and above the Intensity Scale card (the red-zone request).
+        // Horizontal legend: keep the legacy position logic.
+        readonly property real relocatedVerticalX: waterfallLegend.x - width - 8
+        readonly property real relocatedVerticalY: intensityCardGlobalTop - height - launcherSafeMargin
+
         readonly property real fallbackX: intensityCardGlobalLeft - width - launcherSafeMargin
         readonly property real fallbackY: intensityCardGlobalTop - height - launcherSafeMargin
 
+        readonly property real targetX: waterfallLegend.compactHorizontal
+                                       ? (normalPositionVisible ? normalX : fallbackX)
+                                       : relocatedVerticalX
+        readonly property real targetY: waterfallLegend.compactHorizontal
+                                       ? (normalPositionVisible ? normalY : fallbackY)
+                                       : relocatedVerticalY
+
         x: Math.round(Math.max(root.waterfallHudSideMargin,
                                Math.min(root.width - width - root.waterfallHudSideMargin,
-                                        normalPositionVisible ? normalX : fallbackX)))
+                                        targetX)))
 
         y: Math.round(Math.max(waterfallCanvas.y + 8,
                                Math.min(waterfallCanvas.y + waterfallCanvas.height - height - 8,
-                                        normalPositionVisible ? normalY : fallbackY)))
+                                        targetY)))
 
         // Below the modal scrim while a popup is open, so the gray mouse area
         // catches outside clicks and closes the popup instead of letting these

@@ -109,6 +109,7 @@ public:
     bool isRfsocControlConnected() const;
     QString rfsocControlHost() const;
     quint16 rfsocControlPort() const;
+    bool sendIqSampleRateToRfsoc(double rateMsps, bool needAck = true);
     // ImageProvider *capture;
     QString controllerName = "MainController";
     QString Serialnumber = "156952";

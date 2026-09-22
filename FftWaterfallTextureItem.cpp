@@ -293,7 +293,7 @@ void FftWaterfallTextureItem::setRenderEnabled(bool enabled)
 
 void FftWaterfallTextureItem::setTargetFps(int fps)
 {
-    fps = qBound(1, fps, 60);
+    fps = qBound(1, fps, 120);
     {
         QMutexLocker locker(&m_mutex);
         if (m_targetFps == fps)

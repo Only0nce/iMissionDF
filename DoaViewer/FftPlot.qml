@@ -291,7 +291,7 @@ Rectangle {
     // =========================
     Timer {
         id: paintTimer
-        interval: Math.max(16, Math.floor(1000 / Math.max(1, root.fftFps)))
+        interval: Math.max(8, Math.floor(1000 / Math.max(1, root.fftFps)))
         running: root.enabled && root.visible
         repeat: true
         onTriggered: {

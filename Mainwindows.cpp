@@ -288,6 +288,19 @@ Mainwindows::Mainwindows(NetworkController *networkController,
     connect(&wsClient,&WebSocketClient::updateProfiles,this,&Mainwindows::updateProfiles);
     connect(&wsClient,&WebSocketClient::onSQLChanged,this,&Mainwindows::onSQLChanged);
     connect(&wsClient,&WebSocketClient::onTemperatureChanged,this,&Mainwindows::onTemperatureChanged);
+    connect(&wsClient, &WebSocketClient::iqSampleRateCommandReceived,
+            this, [this](double rateMsps, bool needAck) {
+        if (!m_lanIntegrationBackend) {
+            qWarning() << "[ASTRARX-QT5-IQ-RATE] RFSoC control backend is not available"
+                       << "rate_msps=" << rateMsps;
+            return;
+        }
+        const bool dispatched = m_lanIntegrationBackend->sendIqSampleRateToRfsoc(rateMsps, needAck);
+        qInfo() << "[ASTRARX-QT5-IQ-RATE] forwarded to RFSoC"
+                << "rate_msps=" << rateMsps
+                << "needAck=" << needAck
+                << "dispatched=" << dispatched;
+    });
     connect(&wsClient, &WebSocketClient::backendError,
             this, [this](const QString &message) {
         // A rejected/failed source retune must not later apply a deferred DSP

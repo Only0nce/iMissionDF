@@ -239,6 +239,7 @@ signals:
     // Atomic receiver snapshot from the server.
     void receiverStateChanged(quint64 centerHz, int offsetHz, quint64 receiverHz);
     void backendError(QString message);
+    void iqSampleRateCommandReceived(double rateMsps, bool needAck);
     void updateProfiles(QJsonArray value);
 
     void openwebrxConnected();
