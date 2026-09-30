@@ -9,6 +9,9 @@ Item {
     width: 1205
     height: 400
 
+    property bool darkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: root.darkMode }
+
     property var pendingDSP: ({})
     property real pendingCenterFreq: 0
     property var pendingUIParams: ({})
@@ -34,6 +37,16 @@ Item {
         property string presetName: ""
 
         standardButtons: Dialog.Cancel
+        Material.theme: root.darkMode ? Material.Dark : Material.Light
+        Material.background: hmiTheme.panel
+        Material.foreground: hmiTheme.text
+
+        background: Rectangle {
+            radius: hmiTheme.radiusLg
+            color: hmiTheme.panel
+            border.width: 1
+            border.color: hmiTheme.lineStrong
+        }
 
         contentItem: RowLayout {
             y: 4
@@ -43,9 +56,9 @@ Item {
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
                 Rectangle {
-                    color: "#aa009688"
+                    color: root.darkMode ? Qt.rgba(0.0, 0.59, 0.52, 0.66) : Qt.rgba(0.0, 0.55, 0.46, 0.15)
                     radius: 5
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.lineStrong
                     border.width: 0
                     anchors.fill: parent
                     anchors.leftMargin: 8
@@ -72,9 +85,9 @@ Item {
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
                 Rectangle {
-                    color: "#aa009688"
+                    color: root.darkMode ? Qt.rgba(0.0, 0.59, 0.52, 0.66) : Qt.rgba(0.0, 0.55, 0.46, 0.15)
                     radius: 5
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.lineStrong
                     border.width: 0
                     anchors.fill: parent
                     anchors.leftMargin: 8

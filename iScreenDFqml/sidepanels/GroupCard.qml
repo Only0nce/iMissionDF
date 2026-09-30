@@ -2,12 +2,17 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.12
+import "../../ui"
 
 Rectangle {
     id: card
     property string title: ""
     property var    items: []          // array ของ devices
     property bool   selected: false    // สถานะเรือง
+    property bool   darkMode: true
+    property var    krakenmapval: null
+    Theme { id: hmiTheme; darkMode: card.darkMode }
 
     // ===== Inline-rename state =====
     property bool   editing: false
@@ -19,9 +24,9 @@ Rectangle {
     signal addClicked(string title)
 
     radius: 12
-    color: "#0f141a"
+    color: hmiTheme.card
     border.width: selected ? 2 : 1
-    border.color: selected ? "#4aa3ff" : "#233240"
+    border.color: selected ? hmiTheme.remoteRowBorderActive : hmiTheme.remoteRowBorder
     implicitWidth: 480
     implicitHeight: header.implicitHeight + contentCol.implicitHeight + 20
     layer.enabled: true
@@ -57,7 +62,7 @@ Rectangle {
     }
     Connections {
         target: Qt.inputMethod
-        onVisibleChanged: {
+        function onVisibleChanged() {
             if (!Qt.inputMethod.visible && card.editing) {
                 card.cancelEdit()
             }
@@ -76,9 +81,9 @@ Rectangle {
             Layout.fillWidth: true
             implicitHeight: 44
             radius: 8
-            color: card.selected ? "#203142" : "#1a2633"
+            color: card.selected ? hmiTheme.remoteRowActive : hmiTheme.input
             border.width: 1
-            border.color: card.selected ? "#4aa3ff" : "#2a6fb0"
+            border.color: card.selected ? hmiTheme.remoteRowBorderActive : hmiTheme.lineStrong
 
             RowLayout {
                 anchors.fill: parent
@@ -102,7 +107,7 @@ Rectangle {
                             id: titleLabel
                             visible: !card.editing
                             text: card.title
-                            color: "#e9f2f9"
+                            color: hmiTheme.text
                             font.pixelSize: 16
                             font.bold: true
                             Layout.fillWidth: true
@@ -123,7 +128,7 @@ Rectangle {
                                 anchors.left: parent.left
                                 anchors.right: parent.right
                                 text: card._draftTitle
-                                color: "#e9f2f9"
+                                color: hmiTheme.text
                                 onTextChanged: card._draftTitle = text
                                 selectByMouse: true
                                 focus: true
@@ -133,9 +138,9 @@ Rectangle {
                                 padding: 6
                                 background: Rectangle {
                                     radius: 6
-                                    color: "#213040"
+                                    color: hmiTheme.input
                                     border.width: 1
-                                    border.color: "#3b6fa3"
+                                    border.color: hmiTheme.lineStrong
                                 }
                                 Keys.onReturnPressed: card.commitEdit()
                                 Keys.onEnterPressed:  card.commitEdit()
@@ -146,7 +151,7 @@ Rectangle {
 
                         Rectangle {
                             radius: 10
-                            color: "#22364a"
+                            color: hmiTheme.cardAlt
                             height: 24
                             width: countText.implicitWidth + 12
                             Layout.alignment: Qt.AlignVCenter
@@ -154,7 +159,7 @@ Rectangle {
                                 id: countText
                                 anchors.centerIn: parent
                                 text: items ? items.length : 0
-                                color: "#cfe6fb"
+                                color: hmiTheme.textSecondary
                                 font.pixelSize: 12
                             }
                         }
@@ -180,8 +185,8 @@ Rectangle {
                 Rectangle {
                     id: editBtn
                     width: 28; height: 28; radius: 6
-                    color: mouseEdit.containsMouse ? "#305060" : "#22364a"
-                    border.width: 1; border.color: "#2a6fb0"
+                    color: mouseEdit.containsMouse ? hmiTheme.navTileHover : hmiTheme.navTile
+                    border.width: 1; border.color: hmiTheme.lineStrong
                     Layout.alignment: Qt.AlignVCenter
 
                     Image {
@@ -208,15 +213,24 @@ Rectangle {
                 Rectangle {
                     id: addBtn
                     width: 28; height: 28; radius: 6
-                    color: mouseAdd.containsMouse ? "#305060" : "#22364a"
-                    border.width: 1; border.color: "#2a6fb0"
+                    color: mouseAdd.containsMouse ? hmiTheme.navTileHover : hmiTheme.navTile
+                    border.width: 1; border.color: hmiTheme.lineStrong
                     Layout.alignment: Qt.AlignVCenter
 
                     Image {
+                        id: addBtnGearSource
                         anchors.centerIn: parent
-                        source: "qrc:/iScreenDFqml/images/gearicon.png"  /*"qrc:/images/addicon.png"*/
-                        width: 37; height: 37
+                        source: "qrc:/iScreenDFqml/images/gearicon.png"
+                        width: 22; height: 22
                         fillMode: Image.PreserveAspectFit
+                        visible: false
+                    }
+
+                    ColorOverlay {
+                        anchors.fill: addBtnGearSource
+                        source: addBtnGearSource
+                        color: card.darkMode ? "#ECF6F4" : hmiTheme.navTileText
+                        cached: true
                     }
                     MouseArea {
                         id: mouseAdd
@@ -245,9 +259,9 @@ Rectangle {
 
                 delegate: Rectangle {
                     radius: 10
-                    color: "#141b22"
+                    color: hmiTheme.input
                     border.width: 1
-                    border.color: "#1f2b38"
+                    border.color: hmiTheme.line
                     width: parent.width
                     height: devRow.implicitHeight > 0 ? devRow.implicitHeight + 12 : 64
 
@@ -263,6 +277,8 @@ Rectangle {
                         deviceStatus: modelData.status
                         deviceRssi:   0
                         rowIndex:     index
+                        darkMode: card.darkMode
+                        krakenmapval: card.krakenmapval
                     }
                 }
             }

@@ -3,6 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import Qt.labs.settings 1.1
+import "../../ui"
 
 Item {
     id: sidelocal
@@ -11,6 +12,10 @@ Item {
     property var groups: []
     property var krakenmapval: null
     property string test: ""
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: sidelocal.darkMode }
+
+    onDarkModeChanged: console.info("[DRAWER-THEME] SideLocal darkMode=", sidelocal.darkMode)
 
     Settings {
         id: locationSettings
@@ -54,7 +59,7 @@ Item {
 
         Label {
             anchors.verticalCenter: parent.verticalCenter
-            color: "#eeeeee"
+            color: hmiTheme.text
             text: "Local Device Setting"
             font.pixelSize: 18
             font.bold: true
@@ -65,8 +70,8 @@ Item {
     }
 
     // ===== Main content =====
-    SplitView {
-        id: split
+    Item {
+        id: contentArea
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: header.bottom
@@ -75,56 +80,66 @@ Item {
 
         ScrollView {
             id: settingsPane
-            SplitView.fillWidth: true
+            anchors.fill: parent
+            clip: true
+            contentWidth: availableWidth
             ScrollBar.vertical.policy: ScrollBar.AsNeeded
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            clip: true
 
-            ColumnLayout {
-                id: settingsColumn
-                Layout.fillWidth: true
-                spacing: 18
+            Item {
+                id: settingsContent
+                width: settingsPane.availableWidth > 0 ? settingsPane.availableWidth : settingsPane.width
+                implicitHeight: settingsColumn.implicitHeight
+
+                ColumnLayout {
+                    id: settingsColumn
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.rightMargin: 10
+                    spacing: 18
 
                 /* ===== VFO Configuration ===== */
                 Label {
                     text: "Parameter Configuration"
                     font.pixelSize: 20
                     font.bold: true
-                    color: "#ffffff"
+                    color: hmiTheme.text
                 }
 
                 GridLayout {
                     id: vfoConfigLayout
                     columns: 2
                     rowSpacing: 16
-                    columnSpacing: 30
+                    columnSpacing: 24
                     Layout.fillWidth: true
+                    property int labelColumnWidth: Math.max(180, Math.min(220, Math.round(settingsContent.width * 0.34)))
+                    property int fieldColumnWidth: Math.max(260, settingsContent.width - labelColumnWidth - columnSpacing - 36)
 
                     property var  vfoConfigJson: ({})
                     property bool vfoFormInitialized: false
 
                     // --- Device Name ---
-                    Label { text: "Device Name:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Device Name:"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
                     TextField {
                         id: nameDecimationField
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: "#7AE2CF"
+                        color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
                         leftPadding: 10
                         rightPadding: 10
                         topPadding: 4
                         bottomPadding: 4
-                        placeholderTextColor: "#666"
+                        placeholderTextColor: hmiTheme.muted
                         placeholderText: "Device Name"
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -152,27 +167,27 @@ Item {
                     }
 
                     // --- Serial Number ---
-                    Label { text: "Serial Number:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Serial Number:"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
                     TextField {
                         id: serialDecimationField
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: "#7AE2CF"
+                        color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
                         leftPadding: 10
                         rightPadding: 10
                         topPadding: 4
                         bottomPadding: 4
-                        placeholderTextColor: "#666"
+                        placeholderTextColor: hmiTheme.muted
                         placeholderText: "Serial Number"
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -200,28 +215,28 @@ Item {
                     }
 
                     // --- IP Local For Remote Group ---
-                    Label { text: "IP for Remote:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "IP for Remote:"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
                     TextField {
                         id: ipRemoteField
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: "#7AE2CF"
+                        color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
                         leftPadding: 10
                         rightPadding: 10
                         topPadding: 4
                         bottomPadding: 4
-                        placeholderTextColor: "#666"
+                        placeholderTextColor: hmiTheme.muted
                         placeholderText: "e.g. 10.10.0.20"
                         inputMethodHints: Qt.ImhNoPredictiveText | Qt.ImhPreferLowercase
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -275,11 +290,11 @@ Item {
                     }
 
                     // --- DOA Line Length (meters) ---
-                    Label { text: "DOA Line (Km):"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "DOA Line (Km):"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: doaLineMetersCombo
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 44
                         font.pixelSize: 16
                         textRole: "text"
@@ -299,15 +314,15 @@ Item {
                         }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         contentItem: Text {
                             text: doaLineMetersCombo.displayText
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             font.pixelSize: 16
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: 10
@@ -318,7 +333,7 @@ Item {
                             width: doaLineMetersCombo.width
                             contentItem: Text {
                                 text: model.text
-                                color: "#7AE2CF"
+                                color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                 font.pixelSize: 16
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 10
@@ -379,11 +394,11 @@ Item {
                     }
 
                     // ===================== Delay (s) -> sendDelayMs(ms) =====================
-                    Label { text: "Delay (s):"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Delay (s):"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: maxDoaDelayCombo
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 44
                         font.pixelSize: 16
                         textRole: "text"
@@ -410,9 +425,9 @@ Item {
                         }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -423,7 +438,7 @@ Item {
                                     return maxDoaDelayCombo.model.get(maxDoaDelayCombo.currentIndex).text
                                 return ""
                             }
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             font.pixelSize: 16
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: 10
@@ -434,7 +449,7 @@ Item {
                             width: maxDoaDelayCombo.width
                             contentItem: Text {
                                 text: model.text
-                                color: "#7AE2CF"
+                                color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                 font.pixelSize: 16
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 10
@@ -520,11 +535,11 @@ Item {
                     }
 
                     // ===================== DistanceM (m) -> sendDistance(meters) =====================
-                    Label { text: "Distance (m):"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Distance (m):"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: doaDistanceMCombo
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 44
                         font.pixelSize: 16
                         textRole: "text"
@@ -544,15 +559,15 @@ Item {
                         }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         contentItem: Text {
                             text: doaDistanceMCombo.displayText
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             font.pixelSize: 16
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: 10
@@ -563,7 +578,7 @@ Item {
                             width: doaDistanceMCombo.width
                             contentItem: Text {
                                 text: model.text
-                                color: "#7AE2CF"
+                                color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                 font.pixelSize: 16
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 10
@@ -630,7 +645,7 @@ Item {
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
 
-                        Label { text: "DOA:"; font.pixelSize: 16; color: "#ffffff" }
+                        Label { text: "DOA:"; font.pixelSize: 16; color: hmiTheme.text }
 
                         CheckBox {
                             id: doaCheck
@@ -646,7 +661,7 @@ Item {
                             }
                         }
 
-                        Label { text: "FFT:"; font.pixelSize: 16; color: "#ffffff" }
+                        Label { text: "FFT:"; font.pixelSize: 16; color: hmiTheme.text }
 
                         CheckBox {
                             id: fftCheck
@@ -666,11 +681,11 @@ Item {
                     Item { Layout.fillWidth: true }
 
                     // --- DOA Algorithm ---
-                    Label { text: "DOA Algorithm:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "DOA Algorithm:"; font.pixelSize: 16; color: hmiTheme.text; Layout.preferredWidth: vfoConfigLayout.labelColumnWidth }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: doaAlgoCombo
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 44
                         font.pixelSize: 16
                         textRole: "text"
@@ -682,15 +697,15 @@ Item {
                         }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         contentItem: Text {
                             text: doaAlgoCombo.displayText
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             font.pixelSize: 16
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: 10
@@ -700,7 +715,7 @@ Item {
                             width: doaAlgoCombo.width
                             contentItem: Text {
                                 text: model.text
-                                color: "#7AE2CF"
+                                color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                 font.pixelSize: 16
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 10
@@ -775,8 +790,8 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 10
-                            color: "#111A1E"
-                            border.color: "#1B8F77"
+                            color: hmiTheme.input
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
 
                             RowLayout {
@@ -787,7 +802,7 @@ Item {
 
                                 Text {
                                     text: "Threshold"
-                                    color: "#ffffff"
+                                    color: hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.preferredWidth: 70
                                     Layout.alignment: Qt.AlignVCenter
@@ -823,7 +838,7 @@ Item {
                                     Layout.preferredWidth: 90
                                     Layout.preferredHeight: 32
                                     font.pixelSize: 16
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                     validator: DoubleValidator { bottom: -140.0; top: 0.0; decimals: 1 }
                                     enabled: true
@@ -835,9 +850,9 @@ Item {
                                     bottomPadding: 4
 
                                     background: Rectangle {
-                                        color: "#111A1E"
+                                        color: hmiTheme.input
                                         radius: 10
-                                        border.color: sqlDbField.activeFocus ? "#7AE2CF" : "#1B8F77"
+                                        border.color: sqlDbField.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                                         border.width: 1
                                     }
 
@@ -892,7 +907,7 @@ Item {
 
                                 Text {
                                     text: "dB"
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.alignment: Qt.AlignVCenter
                                 }
@@ -983,8 +998,8 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 10
-                            color: "#111A1E"
-                            border.color: "#1B8F77"
+                            color: hmiTheme.input
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
 
                             RowLayout {
@@ -995,7 +1010,7 @@ Item {
 
                                 Text {
                                     text: "Interval"
-                                    color: "#ffffff"
+                                    color: hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.preferredWidth: 50
                                     Layout.alignment: Qt.AlignVCenter
@@ -1035,7 +1050,7 @@ Item {
                                     Layout.preferredWidth: 90
                                     Layout.preferredHeight: 32
                                     font.pixelSize: 16
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                     validator: DoubleValidator { bottom: 0.2; top: 60.0; decimals: 1 }
                                     enabled: true
@@ -1047,9 +1062,9 @@ Item {
                                     bottomPadding: 4
 
                                     background: Rectangle {
-                                        color: "#111A1E"
+                                        color: hmiTheme.input
                                         radius: 10
-                                        border.color: hzField.activeFocus ? "#7AE2CF" : "#1B8F77"
+                                        border.color: hzField.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                                         border.width: 1
                                     }
 
@@ -1101,7 +1116,7 @@ Item {
 
                                 Text {
                                     text: "Hz"
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.alignment: Qt.AlignVCenter
                                 }
@@ -1134,15 +1149,15 @@ Item {
                     Label {
                         text: "Radius (m):"
                         font.pixelSize: 16
-                        color: "#ffffff"
+                        color: hmiTheme.text
                     }
 
                     TextField {
                         id: radiusField
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: "#7AE2CF"
+                        color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
                         leftPadding: 10
@@ -1150,13 +1165,13 @@ Item {
                         topPadding: 4
                         bottomPadding: 4
                         placeholderText: "e.g. 0.80"
-                        placeholderTextColor: "#666"
+                        placeholderTextColor: hmiTheme.muted
                         inputMethodHints: Qt.ImhFormattedNumbersOnly
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: radiusField.activeFocus ? "#7AE2CF" : "#1B8F77"
+                            border.color: radiusField.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -1217,7 +1232,7 @@ Item {
                     RowLayout {
                         Layout.alignment: Qt.AlignVCenter
 
-                        Label { text: "RF AGC:"; font.pixelSize: 16; color: "#ffffff" }
+                        Label { text: "RF AGC:"; font.pixelSize: 16; color: hmiTheme.text }
 
                         CheckBox {
                             id: agcCheck
@@ -1296,8 +1311,8 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 10
-                            color: "#111A1E"
-                            border.color: "#1B8F77"
+                            color: hmiTheme.input
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
 
                             RowLayout {
@@ -1308,7 +1323,7 @@ Item {
 
                                 Text {
                                     text: "Target"
-                                    color: "#ffffff"
+                                    color: hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.preferredWidth: 90
                                     Layout.alignment: Qt.AlignVCenter
@@ -1351,7 +1366,7 @@ Item {
                                     Layout.preferredWidth: 90
                                     Layout.preferredHeight: 32
                                     font.pixelSize: 16
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                                     validator: DoubleValidator { bottom: -90; top: -30; decimals: 1 }
                                     enabled: true
@@ -1364,9 +1379,9 @@ Item {
                                     text: rfAgcTargetAllItem.targetAllDb.toFixed(1)
 
                                     background: Rectangle {
-                                        color: "#111A1E"
+                                        color: hmiTheme.input
                                         radius: 10
-                                        border.color: targetAllField.activeFocus ? "#7AE2CF" : "#1B8F77"
+                                        border.color: targetAllField.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                                         border.width: 1
                                     }
 
@@ -1404,7 +1419,7 @@ Item {
 
                                 Text {
                                     text: "dB"
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                     font.pixelSize: 16
                                     Layout.alignment: Qt.AlignVCenter
                                 }
@@ -1490,7 +1505,7 @@ Item {
                     text: "Location"
                     font.pixelSize: 20
                     font.bold: true
-                    color: "#ffffff"
+                    color: hmiTheme.text
                 }
 
                 GridLayout {
@@ -1576,9 +1591,9 @@ Item {
                         })
                     }
 
-                    Label { text: "Mode:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Mode:"; font.pixelSize: 16; color: hmiTheme.text }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: gpsModeCombo
                         Layout.preferredWidth: 220
                         Layout.preferredHeight: 40
@@ -1587,15 +1602,15 @@ Item {
                         currentIndex: 0
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         contentItem: Text {
                             text: gpsModeCombo.displayText
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             font.pixelSize: 16
                             verticalAlignment: Text.AlignVCenter
                             leftPadding: 10
@@ -1606,7 +1621,7 @@ Item {
                             width: gpsModeCombo.width
                             contentItem: Text {
                                 text: modelData
-                                color: "#7AE2CF"
+                                color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                                 font.pixelSize: 16
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 10
@@ -1634,16 +1649,16 @@ Item {
                         }
                     }
 
-                    Label { text: "Latitude:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Latitude:"; font.pixelSize: 16; color: hmiTheme.text }
 
                     TextField {
                         id: latitudeInput
                         Layout.preferredWidth: 220
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: locationLayout.manualMode ? "#7AE2CF" : "#1B8F77"
+                        color: locationLayout.manualMode ? hmiTheme.accent : hmiTheme.lineStrong
                         placeholderText: "e.g. 13.756331"
-                        placeholderTextColor: "#888"
+                        placeholderTextColor: hmiTheme.muted
                         readOnly: !locationLayout.manualMode
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
@@ -1655,9 +1670,9 @@ Item {
                         validator: DoubleValidator { bottom: -90.0; top: 90.0; decimals: 6 }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: latitudeInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                            border.color: latitudeInput.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                             border.width: 1
                             opacity: locationLayout.manualMode ? 1.0 : 0.75
                         }
@@ -1682,16 +1697,16 @@ Item {
                         }
                     }
 
-                    Label { text: "Longitude:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Longitude:"; font.pixelSize: 16; color: hmiTheme.text }
 
                     TextField {
                         id: longitudeInput
                         Layout.preferredWidth: 220
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
-                        color: locationLayout.manualMode ? "#7AE2CF" : "#1B8F77"
+                        color: locationLayout.manualMode ? hmiTheme.accent : hmiTheme.lineStrong
                         placeholderText: "e.g. 100.501762"
-                        placeholderTextColor: "#888"
+                        placeholderTextColor: hmiTheme.muted
                         readOnly: !locationLayout.manualMode
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
@@ -1703,9 +1718,9 @@ Item {
                         validator: DoubleValidator { bottom: -180.0; top: 180.0; decimals: 6 }
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: longitudeInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                            border.color: longitudeInput.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                             border.width: 1
                             opacity: locationLayout.manualMode ? 1.0 : 0.75
                         }
@@ -1752,7 +1767,7 @@ Item {
                             contentItem: Text {
                                 text: applyAllGpsButton.text
                                 anchors.centerIn: parent
-                                color: "#212121"
+                                color: hmiTheme.darkMode ? "#212121" : "#FFFFFF"
                                 font.pixelSize: 15
                                 font.bold: true
                             }
@@ -1788,7 +1803,7 @@ Item {
                     text: "Compass"
                     font.pixelSize: 20
                     font.bold: true
-                    color: "#ffffff"
+                    color: hmiTheme.text
                 }
 
                 GridLayout {
@@ -1797,15 +1812,15 @@ Item {
                     columnSpacing: 30
                     Layout.fillWidth: true
 
-                    Label { text: "Degree:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Degree:"; font.pixelSize: 16; color: hmiTheme.text }
 
                     TextField {
                         id: degreeInput
-                        Layout.preferredWidth: 200
+                        Layout.preferredWidth: vfoConfigLayout.fieldColumnWidth
                         Layout.preferredHeight: 32
                         font.pixelSize: 16
                         color: "#1B8F77"
-                        placeholderTextColor: "#888"
+                        placeholderTextColor: hmiTheme.muted
                         readOnly: true
                         verticalAlignment: Text.AlignVCenter
                         horizontalAlignment: Text.AlignLeft
@@ -1815,9 +1830,9 @@ Item {
                         bottomPadding: 4
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -1830,7 +1845,7 @@ Item {
                         }
                     }
 
-                    Label { text: "Status:"; font.pixelSize: 16; color: "#ffffff" }
+                    Label { text: "Status:"; font.pixelSize: 16; color: hmiTheme.text }
 
                     TextArea {
                         id: degreeStatus
@@ -1838,15 +1853,15 @@ Item {
                         Layout.preferredHeight: implicitHeight
                         font.pixelSize: 16
                         color: "#1B8F77"
-                        placeholderTextColor: "#888"
+                        placeholderTextColor: hmiTheme.muted
                         readOnly: true
                         wrapMode: Text.Wrap
                         textFormat: Text.PlainText
 
                         background: Rectangle {
-                            color: "#111A1E"
+                            color: hmiTheme.input
                             radius: 10
-                            border.color: "#1B8F77"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -1882,7 +1897,7 @@ Item {
                         contentItem: Text {
                             text: calibrationButton.text
                             anchors.centerIn: parent
-                            color: "#212121"
+                            color: hmiTheme.darkMode ? "#212121" : "#FFFFFF"
                             font.pixelSize: calibrationButton.font.pixelSize
                             font.bold: true
                         }
@@ -1898,4 +1913,6 @@ Item {
             }
         }
     }
+}
+
 }

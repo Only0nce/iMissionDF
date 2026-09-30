@@ -1,5 +1,6 @@
 import QtQuick 2.0
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtWebSockets 1.0
 import QtQuick.Extras 1.4
@@ -9,6 +10,7 @@ import QtQuick.VirtualKeyboard.Styles 2.15
 import QtQuick.VirtualKeyboard.Settings 2.15
 import QtGraphicalEffects 1.0
 import QtQuick.Controls.Styles 1.4
+import "../ui"
 
 Item {
     id: logdataFileRecorder
@@ -18,11 +20,13 @@ Item {
     signal pageRequested(int page)
 
     property int pageWindowSize: 10
+    readonly property bool hmiDarkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: logdataFileRecorder.hmiDarkMode }
 
     Rectangle {
         id: rectangleRecord
         anchors.fill: parent
-        color: "#ffffff"
+        color: hmiTheme.panel
 
         Flickable {
             id: flickable
@@ -33,14 +37,14 @@ Item {
                 id: viewsLogEvent
                 anchors.fill: parent
                 anchors.bottomMargin: 50
-                color: "#e7e6e6"
-                border.color: "#ffffff"
+                color: hmiTheme.panel
+                border.color: hmiTheme.line
 
                 C1.TableView {
                     id: recordFileSDatebase
                     anchors.fill: parent
                     clip: true
-                    model: listFileRecord
+                    model: logdataFileRecorder.visible ? listFileRecord : null
 
                     // ===== ปรับสัดส่วนที่นี่ =====
                     property int rowH: 56
@@ -52,14 +56,16 @@ Item {
                     // สีสลับแถว + ความสูง
                     rowDelegate: Rectangle {
                         height: recordFileSDatebase.rowH
-                        color: styleData.alternate ? "#f7f7f7" : "#ffffff"
+                        color: styleData.selected
+                               ? (logdataFileRecorder.hmiDarkMode ? "#294B45" : "#DCEEEA")
+                               : (styleData.alternate ? hmiTheme.cardAlt : hmiTheme.panel)
                     }
 
                     // หัวตาราง
                     headerDelegate: Rectangle {
                         height: recordFileSDatebase.headerH
-                        color: "#f0f2f5"
-                        border.color: "#dcdcdc"
+                        color: hmiTheme.cardAlt
+                        border.color: hmiTheme.line
                         Text {
                             anchors.fill: parent
                             anchors.leftMargin: recordFileSDatebase.padL
@@ -68,7 +74,7 @@ Item {
                             elide: Text.ElideRight
                             text: styleData.value
                             font.pointSize: recordFileSDatebase.headerPt
-                            color: "#333333"
+                            color: hmiTheme.text
                         }
                     }
 
@@ -83,7 +89,7 @@ Item {
                             elide: Text.ElideRight
                             text: styleData.value
                             font.pointSize: recordFileSDatebase.cellPt
-                            color: "#111111"
+                            color: hmiTheme.textSecondary
                         }
                     }
 
@@ -104,15 +110,15 @@ Item {
                                 height: 45
                                 radius: 10
                                 border.width: 1
-                                border.color: styleData.value ? "#10b981" : "#9aa3af"
-                                color:        styleData.value ? "#34d399" : "#ffffff"
+                                border.color: styleData.value ? hmiTheme.accentHover : hmiTheme.lineStrong
+                                color:        styleData.value ? hmiTheme.accent : hmiTheme.input
 
                                 Rectangle {
                                     anchors.centerIn: parent
                                     width: parent.width  - 6
                                     height: parent.height - 6
                                     radius: 3
-                                    color: styleData.value ? "#34d399" : "transparent"
+                                    color: styleData.value ? hmiTheme.accentHover : "transparent"
                                     opacity: styleData.value ? 0.7 : 0.0
                                 }
                             }
@@ -233,8 +239,11 @@ Item {
                 }
             }
 
-            // ScrollBar (Controls 2) ใช้งานกับ Flickable ได้
-            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOn }
+            // The outer page-level scrollbar is not used by operators here and
+            // creates a distracting grey rail in both light and dark themes.
+            // Keep wheel/trackpad scrolling on the table content, but hide the
+            // redundant recorder-page scrollbar entirely.
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
         }
 
         // ===== เพจจิ้ง (แสดงทีละ 10 หน้า) =====
@@ -246,13 +255,17 @@ Item {
             anchors.bottomMargin: 10
 
             // First / Prev
-            Button {
-                text: "\u00AB First"
+            HmiButton {
+                text: "\u00AB FIRST"
+                compact: true
+                darkMode: logdataFileRecorder.hmiDarkMode
                 enabled: currentPage > 1
                 onClicked: sendChangePage(1)
             }
-            Button {
-                text: "\u2039 Prev"
+            HmiButton {
+                text: "\u2039 PREV"
+                compact: true
+                darkMode: logdataFileRecorder.hmiDarkMode
                 enabled: currentPage > 1
                 onClicked: sendChangePage(currentPage - 1)
             }
@@ -260,23 +273,30 @@ Item {
             // ปุ่มเลขหน้า — สร้างจาก visiblePagesList()
             Repeater {
                 model: visiblePagesList()
-                delegate: Button {
+                delegate: HmiButton {
                     property int pageNo: modelData
-                    text: pageNo
+                    text: String(pageNo)
+                    compact: true
                     checkable: true
                     checked: currentPage === pageNo
+                    tone: checked ? "primary" : "normal"
+                    darkMode: logdataFileRecorder.hmiDarkMode
                     onClicked: if (currentPage !== pageNo) sendChangePage(pageNo)
                 }
             }
 
             // Next / Last
-            Button {
-                text: "Next \u203A"
+            HmiButton {
+                text: "NEXT \u203A"
+                compact: true
+                darkMode: logdataFileRecorder.hmiDarkMode
                 enabled: currentPage < totalPages
                 onClicked: sendChangePage(currentPage + 1)
             }
-            Button {
-                text: "Last \u00BB"
+            HmiButton {
+                text: "LAST \u00BB"
+                compact: true
+                darkMode: logdataFileRecorder.hmiDarkMode
                 enabled: currentPage < totalPages
                 onClicked: sendChangePage(totalPages)
             }

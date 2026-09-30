@@ -1,6 +1,7 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
+import "ui"
 Item {
     id: element
     width: 1200
@@ -68,7 +69,7 @@ Item {
             horizontalAlignment: Text.AlignLeft
         }
 
-        ComboBox {
+        HmiComboBox {
             id: control
             property int modelWidth: width
             x: 197

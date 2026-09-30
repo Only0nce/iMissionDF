@@ -21,6 +21,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import QtQuick.Window 2.15
 import "../.." as SharedComponents
+import "../../ui"
 
 Drawer {
     id: topDrawer
@@ -615,7 +616,7 @@ Drawer {
                         verticalAlignment: Text.AlignVCenter
                     }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: modeCombo
                         Layout.preferredWidth: 180
                         Layout.preferredHeight: 44
@@ -950,7 +951,7 @@ Drawer {
                                     onLoaded: { item.text = "Mode" }
                                 }
 
-                                ComboBox {
+                                HmiComboBox {
                                     id: dhcpCombo
                                     Layout.preferredWidth: 240
                                     Layout.preferredHeight: 44

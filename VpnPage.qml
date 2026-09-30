@@ -1,10 +1,15 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
+import QtQuick.Controls.Material 2.12
+
+import "ui"
 import App 1.0
 
 Item {
     id: root
+
+    Theme { id: hmiTheme; darkMode: root.Material.theme === Material.Dark }
 
     property bool adminMode: false
     property var vpnProfiles: []
@@ -34,18 +39,21 @@ Item {
 
     QtObject {
         id: c
-        property color panel: "#132235"
-        property color card: "#122033"
-        property color field: "#0d1723"
-        property color border: "#2d4056"
-        property color borderSoft: "#203044"
-        property color text: "#e9f0f7"
-        property color sub: "#9aa8b8"
-        property color muted: "#667589"
-        property color accent: "#00c9a7"
-        property color warning: "#f59e0b"
-        property color danger: "#ef4444"
-        property color info: "#38bdf8"
+        property color panel: hmiTheme.panel
+        property color card: hmiTheme.cardAlt
+        property color field: hmiTheme.input
+        property color border: hmiTheme.lineStrong
+        property color borderSoft: hmiTheme.line
+        property color text: hmiTheme.text
+        property color sub: hmiTheme.textSecondary
+        property color muted: hmiTheme.muted
+        property color accent: hmiTheme.accent
+        property color warning: hmiTheme.warning
+        property color danger: hmiTheme.danger
+        property color info: hmiTheme.info
+        property color accentText: "#061514"
+        property color selection: hmiTheme.darkMode ? Qt.lighter(hmiTheme.cardAlt, 1.10) : "#E3F2EF"
+        property color dangerFill: hmiTheme.darkMode ? "#7F1D1D" : "#F7DDE0"
     }
 
     function normalizedType(typeText) { return String(typeText).toLowerCase() === "wireguard" ? "WireGuard" : "VPN" }
@@ -246,14 +254,14 @@ Item {
                 onClicked: requestEnableToggle()
                 contentItem: Text {
                     text: parent.text
-                    color: parent.enabled ? (vpnEnabled ? c.text : "#001412") : c.sub
+                    color: parent.enabled ? (vpnEnabled ? c.text : c.accentText) : c.sub
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     font.bold: true
                 }
                 background: Rectangle {
                     radius: 10
-                    color: !enableVpnButton.enabled ? c.field : vpnEnabled ? "#1d2a38" : c.accent
+                    color: !enableVpnButton.enabled ? c.field : vpnEnabled ? c.card : c.accent
                     border.color: !enableVpnButton.enabled ? c.border : vpnEnabled ? c.warning : c.accent
                 }
             }
@@ -276,7 +284,7 @@ Item {
                 }
                 background: Rectangle {
                     radius: 10
-                    color: refreshButton.pressed ? "#17283b" : c.field
+                    color: refreshButton.pressed ? c.selection : c.field
                     border.color: c.border
                 }
             }
@@ -293,7 +301,7 @@ Item {
                 onClicked: connectSelectedProfile()
                 contentItem: Text {
                     text: parent.text
-                    color: parent.enabled ? "#001412" : c.sub
+                    color: parent.enabled ? c.accentText : c.sub
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     font.bold: true
@@ -323,7 +331,7 @@ Item {
                 }
                 background: Rectangle {
                     radius: 10
-                    color: disconnectButton.enabled ? "#7f1d1d" : c.field
+                    color: disconnectButton.enabled ? c.dangerFill : c.field
                     border.color: disconnectButton.enabled ? c.danger : c.border
                 }
             }
@@ -345,10 +353,10 @@ Item {
                     border.color:String(modelData.uuid||"")===root.selectedUuid?c.info:(modelData.active?c.accent:c.border)
                     border.width:String(modelData.uuid||"")===root.selectedUuid||modelData.active?2:1
                     MouseArea { anchors.fill:parent; onClicked:root.selectProfile(modelData) }
-                    Rectangle { x:18; y:25; width:12; height:12; radius:6; color:modelData.active?c.accent:"#64748b" }
+                    Rectangle { x:18; y:25; width:12; height:12; radius:6; color:modelData.active?c.accent:c.muted }
                     Text { x:44; y:13; width:parent.width-300; text:modelData.name||"Unnamed VPN"; color:c.text; font.pixelSize:18; font.bold:true; elide:Text.ElideRight }
                     Text { x:44; y:42; width:parent.width-300; text:normalizedType(modelData.type)+(modelData.device?" · "+modelData.device:"")+(modelData.ipv4?" · "+modelData.ipv4:""); color:c.sub; font.pixelSize:13; elide:Text.ElideRight }
-                    Text { x:44; y:67; width:parent.width-300; text:(modelData.active?"CONNECTED":"AVAILABLE")+" · UUID "+String(modelData.uuid||""); color:modelData.active?c.accent:"#68798c"; font.pixelSize:10; font.bold:modelData.active; elide:Text.ElideMiddle }
+                    Text { x:44; y:67; width:parent.width-300; text:(modelData.active?"CONNECTED":"AVAILABLE")+" · UUID "+String(modelData.uuid||""); color:modelData.active?c.accent:c.sub; font.pixelSize:10; font.bold:modelData.active; elide:Text.ElideMiddle }
                     Button {
                         id: selectButton
                         width: 150

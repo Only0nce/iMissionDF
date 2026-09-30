@@ -10,8 +10,13 @@ import Receiver 1.0
 import WebSocketClient 1.0
 import QtQuick.Layouts 1.0
 import App1 1.0
+import "ui"
 Item {
     id: homeDisplay
+    // Explicit theme contract from MainPage. This avoids relying on attached
+    // Material inheritance across StackView boundaries on Qt 5.15/EGLFS.
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: homeDisplay.darkMode }
     // This item is owned by MainPage's StackView. Do not anchor the page root:
     // StackView controls x/y/width/height during push/pop transitions.
     // Root anchors would fight that geometry and produce:
@@ -666,10 +671,8 @@ Item {
         }
 
 
-        // homeDisplay.width = screenrotation == 270 ? 1280 : 1920
-        // homeDisplay.height = screenrotation == 270 ? 400 : 1080
-        homeDisplay.width = 1920
-        homeDisplay.height = 1080
+        // MainPage/StackView owns page geometry.  Do not force 1920x1080 here:
+        // doing so breaks resizing after the HMI shell reserves the navigation rail.
     }
 
 
@@ -884,7 +887,7 @@ Item {
         anchors.top: parent.top
         anchors.topMargin: 60
         height: parent.height - 60
-        color: "#23404d"
+        color: hmiTheme.page
         // anchors.fill: parent
         StackView
         {
@@ -899,6 +902,7 @@ Item {
             initialItem: RadioScanner {
                 id: radioScanner
                 objectName: "radioScanner"
+                darkMode: homeDisplay.darkMode
 
                 // FFT/Spectrum/Waterfall run only when both navigation levels
                 // actually show the RadioScanner page. Audio is independent.
@@ -953,8 +957,8 @@ Item {
 
         background: Rectangle {
             radius: 18
-            color: "#0E1520"
-            border.color: "#1C2A3D"
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
@@ -969,7 +973,7 @@ Item {
                 // ===== Title =====
                 Text {
                     text: clearPresetActionDialog.titleText
-                    color: "#FFFFFF"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                 }
@@ -977,7 +981,7 @@ Item {
                 // ===== Message =====
                 Text {
                     text: clearPresetActionDialog.messageText
-                    color: "#BFD0E6"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 24
                     wrapMode: Text.WordWrap
                 }
@@ -998,14 +1002,14 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: "transparent"
-                            border.color: "#3B4B63"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "CANCEL"
-                            color: "#F2F6FF"
+                            color: hmiTheme.text
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -1027,7 +1031,7 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: "transparent"
-                            border.color: "#3B4B63"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -1165,11 +1169,11 @@ Item {
         y: (parent.height - height) / 2
         modal: false
         standardButtons: Dialog.Cancel
-        Material.background: "#202633"
+        Material.background: hmiTheme.panel
         background:
         Rectangle {
         id: rectangle
-            color: "#2C384A"
+            color: hmiTheme.panel
             radius: 15
         }
         // signal shutdownRequested()
@@ -1291,13 +1295,13 @@ Item {
         x: 263
         width: inputKey.inputPanel.width
         height: 33
-        color: "#000000"
+        color: hmiTheme.input
         radius: 0
         visible: Qt.inputMethod.visible && screenrotation == 270
         Text {
             id: previewText
             anchors.fill: parent
-            color: "white"
+            color: hmiTheme.text
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignBottom
             text: Qt.inputMethod.visible &&
@@ -1319,7 +1323,7 @@ Item {
         clip: false
         dragMargin: 0
         edge: Qt.LeftEdge
-        Material.background:  "#000000"
+        Material.background: hmiTheme.panel
         TextDialog {
             rotation: screenrotation
             id: errorDialogText

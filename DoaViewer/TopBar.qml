@@ -1,29 +1,30 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../ui"
 
-Rectangle {
+HmiPanel {
     id: root
-    radius: 12
-    color: "#071025"
-    border.color: "#20304A"
-    border.width: 1
-    height: 240
-    width: 1920
+    Theme { id: theme; darkMode: root.darkMode }
+    height: 334
+    width: parent ? parent.width : 1920
     property int rowH: 44
     property int pad: 10
+    property int channelCardWidth: 176
+    property int channelCardMinWidth: 156
     property int displayChannel: 1
     property bool rxSourceAvailable: false
     property bool fftEnabled: false
+    property int ncoUpdateEnDisplay: root.dc() ? Number(root.dc().ncoUpdateEn) : 31
     signal displayChannelRequested(int channel)
     signal fftEnabledRequested(bool enabled)
 
-    // Target dB ใช้ตัวเดียวสำหรับ CH0..CH4
+    // Channel row uses logical CH1=Home/RX plus DF physical indexes CH0..CH4 shown as CH2..CH6
     property real rfAgcTargetAllDb: -75.0
     // optional target (FftPlot) for controlling Y-axis scale
     property var fftPlotTarget: null
 
-    implicitHeight: (rowH * 3) + (pad * 2) + 8
+    implicitHeight: 334
 
     // ---- SAFE ACCESS: doaClient is contextProperty, may be undefined/null early ----
     function dc() {
@@ -45,7 +46,7 @@ Rectangle {
     // ================= RF ATT AGC (per-channel) =================
     property bool rfAgcAvailable: false
     property bool rfAgcEnabledGlobal: true
-    property var rfAgcChEnabled: [true,true,true,true,true]   // CH0..CH4
+    property var rfAgcChEnabled: [true,true,true,true,true]   // backend DF CH0..CH4 => UI CH2..CH6
     property var rfAgcTargetDb:  [-55,-55,-55,-55,-55]
     property var rfAgcAttDb:     [0,0,0,0,0]
     property var rfAgcErrDb:     [0,0,0,0,0]
@@ -57,6 +58,26 @@ Rectangle {
     property real scannerAttDb: 0.0   // ATT #7 manual (scanner)
 
     function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+    // UI logical channel mapping:
+    // CH1 = shared Home/RX FFT source.
+    // CH2..CH6 = DF physical ADC channels 0..4 shown in the RF AGC cards below.
+    function dfIndexToLogicalChannel(idx) {
+        return Number(idx) + 2
+    }
+
+    function logicalChannelLabel(logicalChannel) {
+        return "CH" + Number(logicalChannel)
+    }
+
+    function sendDisplayChannelFromDfIndex(idx) {
+        var ch = dfIndexToLogicalChannel(idx)
+        root.displayChannelRequested(ch)
+    }
+
+    function sendDisplayChannelHomeRx() {
+        root.displayChannelRequested(1)
+    }
 
     function sendRfAgcEnable(ch, enable) {
         var c = dc()
@@ -280,15 +301,19 @@ Rectangle {
         spacing: 8
 
         // ===================== Row 1 =====================
-        RowLayout {
-            Layout.preferredHeight: 60
+        HmiHorizontalScroll {
+            // Row-1 controls have a 64 px preferred height. Keep the viewport
+            // equally tall so the ComboBox / DOA / FFT panels are not clipped.
+            Layout.preferredHeight: 64
             Layout.fillWidth: true
             spacing: 10
 
-            Button {
+            HmiButton {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH
-                Layout.preferredWidth: 120
-                text: (root.dc() && root.dc().connected) ? "Disconnect" : "Connect"
+                Layout.preferredWidth: 110
+                tone: (root.dc() && root.dc().connected) ? "normal" : "primary"
+                text: (root.dc() && root.dc().connected) ? "DISCONNECT" : "CONNECT"
                 onClicked: {
                     var c = root.dc()
                     if (!c) return
@@ -296,9 +321,10 @@ Rectangle {
                 }
             }
 
-            TextField {
+            HmiTextField {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH
-                Layout.preferredWidth: 180
+                Layout.preferredWidth: 150
                 text: root.dc() ? root.dc().host : ""
                 placeholderText: "IP"
                 onEditingFinished: {
@@ -308,9 +334,10 @@ Rectangle {
                 }
             }
 
-            TextField {
+            HmiTextField {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH
-                Layout.preferredWidth: 90
+                Layout.preferredWidth: 80
                 inputMethodHints: Qt.ImhDigitsOnly
                 text: root.dc() ? String(root.dc().port) : "5555"
                 placeholderText: "Port"
@@ -321,10 +348,12 @@ Rectangle {
                 }
             }
 
-            Button {
+            HmiButton {
+                darkMode: root.darkMode
+                compact: true
                 Layout.preferredHeight: root.rowH
-                Layout.preferredWidth: 90
-                text: "State"
+                Layout.preferredWidth: 76
+                text: "STATE"
                 enabled: root.dc() ? root.dc().connected : false
                 onClicked: {
                     var c = root.dc()
@@ -333,16 +362,13 @@ Rectangle {
                 }
             }
 
-            Rectangle { width: 1; Layout.fillHeight: true; color: "#223049"; opacity: 0.7 }
+            Rectangle { width: 1; Layout.fillHeight: true; color: theme.line; opacity: 0.8 }
 
             // ===== Algorithm selector (3 modes) =====
-            Rectangle {
+            HmiPanel {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH + 20
-                Layout.preferredWidth: 300
-                radius: 10
-                color: "#0B1220"
-                border.color: "#223049"
-                border.width: 1
+                Layout.preferredWidth: 280
 
                 RowLayout {
                     anchors.fill: parent
@@ -351,14 +377,16 @@ Rectangle {
 
                     Text {
                         text: "DOA Algo"
-                        color: "#E5E7EB"
-                        font.pixelSize: 13
+                        color: theme.text
+                        font.pixelSize: 12
+                        font.bold: true
                         Layout.preferredWidth: 70
                         elide: Text.ElideRight
                     }
 
-                    ComboBox {
+                    HmiComboBox {
                         id: algoCombo
+                        darkMode: root.darkMode
                         Layout.fillWidth: true
                         enabled: root.dc() ? root.dc().connected : false
                         model: [
@@ -410,13 +438,15 @@ Rectangle {
             }
 
             DoaControlPanel {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH + 20
-                Layout.preferredWidth: 240
+                Layout.preferredWidth: 196
             }
 
             FftControlPanel {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH + 20
-                Layout.preferredWidth: 340
+                Layout.preferredWidth: 328
                 displayChannel: root.displayChannel
                 rxSourceAvailable: root.rxSourceAvailable
                 fftEnabled: root.fftEnabled
@@ -424,9 +454,11 @@ Rectangle {
                 onFftEnabledRequested: root.fftEnabledRequested(enabled)
             }
 
-            Button {
+            HmiButton {
+                darkMode: root.darkMode
+                compact: true
                 Layout.preferredHeight: root.rowH + 20
-                Layout.preferredWidth: 90
+                Layout.preferredWidth: 76
                 text: "FFT Y"
                 enabled: (root.fftPlotTarget !== null)
                 onClicked: fftYPopup.open()
@@ -434,31 +466,33 @@ Rectangle {
 
             Item { Layout.fillWidth: true }
 
-            Text {
-                Layout.preferredWidth: 320
-                horizontalAlignment: Text.AlignRight
+            HmiStatusPill {
+                darkMode: root.darkMode
+                compact: true
+                Layout.preferredWidth: 210
+                Layout.maximumWidth: 230
                 text: {
                     var c = root.dc()
-                    if (!c) return ""
-                    return c.statusText + " | " + c.doaAlgo
+                    if (!c) return "NO CLIENT"
+                    return c.connected ? ("CONNECTED · " + c.doaAlgo) : "DISCONNECTED"
                 }
-                color: (root.dc() && root.dc().connected) ? "#22c55e" : "#f87171"
-                font.pixelSize: 12
-                elide: Text.ElideRight
+                tone: (root.dc() && root.dc().connected) ? "good" : "danger"
             }
         }
 
         // ===================== Row 2: Frequency + Array =====================
-        RowLayout {
+        HmiHorizontalScroll {
             Layout.preferredHeight: 60
             Layout.fillWidth: true
             spacing: 8
 
-            Text { text: "RF (MHz)"; color: "#cccccc" }
+            Text { text: "RF CENTER"; color: theme.textSecondary; font.pixelSize: 11; font.bold: true }
 
             // ===== RF input: UI MHz, backend Hz =====
-            TextField {
+            HmiTextField {
                 id: freqField
+                darkMode: root.darkMode
+                emphasized: true
                 Layout.preferredWidth: 200
 
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
@@ -497,28 +531,35 @@ Rectangle {
                 }
             }
 
-            Text { text: "update_en"; color: "#cccccc" }
+            Text { text: "UPDATE EN"; color: theme.muted; font.pixelSize: 10; font.bold: true }
 
-            SpinBox {
+            // Read-only backend update-enable value. A disabled SpinBox looked like
+            // "- 31 +" and visually collided with the surrounding labels in dark mode.
+            // Keep the exact backend state but present it as a compact metric instead.
+            HmiMetricChip {
                 id: updateEnSpin
-                from: 0
-                to: 63
-                value: root.dc() ? root.dc().ncoUpdateEn : 31
-                editable: false
-                enabled: false
-                Layout.preferredWidth: 110
+                darkMode: root.darkMode
+                compact: true
+                label: "EN"
+                value: String(root.ncoUpdateEnDisplay)
+                tone: "neutral"
+                Layout.preferredWidth: 66
+
                 Connections {
                     target: root.dc()
                     function onNcoUpdateEnChanged() {
                         var c = root.dc()
                         if (!c) return
-                        updateEnSpin.value = c.ncoUpdateEn
+                        root.ncoUpdateEnDisplay = Number(c.ncoUpdateEn)
                     }
                 }
             }
 
-            Button {
-                text: "Set NCO"
+            HmiButton {
+                darkMode: root.darkMode
+                compact: true
+                tone: "primary"
+                text: "SET NCO"
                 enabled: root.dc() ? root.dc().connected : false
                 onClicked: {
                     var c = root.dc()
@@ -528,17 +569,19 @@ Rectangle {
                     var fHz = root.rfTextToHz(freqField.text)
                     if (isNaN(fHz) || fHz <= 0) return
 
-                    // c.setFrequencyHz(fHz, updateEnSpin.value, true)
+                    // Production baseline intentionally sends the validated update_en=31.
                     c.setFrequencyHz(fHz, 31, true)
                 }
             }
 
-            Rectangle { width: 1; Layout.fillHeight: true; color: "#223049"; opacity: 0.7 }
+            Rectangle { width: 1; Layout.fillHeight: true; color: theme.line; opacity: 0.8 }
 
-            Text { text: "Radius (m)"; color: "#cccccc" }
+            Text { text: "ARRAY RADIUS"; color: theme.textSecondary; font.pixelSize: 11; font.bold: true }
 
-            TextField {
+            HmiTextField {
                 id: radiusField
+                darkMode: root.darkMode
+                compact: true
                 Layout.preferredWidth: 90
                 inputMethodHints: Qt.ImhFormattedNumbersOnly
                 text: {
@@ -549,7 +592,7 @@ Rectangle {
                 placeholderText: "0.80"
             }
 
-            Text { text: "N"; color: "#cccccc" }
+            Text { text: "ANT N"; color: theme.muted; font.pixelSize: 10; font.bold: true }
 
             SpinBox {
                 id: numAntSpin
@@ -564,8 +607,10 @@ Rectangle {
                 Layout.preferredWidth: 100
             }
 
-            Button {
-                text: "Apply Array"
+            HmiButton {
+                darkMode: root.darkMode
+                compact: true
+                text: "APPLY ARRAY"
                 enabled: root.dc() ? root.dc().connected : false
                 onClicked: {
                     var c = root.dc()
@@ -585,31 +630,28 @@ Rectangle {
                     if (!c) return "Current: --"
                     return "Current: " + (c.fcHz/1e6).toFixed(6) + " MHz (" + c.fcHz.toFixed(0) + " Hz)"
                 }
-                color: "#6fbf73"
+                color: theme.success
                 font.bold: true
             }
         }
 
         // ===================== Row 2 (Tx Hz) =====================
-        RowLayout {
+        HmiHorizontalScroll {
             Layout.preferredHeight: 60
             Layout.fillWidth: true
             spacing: 10
 
-            Rectangle {
+            HmiPanel {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH
                 Layout.preferredWidth: 360
-                radius: 10
-                color: "#0B1220"
-                border.color: "#223049"
-                border.width: 1
 
                 RowLayout {
                     anchors.fill: parent
                     anchors.margins: 8
                     spacing: 10
 
-                    Text { text: "Tx Hz"; color: "#E5E7EB"; font.pixelSize: 13; Layout.preferredWidth: 50 }
+                    Text { text: "TX RATE"; color: theme.text; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 60 }
 
                     Slider {
                         id: txSlider
@@ -639,34 +681,36 @@ Rectangle {
                         Layout.preferredWidth: 80
                         horizontalAlignment: Text.AlignRight
                         text: (root.dc() ? root.dc().txHz.toFixed(1) : "10.0") + " Hz"
-                        color: "#93c5fd"
-                        font.pixelSize: 13
+                        color: theme.info
+                        font.pixelSize: 12
                     }
                 }
             }
 
             DoaTonePanel {
+                darkMode: root.darkMode
                 Layout.preferredHeight: root.rowH
                 Layout.fillWidth: true
             }
         }
 
         // ===================== RF AGC cards =====================
-        RowLayout {
-            Layout.preferredHeight: 90
+        HmiHorizontalScroll {
+            Layout.preferredHeight: 104
             Layout.fillWidth: true
             spacing: 2
 
             Text {
                 text: "RF AGC"
-                color: "#E5E7EB"
-                font.pixelSize: 13
+                color: theme.text
+                font.pixelSize: 12
+                font.bold: true
                 Layout.preferredWidth: 70
             }
 
             Text {
                 text: root.rfAgcAvailable ? "available" : "n/a"
-                color: root.rfAgcAvailable ? "#22c55e" : "#f87171"
+                color: root.rfAgcAvailable ? theme.success : theme.danger
                 font.pixelSize: 12
                 Layout.preferredWidth: 80
             }
@@ -679,13 +723,11 @@ Rectangle {
             }
 
             // ----- Scanner Attenuator (ATT #7) -----
-            Rectangle {
-                radius: 8
-                color: "#0B1220"
-                border.color: "#223049"
-                border.width: 1
-                Layout.preferredWidth: 210
-                Layout.preferredHeight: 75
+            HmiPanel {
+                darkMode: root.darkMode
+                Layout.preferredWidth: 170
+                Layout.minimumWidth: 152
+                Layout.preferredHeight: 88
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -693,8 +735,8 @@ Rectangle {
                     spacing: 4
 
                     Text {
-                        text: "Scanner ATT #7"
-                        color: "#E5E7EB"
+                        text: "SCANNER ATT #7"
+                        color: theme.text
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignHCenter
                     }
@@ -718,29 +760,19 @@ Rectangle {
                             onPressedChanged: if (!pressed) root.sendScannerAttDb(value)
                         }
 
-                        TextField {
+                        HmiTextField {
                             id: scannerAttField
+                            darkMode: root.darkMode
+                            compact: true
                             Layout.preferredWidth: 58
                             Layout.alignment: Qt.AlignVCenter
                             Layout.preferredHeight: 28
 
                             text: Number(root.scannerAttDb).toFixed(2)
                             inputMethodHints: Qt.ImhFormattedNumbersOnly
-                            color: "#E5E7EB"
                             horizontalAlignment: Text.AlignRight
                             verticalAlignment: Text.AlignVCenter
-                            leftPadding: 8
-                            rightPadding: 8
-                            topPadding: 0
-                            bottomPadding: 0
                             clip: true
-
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111A24"
-                                border.color: "#223049"
-                                border.width: 1
-                            }
 
                             onEditingFinished: root.sendScannerAttDb(text)
                         }
@@ -748,13 +780,11 @@ Rectangle {
                 }
             }
 
-            Rectangle {
-                radius: 8
-                color: "#071025"
-                border.color: "#20304A"
-                border.width: 1
-                Layout.preferredWidth: 200
-                Layout.preferredHeight: 75
+            HmiPanel {
+                darkMode: root.darkMode
+                Layout.preferredWidth: 180
+                Layout.minimumWidth: 160
+                Layout.preferredHeight: 88
 
                 ColumnLayout {
                     anchors.fill: parent
@@ -762,8 +792,8 @@ Rectangle {
                     spacing: 4
 
                     Text {
-                        text: "Target (DF CH1..CH5)"
-                        color: "#CBD5E1"
+                        text: "DF TARGET · CH2..CH6"
+                        color: theme.textSecondary
                         font.pixelSize: 12
                         Layout.alignment: Qt.AlignHCenter
                     }
@@ -791,7 +821,7 @@ Rectangle {
 
                         Text {
                             text: Number(root.rfAgcTargetAllDb).toFixed(1) + " dB"
-                            color: "#93c5fd"
+                            color: theme.info
                             font.pixelSize: 11
                             Layout.preferredWidth: 60
                             horizontalAlignment: Text.AlignRight
@@ -800,77 +830,183 @@ Rectangle {
                 }
             }
 
-            Repeater {
-                Layout.fillHeight: true
-                model: 5
-                delegate: Rectangle {
-                    Layout.preferredHeight: 75
-                    Layout.preferredWidth: 240
-                    radius: 8
-                    color: "#071025"
-                    border.color: "#20304A"
-                    border.width: 1
+            HmiPanel {
+                id: rxChannelCard
+                darkMode: root.darkMode
+                Layout.preferredHeight: 88
+                Layout.preferredWidth: root.channelCardWidth
+                Layout.minimumWidth: root.channelCardMinWidth
+                clip: true
+
+                readonly property int logicalChannel: 1
+                readonly property bool selectedForFft: root.displayChannel === logicalChannel
+                readonly property bool hovered: rxCardMouse.containsMouse
+
+                color: selectedForFft
+                       ? (root.darkMode ? "#123F3B" : "#E8F8F5")
+                       : (hovered ? theme.cardAlt : theme.panel)
+                border.width: selectedForFft ? 2 : 1
+                border.color: selectedForFft ? theme.accent : (hovered ? theme.lineStrong : theme.line)
+
+                MouseArea {
+                    id: rxCardMouse
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.sendDisplayChannelHomeRx()
+                }
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    spacing: 2
 
                     RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 6
+
+                        Text {
+                            text: root.logicalChannelLabel(rxChannelCard.logicalChannel)
+                            color: rxChannelCard.selectedForFft ? theme.accent : theme.text
+                            font.pixelSize: 12
+                            font.bold: true
+                            Layout.preferredWidth: 30
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            horizontalAlignment: Text.AlignRight
+                            text: Number(root.dc() ? root.dc().bandPeakDb : -200).toFixed(1) + " dB"
+                            color: rxChannelCard.selectedForFft ? theme.accent : theme.info
+                            font.pixelSize: 12
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.rxSourceAvailable ? "HOME / RX FFT" : "HOME / RX WAIT"
+                        color: theme.textSecondary
+                        font.pixelSize: 10
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: {
+                            var c = root.dc()
+                            if (!c) return "Band --   Th --"
+                            return "Band " + Number(c.bandPeakDb).toFixed(1)
+                                   + "   Th " + Number(c.gateThDb).toFixed(1)
+                        }
+                        color: rxChannelCard.selectedForFft ? theme.accent : theme.warn
+                        font.pixelSize: 9
+                        font.bold: true
+                        elide: Text.ElideRight
+                    }
+                }
+            }
+
+            Repeater {
+                Layout.fillHeight: true
+                // Physical DF ADC cards are 0..4, displayed as logical FFT CH2..CH6.
+                model: 5
+                delegate: HmiPanel {
+                    id: dfChannelCard
+                    darkMode: root.darkMode
+                    Layout.preferredHeight: 88
+                    Layout.preferredWidth: root.channelCardWidth
+                    Layout.minimumWidth: root.channelCardMinWidth
+                    clip: true
+
+                    readonly property int logicalChannel: root.dfIndexToLogicalChannel(index)
+                    readonly property bool selectedForFft: root.displayChannel === logicalChannel
+                    readonly property bool hovered: dfCardMouse.containsMouse
+
+                    color: selectedForFft
+                           ? (root.darkMode ? "#123F3B" : "#E8F8F5")
+                           : (hovered ? theme.cardAlt : theme.panel)
+                    border.width: selectedForFft ? 2 : 1
+                    border.color: selectedForFft ? theme.accent : (hovered ? theme.lineStrong : theme.line)
+
+                    MouseArea {
+                        id: dfCardMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.sendDisplayChannelFromDfIndex(index)
+                    }
+
+                    ColumnLayout {
                         anchors.fill: parent
                         anchors.margins: 8
                         spacing: 2
 
-                        Text {
-                            text: "CH" + (index + 1)   // UI: CH1..CH5 (backend still uses index 0..4)
-                            color: "#CBD5E1"
-                            font.pixelSize: 13
-                            Layout.preferredWidth: 32
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 6
+
+                            Text {
+                                text: root.logicalChannelLabel(dfChannelCard.logicalChannel)   // UI: CH2..CH6, backend index remains 0..4
+                                color: dfChannelCard.selectedForFft ? theme.accent : theme.text
+                                font.pixelSize: 12
+                                font.bold: true
+                                Layout.preferredWidth: 32
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                horizontalAlignment: Text.AlignRight
+                                text: Number(root.rfAgcPeakDb[index]).toFixed(1) + " dB"
+                                color: dfChannelCard.selectedForFft ? theme.accent : theme.info
+                                font.pixelSize: 12
+                                font.bold: true
+                                elide: Text.ElideRight
+                            }
                         }
 
+                        Text {
+                            Layout.fillWidth: true
+                            text: "ATT " + Number(root.rfAgcAttDb[index]).toFixed(1)
+                                  + "   TARGET " + Number(root.rfAgcTargetAllDb).toFixed(1) + " dB"
+                            color: theme.textSecondary
+                            font.pixelSize: 9
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: {
+                                var c = root.dc()
+                                if (!c || !c.phaseDebug) return "φ --   C --   RMS --"
+
+                                var pd = c.phaseDebug
+                                var ph = (pd.phase_deg && pd.phase_deg.length > index)
+                                            ? Number(pd.phase_deg[index]) : 0
+                                var co = (pd.coh && pd.coh.length > index)
+                                            ? Number(pd.coh[index]) : 0
+                                var rm = (pd.rms_dbfs && pd.rms_dbfs.length > index)
+                                            ? Number(pd.rms_dbfs[index]) : 0
+
+                                return "φ " + ph.toFixed(2) + "°   C " + co.toFixed(3)
+                                     + "   RMS " + rm.toFixed(1)
+                            }
+                            color: theme.warning
+                            font.pixelSize: 9
+                            elide: Text.ElideRight
+                        }
+
+                        // Preserve the per-channel enable control contract. It remains
+                        // hidden because the current product UX uses the global RF AGC
+                        // switch, exactly as before this visual cleanup.
                         Switch {
                             visible: false
                             checked: !!root.rfAgcChEnabled[index]
                             enabled: rfAgcGlobalSwitch.checked && (root.dc() ? root.dc().connected : false)
                             onToggled: root.sendRfAgcEnable(index, checked) // backend: 0..4
-                        }
-
-                        Column {
-                            Layout.fillWidth: true
-                            spacing: 2
-
-                            Text {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignRight
-                                text: {
-                                    var pk = Number(root.rfAgcPeakDb[index]).toFixed(1)
-                                    var at = Number(root.rfAgcAttDb[index]).toFixed(1)
-                                    var tg = Number(root.rfAgcTargetAllDb).toFixed(1)
-                                    return pk + " dB | ATT " + at + " | T " + tg
-                                }
-                                color: "#93c5fd"
-                                font.pixelSize: 12
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                horizontalAlignment: Text.AlignRight
-                                text: {
-                                    var c = root.dc()
-                                    if (!c || !c.phaseDebug) return ""
-
-                                    var pd = c.phaseDebug
-                                    var ph = (pd.phase_deg && pd.phase_deg.length > index)
-                                                ? Number(pd.phase_deg[index]) : 0
-                                    var co = (pd.coh && pd.coh.length > index)
-                                                ? Number(pd.coh[index]) : 0
-                                    var rm = (pd.rms_dbfs && pd.rms_dbfs.length > index)
-                                                ? Number(pd.rms_dbfs[index]) : 0
-
-                                    return "φ " + ph.toFixed(2) + "°"
-                                         + " | coh " + co.toFixed(3)
-                                         + " | rms " + rm.toFixed(1) + " dBFS"
-                                }
-                                color: "#EAB308"
-                                font.pixelSize: 10
-                                elide: Text.ElideRight
-                            }
                         }
                     }
                 }
@@ -892,9 +1028,9 @@ Rectangle {
         height: 200
 
         background: Rectangle {
-            radius: 12
-            color: "#0B1220"
-            border.color: "#223049"
+            radius: theme.radiusLg
+            color: theme.panel
+            border.color: theme.lineStrong
             border.width: 1
         }
 
@@ -912,7 +1048,7 @@ Rectangle {
 
             Text {
                 text: "FFT Y-Axis"
-                color: "#E5E7EB"
+                color: theme.text
                 font.pixelSize: 14
                 font.bold: true
             }
@@ -921,7 +1057,7 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Text { text: "Auto"; color: "#94A3B8"; Layout.preferredWidth: 60 }
+                Text { text: "Auto"; color: theme.textSecondary; Layout.preferredWidth: 60 }
                 Switch {
                     id: autoSwitch
                     checked: true
@@ -937,9 +1073,10 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Text { text: "Min dB"; color: "#94A3B8"; Layout.preferredWidth: 60 }
-                TextField {
+                Text { text: "Min dB"; color: theme.textSecondary; Layout.preferredWidth: 60 }
+                HmiTextField {
                     id: minField
+                    darkMode: root.darkMode
                     Layout.fillWidth: true
                     enabled: !autoSwitch.checked
                     placeholderText: "e.g. -95"
@@ -951,9 +1088,10 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Text { text: "Max dB"; color: "#94A3B8"; Layout.preferredWidth: 60 }
-                TextField {
+                Text { text: "Max dB"; color: theme.textSecondary; Layout.preferredWidth: 60 }
+                HmiTextField {
                     id: maxField
+                    darkMode: root.darkMode
                     Layout.fillWidth: true
                     enabled: !autoSwitch.checked
                     placeholderText: "e.g. -10"
@@ -965,8 +1103,10 @@ Rectangle {
                 Layout.fillWidth: true
                 spacing: 8
 
-                Button {
-                    text: "Apply"
+                HmiButton {
+                    darkMode: root.darkMode
+                    tone: "primary"
+                    text: "APPLY"
                     enabled: !autoSwitch.checked && (root.fftPlotTarget !== null)
                     onClicked: {
                         if (!root.fftPlotTarget) return
@@ -980,8 +1120,9 @@ Rectangle {
                     }
                 }
 
-                Button {
-                    text: "Close"
+                HmiButton {
+                    darkMode: root.darkMode
+                    text: "CLOSE"
                     onClicked: fftYPopup.close()
                 }
 

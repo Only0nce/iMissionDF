@@ -3,6 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "pages"
+import "../../ui"
 Drawer {
     id: topDrawer
     edge: Qt.TopEdge
@@ -78,7 +79,7 @@ Drawer {
         RowLayout {
             spacing: 10
             Label { text: "DHCP"; color: "#cccccc"; font.pixelSize: 16; Layout.preferredWidth: 100 }
-            ComboBox {
+            HmiComboBox {
                 id: ipModeCombo
                 Layout.preferredWidth: 200
                 model: ["Automatic", "Static"]

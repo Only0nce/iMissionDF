@@ -1,9 +1,14 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
+import QtQuick.Controls.Material 2.12
 import QtQuick.Layouts 1.12
+import "ui"
 
 Popup {
     id: root
+
+    property bool darkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: root.darkMode }
 
     modal: true
     focus: true
@@ -14,13 +19,13 @@ Popup {
     x: parent ? Math.max(10, (parent.width - width) / 2) : 10
     y: parent ? Math.max(10, (parent.height - height) / 3) : 10
 
-    property color backgroundColor: "#101a26"
-    property color cardColor: "#132235"
-    property color borderColor: "#2d4056"
-    property color textColor: "#e9f0f7"
-    property color subTextColor: "#9aa8b8"
-    property color accentColor: "#00c9a7"
-    property color viewerColor: "#2f80ed"
+    property color backgroundColor: hmiTheme.panel
+    property color cardColor: hmiTheme.cardAlt
+    property color borderColor: hmiTheme.lineStrong
+    property color textColor: hmiTheme.text
+    property color subTextColor: hmiTheme.textSecondary
+    property color accentColor: hmiTheme.accent
+    property color viewerColor: hmiTheme.info
 
     signal viewerSelected()
     signal adminSelected()
@@ -97,7 +102,7 @@ Popup {
                             Layout.fillWidth: true
                         }
                         Item { Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 6 }
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Qt.rgba(1, 1, 1, 0.08) }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.08) }
                         Text { text: "Continue without administrator password"; color: root.viewerColor; font.pixelSize: 13; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
@@ -136,7 +141,7 @@ Popup {
                             Layout.fillWidth: true
                         }
                         Item { Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 6 }
-                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: Qt.rgba(1, 1, 1, 0.08) }
+                        Rectangle { Layout.fillWidth: true; Layout.preferredHeight: 1; color: root.darkMode ? Qt.rgba(1, 1, 1, 0.08) : Qt.rgba(0, 0, 0, 0.08) }
                         Text { text: "Administrator password required"; color: root.accentColor; font.pixelSize: 13; font.bold: true; wrapMode: Text.WordWrap; Layout.fillWidth: true }
                     }
                 }
@@ -151,7 +156,7 @@ Popup {
             Layout.preferredHeight: 42
             scale: pressed ? 0.96 : 1.0
             Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
-            background: Rectangle { radius: 10; color: cancelButton.pressed ? "#26384b" : "#1a2a3b"; border.color: root.borderColor }
+            background: Rectangle { radius: 10; color: cancelButton.pressed ? hmiTheme.cardAlt : hmiTheme.input; border.color: root.borderColor }
             contentItem: Text { text: cancelButton.text; color: root.textColor; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true }
             onClicked: { root.close(); root.cancelled() }
         }

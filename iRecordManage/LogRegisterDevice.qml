@@ -130,7 +130,7 @@ Item {
                         id: registerDviceList
                         anchors.fill: parent
                         clip: true
-                        model: listoFDevice     // ← ใช้ตรง ๆ ตามที่สั่ง
+                        model: logregisterDevice.visible ? listoFDevice : null
                         focus: false
 
                         // ---------- helpers ----------

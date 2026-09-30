@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
+import "../ui"
 
 Drawer {
     id: settingsDrawer
@@ -44,7 +45,7 @@ Drawer {
                 inputMethodHints: Qt.ImhDigitsOnly
             }
 
-            ComboBox {
+            HmiComboBox {
                 Layout.fillWidth: true
                 model: ["Option 1", "Option 2", "Option 3"]
             }

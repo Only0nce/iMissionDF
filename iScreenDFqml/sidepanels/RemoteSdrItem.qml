@@ -1,6 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
+import QtGraphicalEffects 1.12
+import "../../ui"
 
 Rectangle {
     id: remotedevicelist
@@ -11,6 +13,27 @@ Rectangle {
     property int    deviceRssi: 0
     property int    rowIndex: 0
     property bool   isCurrent: false    // รับจาก ListView.isCurrentItem
+    property bool   darkMode: true
+    property bool   hovered: false
+    property var    krakenmapval: null
+    Theme { id: hmiTheme; darkMode: remotedevicelist.darkMode }
+
+    readonly property color rowBg:        isCurrent ? hmiTheme.remoteRowActive : hmiTheme.remoteRow
+    readonly property color rowHoverBg:   hmiTheme.remoteRowHover
+    readonly property color rowBorder:    isCurrent ? hmiTheme.remoteRowBorderActive : hmiTheme.remoteRowBorder
+    readonly property color rowText:      hmiTheme.text
+    readonly property color rowSubText:   hmiTheme.textSecondary
+    readonly property color statusColor:  String(deviceStatus).toLowerCase() === "online" ? hmiTheme.success : hmiTheme.muted
+    readonly property string detailText: {
+        var ip = String(deviceIp || "").trim()
+        var status = String(deviceStatus || "").trim()
+        var portText = (devicePort > 0) ? (":" + devicePort) : ""
+        var left = ip.length > 0 ? (ip + portText) : ""
+        if (left.length > 0 && status.length > 0)
+            return left + "  ·  " + status
+        return left.length > 0 ? left : status
+    }
+
     signal clicked()                    // แจ้งคลิกออกไป
 
     Component.onCompleted: {
@@ -18,15 +41,18 @@ Rectangle {
     }
 
     width: parent ? parent.width : 300
-    height: 64
-    color: "#2a2a2a"
+    height: 74
+    color: hovered ? rowHoverBg : rowBg
     radius: 8
 
-    border.color: isCurrent ? "#48ff9a" : "#2a2a2a"
+    border.color: rowBorder
     border.width: 2
 
     MouseArea {
         anchors.fill: parent
+        hoverEnabled: true
+        onEntered: remotedevicelist.hovered = true
+        onExited:  remotedevicelist.hovered = false
         onClicked: remotedevicelist.clicked()
     }
 
@@ -60,18 +86,36 @@ Rectangle {
         // }
 
         // ==== ชื่อ + สถานะ (ปล่อยกินที่ได้เต็มที่) ====
+        Rectangle {
+            width: 9
+            height: 9
+            radius: 5
+            color: remotedevicelist.statusColor
+            Layout.alignment: Qt.AlignVCenter
+            opacity: 1.0
+        }
+
         Column {
             Layout.fillWidth: true           // << สำคัญ
             Layout.alignment: Qt.AlignVCenter
-            spacing: 2
+            spacing: 3
             clip: true
 
             Text {
                 text: remotedevicelist.deviceName || "(unnamed)"
-                color: "#e6f7ec"
+                color: rowText
                 font.pixelSize: 14
                 font.bold: true
                 elide: Text.ElideRight
+            }
+
+            Text {
+                visible: remotedevicelist.detailText.length > 0
+                text: remotedevicelist.detailText
+                color: rowSubText
+                font.pixelSize: 11
+                elide: Text.ElideRight
+                opacity: 0.95
             }
             // Text {
             //     color: (remotedevicelist.deviceStatus === "Online") ? "#9ae6b4" : "#ffc9c9"
@@ -85,32 +129,46 @@ Rectangle {
         Item { Layout.fillWidth: true }
 
         // ==== Settings ====
-        // Rectangle {
-        //     id: gearBtn
-        //     width: 30; height: 30; radius: 14
-        //     color: "transparent"; border.color: "#2a6a3a"
-        //     Layout.rightMargin: 10
-        //     Layout.alignment: Qt.AlignVCenter
-        //     // Text { anchors.centerIn: parent; text: "\u2699"; color: "#d9f7e4"; font.pixelSize: 16 }
-        //     Image {
-        //         id: penIcon
-        //         anchors.centerIn: parent
-        //         source: "qrc:/iScreenDFqml/images/gearicon.png"    // หรือ "images/add_icon.png"
-        //         width: 33
-        //         height: 33
-        //         fillMode: Image.PreserveAspectFit
-        //     }
-        //     MouseArea {
-        //         anchors.fill: parent
-        //         hoverEnabled: true
-        //         onEntered: gearBtn.border.color = "#4bc46d"
-        //         onExited:  gearBtn.border.color = "#2a6a3a"
-        //         onClicked: {
-        //             if (krakenmapval) krakenmapval.openPopupSetting("Setting Parameter")
-        //             console.log("settings:", root.deviceName, root.deviceIp + ":" + root.devicePort)
-        //         }
-        //     }
-        // }
+        Rectangle {
+            id: gearBtn
+            width: 30
+            height: 30
+            radius: 15
+            color: remotedevicelist.darkMode ? "#28433E" : "#F4FAF8"
+            border.width: 1
+            border.color: gearMouse.containsMouse ? hmiTheme.accentHover : hmiTheme.lineStrong
+            Layout.rightMargin: 4
+            Layout.alignment: Qt.AlignVCenter
+
+            Image {
+                id: gearBtnIconSource
+                anchors.centerIn: parent
+                source: "qrc:/iScreenDFqml/images/gearicon.png"
+                width: 18
+                height: 18
+                fillMode: Image.PreserveAspectFit
+                visible: false
+            }
+
+            ColorOverlay {
+                anchors.fill: gearBtnIconSource
+                source: gearBtnIconSource
+                color: remotedevicelist.darkMode ? "#ECF6F4" : hmiTheme.navTileText
+                cached: true
+            }
+
+            MouseArea {
+                id: gearMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: {
+                    if (typeof krakenmapval !== "undefined" && krakenmapval)
+                        krakenmapval.openPopupSetting("Setting Parameter")
+                    console.log("settings:", remotedevicelist.deviceName, remotedevicelist.deviceIp + ":" + remotedevicelist.devicePort)
+                }
+            }
+        }
 
         // ==== วงแหวนเลือกอุปกรณ์ ====
         // Rectangle {
@@ -145,6 +203,7 @@ Rectangle {
                 source: "qrc:/iScreenDFqml/images/target_ring.png"   // ไฟล์ target โปร่งใส
                 fillMode: Image.PreserveAspectFit
                 smooth: true
+                opacity: remotedevicelist.darkMode ? 1.0 : 0.82
             }
 
             MouseArea {
@@ -156,8 +215,8 @@ Rectangle {
                 }
                 onReleased: {
                     ringImage.scale = 1.0          // กลับสภาพเดิม
-                    ringImage.opacity = 1.0
-                    console.log("select:", root.deviceName)
+                    ringImage.opacity = remotedevicelist.darkMode ? 1.0 : 0.9
+                    console.log("select:", remotedevicelist.deviceName)
                 }
             }
 

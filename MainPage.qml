@@ -6,7 +6,9 @@ import QtLocation 5.6
 import QtQuick.Controls.Material 2.15
 import QtGraphicalEffects 1.12
 import QtQuick.VirtualKeyboard 2.4
+import Qt.labs.settings 1.1
 
+import "ui"
 import "iScreenDFqml/pages"
 import "iScreenDFqml/popuppanels"
 import "iScreenDFqml/sidepanels"
@@ -15,18 +17,42 @@ import "./"
 
 Item {
     id: mainPage
-    width: 1920
-    height: 1080
+    width: parent ? parent.width : 1920
+    height: parent ? parent.height : 1080
     property bool savedDaqVisible: true
     property bool savelockFadeButton: true
-    Material.theme: Material.Dark
-    Material.accent: Material.Teal
+    readonly property bool compactShell: width < hmiTheme.compactWidth
+    readonly property bool narrowShell: width < hmiTheme.narrowWidth
+
+    Settings {
+        id: shellSettings
+        category: "iScanMR10.HmiShell"
+        property bool darkTheme: true
+    }
+
+    property alias darkTheme: shellSettings.darkTheme
+    Theme { id: hmiTheme; darkMode: mainPage.darkTheme }
+
+    Material.theme: darkTheme ? Material.Dark : Material.Light
+    // Explicit Material palette keeps Controls2 popups/dialogs readable even
+    // when Qt creates their visual content under Overlay rather than the page.
+    Material.background: hmiTheme.panel
+    Material.foreground: hmiTheme.text
+    Material.primary: hmiTheme.accent
+    Material.accent: hmiTheme.accent
     property bool daqLocked: false
     property string signalStrength: "144"
     property string receiverGain: "0.9 dB"
     property bool keyfreqEdit: false
+    property string operationMode: "LOCAL"
+    // R1.7.4C: disable the old Remote Mode text overlay.
+    // On touch screens it could remain visible until the user tapped the text.
+    readonly property bool remoteModePopupEnabled: false
     signal receiverParamsUpdated(string signalStrength, string receiverGain)
     property string currentPageSource: "qrc:/HomeDisplay.qml"
+    // User requested to remove the persistent left navigation rail because
+    // SideSettingsDrawer already provides page navigation.
+    readonly property bool primaryNavigationEnabled: false
     // UX-NAV1: remove the legacy top Network Settings drawer handle.
     // Network Settings is still opened from the normal menu.
     readonly property bool topNetworkDrawerEnabled: false
@@ -54,27 +80,58 @@ Item {
 
         function onUpdateParameterModePopup(mode) {
             console.log("[mainPage] updateParameterMode =", mode)
+            mainPage.operationMode = mode
             remoteModePopup.remoteStatus = mode
 
-            if (mode === "LOCAL") {
+            // R1.7.4C: keep the internal mode/status update, but do not show
+            // the old text overlay/popup when mode changes.
+            if (remoteModePopup.visible)
+                remoteModePopup.close()
+
+            if (mainPage.remoteModePopupEnabled && mode === "LOCAL")
                 remoteModePopup.open()
-            } else {
-                if (remoteModePopup.visible)
-                    remoteModePopup.close()
-            }
         }
 
         function onRequestRemotePopup() {
-            console.log("RemoteStatus is LOCAL → showing ModePopup")
-            remoteModePopup.open()
+            console.log("RemoteStatus is LOCAL → ModePopup disabled by R1.7.4C")
+            if (remoteModePopup.visible)
+                remoteModePopup.close()
+
+            if (mainPage.remoteModePopupEnabled)
+                remoteModePopup.open()
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: hmiTheme.page
+        z: 0
+    }
+
+    Component {
+        id: homeDisplayComponent
+        HomeDisplay {
+            darkMode: mainPage.darkTheme
         }
     }
 
     StackView {
         id: loader
         anchors.fill: parent
-        initialItem: "qrc:/HomeDisplay.qml"
+        anchors.leftMargin: mainPage.primaryNavigationEnabled ? primaryNavigation.width : 0
+        initialItem: homeDisplayComponent
         z: 1
+    }
+
+    // Only the currently visible Recorder page owns its TableView/WaveEditor.
+    // Forward the optional signal without keeping a second hidden Recorder tree.
+    Connections {
+        target: loader.currentItem
+        ignoreUnknownSignals: true
+        function onWavePlayToggleRequested(wantPlay, filesArray, concatMode, playPosMs) {
+            if (typeof window !== "undefined" && window.handleRecorderWavePlayToggle)
+                window.handleRecorderWavePlayToggle(wantPlay, filesArray, concatMode, playPosMs)
+        }
     }
 
     QMLMap { id: myMap }
@@ -83,8 +140,10 @@ Item {
     Rectangle {
         id: navBar
         width: parent.width
-        height: 60
-        color: "#111212"
+        height: hmiTheme.topBarHeight
+        color: hmiTheme.topBar
+        border.color: hmiTheme.line
+        border.width: 1
         z: 1
         anchors.top: parent.top
 
@@ -248,9 +307,15 @@ Item {
                 radius: 24
                 padding: 6
 
+                property color glyphColor: mainPage.darkTheme ? hmiTheme.accentHover : hmiTheme.accent
+
                 background: Rectangle {
-                    color: "#111212"
-                    border.color: "#373640"
+                    color: mainPage.darkTheme
+                           ? (settingsButton.hovered ? hmiTheme.card : hmiTheme.cardAlt)
+                           : (settingsButton.hovered ? "#F4FBF9" : "#FFFFFF")
+                    border.color: mainPage.darkTheme
+                                  ? (settingsButton.hovered ? hmiTheme.accentHover : hmiTheme.line)
+                                  : (settingsButton.hovered ? hmiTheme.accent : "#A7C3BC")
                     border.width: settingsButton.hovered ? 2 : 1
                     radius: 24
                     anchors.fill: parent
@@ -265,9 +330,9 @@ Item {
                     Column {
                         spacing: 6
                         anchors.centerIn: parent
-                        Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
-                        Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
-                        Rectangle { width: 20; height: 3; radius: 1.5; color: "#7AE2CF" }
+                        Rectangle { width: 20; height: 3; radius: 1.5; color: settingsButton.glyphColor }
+                        Rectangle { width: 20; height: 3; radius: 1.5; color: settingsButton.glyphColor }
+                        Rectangle { width: 20; height: 3; radius: 1.5; color: settingsButton.glyphColor }
                     }
                 }
 
@@ -280,20 +345,82 @@ Item {
                 }
             }
 
+            // Reserved slot for the existing screenshot action which remains a
+            // top-level overlay so its screenshot timing/behavior is unchanged.
+            Item { Layout.preferredWidth: 48; Layout.preferredHeight: 48 }
+
+            ColumnLayout {
+                Layout.alignment: Qt.AlignVCenter
+                spacing: 0
+                visible: mainPage.width >= 1500
+
+                Label {
+                    text: "iScanMR10"
+                    color: hmiTheme.text
+                    font.pixelSize: 17
+                    font.bold: true
+                }
+
+                Label {
+                    text: "RF / DF OPERATION CONSOLE"
+                    color: hmiTheme.muted
+                    font.pixelSize: 9
+                    font.bold: true
+                    font.letterSpacing: 0.8
+                }
+            }
+
+            HmiStatusPill {
+                visible: mainPage.width >= 1500
+                darkMode: mainPage.darkTheme
+                text: mainPage.operationMode
+                tone: mainPage.operationMode === "LOCAL" ? "good" : "warn"
+                Layout.alignment: Qt.AlignVCenter
+            }
+
             Item { Layout.fillWidth: true }
+
+            ToolButton {
+                id: themeButton
+                Layout.preferredWidth: 44
+                Layout.preferredHeight: 44
+                Layout.alignment: Qt.AlignVCenter
+                hoverEnabled: true
+
+                background: Rectangle {
+                    radius: height / 2
+                    color: themeButton.hovered ? hmiTheme.card : hmiTheme.cardAlt
+                    border.width: 1
+                    border.color: mainPage.darkTheme ? hmiTheme.warning : hmiTheme.lineStrong
+                }
+
+                contentItem: Text {
+                    text: mainPage.darkTheme ? "☀" : "☾"
+                    color: mainPage.darkTheme ? hmiTheme.warning : hmiTheme.textSecondary
+                    font.pixelSize: 20
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                ToolTip.visible: hovered
+                ToolTip.text: mainPage.darkTheme ? qsTr("Light theme") : qsTr("Dark theme")
+                onClicked: mainPage.darkTheme = !mainPage.darkTheme
+            }
 
             ColumnLayout {
                 id: gpsColumn
                 Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                Layout.maximumWidth: Math.max(180, mainPage.width - (mainPage.compactShell ? 190 : 430))
                 spacing: 2
 
                 Label {
                     id: locationLabel
+                    visible: mainPage.width >= 1120
                     text:
                         "Latitude "  + Number(navBar.gpsLat).toFixed(6)  + "°N " +
                         "Longitude " + Number(navBar.gpsLong).toFixed(6) + "°E " +
                         "Altitude "  + Number(navBar.gpsAlt).toFixed(2)  + "m"
-                    color: "#169976"
+                    color: hmiTheme.accent
                     font.pixelSize: 17
                     horizontalAlignment: Text.AlignRight
                     Layout.fillWidth: true
@@ -306,9 +433,10 @@ Item {
 
                     Label {
                         id: gps_mgrs
+                        visible: mainPage.width >= 1480
                         text: "MGRS: " + navBar.formatMGRS(navBar.mgrsText) +
                               "   UTM: " + navBar.formatUTM(navBar.utmText)
-                        color: "#169976"
+                        color: hmiTheme.accent
                         font.pixelSize: 17
                         horizontalAlignment: Text.AlignRight
                         Layout.fillWidth: true
@@ -318,14 +446,15 @@ Item {
                     Label {
                         id: timeLabel
                         text: navBar.gpsTimeText && navBar.gpsTimeText.length ? navBar.gpsTimeText : "--:--:--"
-                        color: "#7AE2CF"
+                        color: hmiTheme.accentHover
                         font.pixelSize: 17
                     }
 
                     Label {
                         id: dateLabel
+                        visible: mainPage.width >= 940
                         text: navBar.gpsDateText && navBar.gpsDateText.length ? navBar.gpsDateText : "---- -- --"
-                        color: "#7AE2CF"
+                        color: hmiTheme.accentHover
                         font.pixelSize: 17
                     }
                 }
@@ -518,6 +647,53 @@ Item {
         }
     }
 
+    // ================================ PRIMARY NAVIGATION ================================
+    // New HMI shell rail. Existing SideSettingsDrawer stays available from the
+    // menu button for local/remote and advanced settings, while primary page
+    // navigation is always one touch away.
+    Rectangle {
+        id: primaryNavigation
+        anchors.left: parent.left
+        anchors.top: navBar.bottom
+        anchors.bottom: parent.bottom
+        visible: mainPage.primaryNavigationEnabled
+        width: mainPage.primaryNavigationEnabled
+               ? (mainPage.narrowShell ? hmiTheme.compactNavigationRailWidth : hmiTheme.navigationRailWidth)
+               : 0
+        color: hmiTheme.sidebar
+        border.color: hmiTheme.line
+        border.width: 1
+        z: 2
+
+        Column {
+            anchors.fill: parent
+            anchors.topMargin: 10
+            anchors.leftMargin: 6
+            anchors.rightMargin: 6
+            spacing: 5
+
+            Repeater {
+                model: settingsDrawer ? settingsDrawer.toolbarPages() : []
+
+                HmiNavButton {
+                    width: primaryNavigation.width - 12
+                    darkMode: mainPage.darkTheme
+                    label: modelData.title
+                    iconSource: mainPage.darkTheme
+                                ? (modelData.iconDark || modelData.icon || "")
+                                : (modelData.iconLight || modelData.icon || "")
+                    active: mainPage.currentPageSource === modelData.source
+
+                    onClicked: {
+                        settingsDrawer.requestToolbarNavigation(index,
+                                                                modelData.title,
+                                                                modelData.source)
+                    }
+                }
+            }
+        }
+    }
+
     // ==================== OPTIONAL: ถ้า C++ ส่งมา ก็รับทับได้ ====================
     Connections {
         id: timeGpsConn
@@ -548,7 +724,7 @@ Item {
         anchors.top: navBar.top
         anchors.left: parent.left
         anchors.topMargin: 6
-        anchors.leftMargin: 90
+        anchors.leftMargin: 88
 
         Rectangle {
             id: floatingButton
@@ -597,10 +773,15 @@ Item {
     // ================================ DRAWERS / POPUPS ================================
     SideSettingsDrawer {
         id: settingsDrawer
+        darkMode: mainPage.darkTheme
         krakenmapval: Krakenmapval
-        width: 500
+        width: Math.min(500, Math.max(320, parent.width * 0.82))
         height: parent.height
-        z: 1
+        // Phase 8: this drawer owns a full-screen dim/blocker layer.  Keep the
+        // whole component above the HMI navigation rail and screenshot button
+        // so clicks cannot leak through while it is open, but below the
+        // application-level PopupSettingDrawer (z: 10000).
+        z: 9000
 
         onNavigate: function(title, source, index) {
             console.info("[NAV] title=", title, "source=", source, "index=", index)
@@ -628,6 +809,7 @@ Item {
         z: 10000
         visible: false
         krakenmapval: Krakenmapval
+        darkMode: mainPage.darkTheme
 
         // ===== Responsive size =====
         // อิง design 1920x1080 (เหมือนหน้าอื่น)
@@ -657,6 +839,83 @@ Item {
         anchors.margins: dp(10)
     }
 
+    // Phase 10 / V9: outside-click blocker for app popups.
+    // IMPORTANT: the click-close MouseAreas are split into four regions around
+    // popupSetting.  A full-screen MouseArea below a non-mouse-accepting popup
+    // can still steal blank/form clicks, which prevents TextField/SpinBox input
+    // and closes Device Parameters immediately.
+    Item {
+        id: popupSettingBackdrop
+        anchors.fill: parent
+        visible: popupSetting.visible
+        enabled: visible
+        z: 9999
+
+        Rectangle {
+            anchors.fill: parent
+            color: mainPage.darkTheme ? "#000000" : "#E5E8EC"
+            opacity: mainPage.darkTheme ? 0.42 : 0.36
+        }
+
+        function closePopupFromBackdrop(mouse) {
+            popupSetting.close()
+            mouse.accepted = true
+        }
+
+        // Top outside area
+        MouseArea {
+            x: 0
+            y: 0
+            width: parent.width
+            height: Math.max(0, popupSetting.y)
+            hoverEnabled: true
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+            onPressed: popupSettingBackdrop.closePopupFromBackdrop(mouse)
+        }
+
+        // Bottom outside area
+        MouseArea {
+            x: 0
+            y: Math.min(parent.height, popupSetting.y + popupSetting.height)
+            width: parent.width
+            height: Math.max(0, parent.height - y)
+            hoverEnabled: true
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+            onPressed: popupSettingBackdrop.closePopupFromBackdrop(mouse)
+        }
+
+        // Left outside area
+        MouseArea {
+            x: 0
+            y: Math.max(0, popupSetting.y)
+            width: Math.max(0, popupSetting.x)
+            height: Math.max(0, Math.min(parent.height, popupSetting.y + popupSetting.height) - y)
+            hoverEnabled: true
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+            onPressed: popupSettingBackdrop.closePopupFromBackdrop(mouse)
+        }
+
+        // Right outside area
+        MouseArea {
+            x: Math.min(parent.width, popupSetting.x + popupSetting.width)
+            y: Math.max(0, popupSetting.y)
+            width: Math.max(0, parent.width - x)
+            height: Math.max(0, Math.min(parent.height, popupSetting.y + popupSetting.height) - y)
+            hoverEnabled: true
+            acceptedButtons: Qt.AllButtons
+            preventStealing: true
+            propagateComposedEvents: false
+            onPressed: popupSettingBackdrop.closePopupFromBackdrop(mouse)
+        }
+    }
+
+
     TopNetworkDrawer {
         id: topDrawer
         krakenmapval: Krakenmapval
@@ -665,5 +924,8 @@ Item {
         interactive: mainPage.topNetworkDrawerEnabled
     }
 
-    ModePopup { id: remoteModePopup }
+    ModePopup {
+        id: remoteModePopup
+        popupEnabled: mainPage.remoteModePopupEnabled
+    }
 }

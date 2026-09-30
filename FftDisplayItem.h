@@ -258,6 +258,7 @@ private:
     QVector<QMetaObject::Connection> m_backendConnections;
     Mode m_mode = Spectrum;
     bool m_renderEnabled = true;
+    bool m_presentClockRegistered = false;
     int m_targetFps = 30;
     bool m_presentDirty = false;
     qint64 m_lastPresentUpdateMs = 0;

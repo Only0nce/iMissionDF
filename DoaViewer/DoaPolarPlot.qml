@@ -1,10 +1,13 @@
 import QtQuick 2.15
+import "../ui"
 
 Rectangle {
     id: root
+    property bool darkMode: true
+    Theme { id: theme; darkMode: root.darkMode }
     radius: 10
-    color: "#060B16"
-    border.color: "#1F2A44"
+    color: theme.plot
+    border.color: theme.analyzerBorder
     border.width: 1
 
     property bool enabled: true
@@ -18,6 +21,16 @@ Rectangle {
     property real sigPower: 0.0
     property real bandPeakDb: -200.0
     property real gateThDb: -65.0
+
+    readonly property color plotBg: theme.plot
+    readonly property color gridColor: theme.gridLine
+    readonly property color tickColor: theme.axisText
+    readonly property color spectrumColor: root.darkMode ? "#60A5FA" : "#2167BC"
+    readonly property color peakColor: root.darkMode ? "#FBBF24" : "#B97910"
+    readonly property color centerColor: root.darkMode ? "#E5E7EB" : "#314743"
+    readonly property color infoColor: root.darkMode ? "#FDE68A" : "#7A5408"
+    readonly property color goodColor: root.darkMode ? "#22c55e" : "#16824C"
+    readonly property color dangerColor: root.darkMode ? "#F87171" : "#C73340"
 
     // Paint scheduler: backend DoAResult can update faster than users can see.
     // Mark dirty on data changes, then paint on a small bounded clock so Polar
@@ -38,6 +51,7 @@ Rectangle {
     onEnabledChanged:      _markDirty()
     onWidthChanged:        _markDirty()
     onHeightChanged:       _markDirty()
+    onDarkModeChanged:     _markDirty()
 
     Timer {
         interval: Math.max(33, Math.floor(1000 / Math.max(1, root.paintFps)))
@@ -50,37 +64,49 @@ Rectangle {
         }
     }
 
-    // ---- badge ----
+    // ---- signal badge ----
+    // Keep the plot overlay compact and two-line so long band/threshold values
+    // cannot run into the right edge. The outer panel already shows DOA OFF,
+    // therefore this badge is needed only while the DOA engine is enabled.
     Rectangle {
         id: sigBadge
-        width: 200
-        height: 30
+        visible: root.enabled
+        width: Math.min(220, Math.max(160, parent.width - 16))
+        height: 44
         radius: 8
         anchors.top: parent.top
         anchors.right: parent.right
         anchors.topMargin: 8
         anchors.rightMargin: 8
         z: 10
+        clip: true
 
-        color: root.signalPresent ? "#052e16" : "#3f1d1d"
-        border.color: root.signalPresent ? "#16a34a" : "#ef4444"
+        color: root.signalPresent ? (root.darkMode ? "#052e16" : "#E8F6EE") : (root.darkMode ? "#3f1d1d" : "#FDECEE")
+        border.color: root.signalPresent ? theme.success : theme.danger
         border.width: 1
 
-        Row {
-            anchors.centerIn: parent
-            spacing: 10
+        Column {
+            anchors.fill: parent
+            anchors.margins: 6
+            spacing: 1
 
             Text {
+                width: parent.width
                 text: root.signalPresent ? "SIGNAL" : "NO SIGNAL"
-                color: root.signalPresent ? "#22c55e" : "#f87171"
-                font.pixelSize: 12
+                color: root.signalPresent ? theme.success : theme.danger
+                font.pixelSize: 11
                 font.bold: true
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
             }
 
             Text {
-                text: "Band " + root.bandPeakDb.toFixed(1) + " dB  (th " + root.gateThDb.toFixed(1) + ")"
-                color: "#93c5fd"
-                font.pixelSize: 10
+                width: parent.width
+                text: "Band " + root.bandPeakDb.toFixed(1) + " dB  ·  Th " + root.gateThDb.toFixed(1) + " dB"
+                color: root.darkMode ? "#93c5fd" : theme.info
+                font.pixelSize: 9
+                horizontalAlignment: Text.AlignHCenter
+                elide: Text.ElideRight
             }
         }
     }
@@ -100,7 +126,7 @@ Rectangle {
             var cy = height * 0.55
             var R  = Math.min(width, height) * 0.42
 
-            ctx.fillStyle = "#060B16"
+            ctx.fillStyle = root.plotBg
             ctx.fillRect(0, 0, width, height)
 
             function thToRad(deg) { return (deg - 90) * Math.PI / 180.0 }
@@ -115,7 +141,7 @@ Rectangle {
 
             // grid circles
             ctx.lineWidth = 1
-            ctx.strokeStyle = "#142033"
+            ctx.strokeStyle = root.gridColor
             for (var i = 1; i <= 4; i++) {
                 ctx.beginPath()
                 ctx.arc(cx, cy, R * i / 4.0, 0, Math.PI * 2)
@@ -127,7 +153,7 @@ Rectangle {
             ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke()
 
             // ticks
-            ctx.fillStyle = "#94A3B8"
+            ctx.fillStyle = root.tickColor
             ctx.font = "12px sans-serif"
             for (var a = 0; a < 360; a += 30) {
                 var rad = thToRad(a)
@@ -138,10 +164,10 @@ Rectangle {
 
             // gated
             if (!root.signalPresent) {
-                ctx.fillStyle = "#F87171"
+                ctx.fillStyle = root.dangerColor
                 ctx.font = "16px sans-serif"
                 ctx.fillText("NO SIGNAL (DOA gated)", cx - 105, cy)
-                ctx.fillStyle = "#94A3B8"
+                ctx.fillStyle = root.tickColor
                 ctx.font = "12px sans-serif"
                 ctx.fillText("Select offset/BW to hit the tone peak.", cx - 140, cy + 20)
                 return
@@ -163,14 +189,14 @@ Rectangle {
 
                     // peak line (green for peak-only mode)
                     ctx.lineWidth = 2.4
-                    ctx.strokeStyle = "#22c55e"
+                    ctx.strokeStyle = root.goodColor
                     ctx.beginPath()
                     ctx.moveTo(cx, cy)
                     ctx.lineTo(cx + R * Math.cos(pang), cy + R * Math.sin(pang))
                     ctx.stroke()
 
                     // peak dot
-                    ctx.fillStyle = "#22c55e"
+                    ctx.fillStyle = root.goodColor
                     ctx.beginPath()
                     ctx.arc(cx + (R * 0.98) * Math.cos(pang),
                             cy + (R * 0.98) * Math.sin(pang),
@@ -178,22 +204,22 @@ Rectangle {
                     ctx.fill()
 
                     // center dot
-                    ctx.fillStyle = "#E5E7EB"
+                    ctx.fillStyle = root.centerColor
                     ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill()
 
                     // info
-                    ctx.fillStyle = "#BBF7D0"
+                    ctx.fillStyle = root.darkMode ? "#BBF7D0" : "#12613A"
                     ctx.font = "12px sans-serif"
                     ctx.fillText("Peak: " + peak.toFixed(1) + "°  Conf: " + root.conf.toFixed(2),
                                  12, height - 10)
 
                     // hint label
-                    ctx.fillStyle = "#94A3B8"
+                    ctx.fillStyle = root.tickColor
                     ctx.font = "13px sans-serif"
                     ctx.fillText("Peak-only mode (ESPRIT)", 12, 22)
                     return
                 } else {
-                    ctx.fillStyle = "#94A3B8"
+                    ctx.fillStyle = root.tickColor
                     ctx.font = "14px sans-serif"
                     ctx.fillText("No DOA data", 12, 22)
                     return
@@ -206,7 +232,7 @@ Rectangle {
 
             // spectrum polyline
             ctx.lineWidth = 1.6
-            ctx.strokeStyle = "#60A5FA"
+            ctx.strokeStyle = root.spectrumColor
             ctx.beginPath()
             var x0 = cx + (sp[0] * R) * Math.cos(thToRad(th[0]))
             var y0 = cy + (sp[0] * R) * Math.sin(thToRad(th[0]))
@@ -223,14 +249,14 @@ Rectangle {
             if (hasPeak) {
                 var pang2 = thToRad(peak)
                 ctx.lineWidth = 2.0
-                ctx.strokeStyle = "#FBBF24"
+                ctx.strokeStyle = root.peakColor
                 ctx.beginPath()
                 ctx.moveTo(cx, cy)
                 ctx.lineTo(cx + R * Math.cos(pang2), cy + R * Math.sin(pang2))
                 ctx.stroke()
 
                 // peak dot
-                ctx.fillStyle = "#FBBF24"
+                ctx.fillStyle = root.peakColor
                 ctx.beginPath()
                 ctx.arc(cx + (R * 0.98) * Math.cos(pang2),
                         cy + (R * 0.98) * Math.sin(pang2),
@@ -239,11 +265,11 @@ Rectangle {
             }
 
             // center dot
-            ctx.fillStyle = "#E5E7EB"
+            ctx.fillStyle = root.centerColor
             ctx.beginPath(); ctx.arc(cx, cy, 3, 0, Math.PI * 2); ctx.fill()
 
             // info
-            ctx.fillStyle = "#FDE68A"
+            ctx.fillStyle = root.infoColor
             ctx.font = "12px sans-serif"
             ctx.fillText("Peak: " + (hasPeak ? peak.toFixed(1) : "NaN") + "°  Conf: " + root.conf.toFixed(2),
                          12, height - 10)
@@ -253,6 +279,6 @@ Rectangle {
     Item {
         anchors.fill: parent
         visible: !root.enabled
-        Text { anchors.centerIn: parent; text: "DOA is OFF"; color: "#F87171"; font.pixelSize: 18 }
+        Text { anchors.centerIn: parent; text: "DOA is OFF"; color: theme.danger; font.pixelSize: 18 }
     }
 }

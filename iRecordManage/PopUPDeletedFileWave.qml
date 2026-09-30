@@ -1,12 +1,16 @@
 //// PopUPDeletedFileWave.qml  (Qt 5.12 / Controls2)  ✅ FULL FILE
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
+import "../ui"
 
 Item {
     id: rootPopUPDeletedFileWave
     anchors.fill: parent
     z: 999999
+    property bool isDarkTheme: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: rootPopUPDeletedFileWave.isDarkTheme }
 
     // ===== external inputs =====
 //    property var listoFDevice: null
@@ -75,36 +79,38 @@ Item {
         focus: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-        width: 950
+        width: Math.min(950, Math.max(240, rootPopUPDeletedFileWave.width - 32))
 
-        // ✅ auto height by content (avoid clip)
-        readonly property int minH: 420
-        readonly property int maxH: 920
-        height: {
-            var h = contentCol.implicitHeight + 24
-            if (h < minH) h = minH
-            if (h > maxH) h = maxH
-            return h
-        }
+        // Keep the dialog inside the recorder viewport. Custom date range can
+        // exceed short displays, so contentItem below becomes scrollable.
+        readonly property int minH: Math.min(420, Math.max(220, rootPopUPDeletedFileWave.height - 32))
+        readonly property int maxH: Math.max(220, rootPopUPDeletedFileWave.height - 32)
+        height: Math.max(minH, Math.min(maxH, contentCol.implicitHeight + 24))
 
         // center
-        x: (rootPopUPDeletedFileWave.width  - width)  / 2
-        y: (rootPopUPDeletedFileWave.height - height) / 2
+        x: Math.max(0, (rootPopUPDeletedFileWave.width  - width)  / 2)
+        y: Math.max(0, (rootPopUPDeletedFileWave.height - height) / 2)
 
         background: Rectangle {
-            radius: 14
-            color: "#0B1216"
-            border.color: "#2A3A44"
+            radius: hmiTheme.radiusLg
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
-        contentItem: Item {
-            anchors.fill: parent
+        contentItem: Flickable {
+            id: deleteFilesFlick
+            clip: true
+            contentWidth: width
+            contentHeight: contentCol.implicitHeight + 24
+            boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
 
             ColumnLayout {
                 id: contentCol
-                anchors.fill: parent
-                anchors.margins: 16
+                x: 12
+                y: 12
+                width: Math.max(0, deleteFilesFlick.width - 24)
                 spacing: 12
 
                 // ===== title =====
@@ -114,7 +120,7 @@ Item {
 
                     Text {
                         text: "Delete files"
-                        color: "white"
+                        color: hmiTheme.text
                         font.pixelSize: 18
                         font.bold: true
                     }
@@ -125,9 +131,10 @@ Item {
                     Layout.fillWidth: true
                     spacing: 6
 
-                    Text { text: "Device"; color: "#C7D2DA"; font.pixelSize: 13 }
-                    ComboBox {
+                    Text { text: "Device"; color: hmiTheme.textSecondary; font.pixelSize: 13 }
+                    HmiComboBox {
                         id: deviceNumBox
+                        darkMode: rootPopUPDeletedFileWave.isDarkTheme
                         property var sourceModel: listoFDevice
                         property var ids: []
                         model: ids
@@ -135,7 +142,7 @@ Item {
                         Layout.preferredHeight: 55
                         implicitWidth: 320
                         Layout.preferredWidth: 320
-                        background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
+                        background: Rectangle { radius: hmiTheme.radiusSm; color: hmiTheme.input; border.color: hmiTheme.lineStrong }
 
                         function rebuild() {
                             const out = []
@@ -168,7 +175,7 @@ Item {
                         function onDeviceListUpdated() { deviceNumBox.rebuild() }
                     }
 
-//                    ComboBox {
+//                    HmiComboBox {
 //                        id: deviceCombo
 //                        Layout.preferredWidth: 320
 //                        Layout.preferredHeight: 60
@@ -222,7 +229,7 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 1
-                    color: "#20303A"
+                    color: hmiTheme.line
                 }
 
                 // ===== Quick delete =====
@@ -230,7 +237,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 8
 
-                    Text { text: "Quick delete"; color: "#C7D2DA"; font.pixelSize: 13 }
+                    Text { text: "Quick delete"; color: hmiTheme.textSecondary; font.pixelSize: 13 }
 
                     RowLayout {
                         Layout.fillWidth: true
@@ -241,38 +248,49 @@ Item {
                             rootPopUPDeletedFileWave.presetDays = d
                         }
 
-                        Button {
-                            text: "24 HR"; checkable: true
+                        HmiButton {
+                            text: "24 HR"; checkable: true; compact: true
+                            darkMode: rootPopUPDeletedFileWave.isDarkTheme
                             checked: !rootPopUPDeletedFileWave.customMode && rootPopUPDeletedFileWave.presetDays === 1
+                            tone: checked ? "primary" : "normal"
                             onClicked: parent.setPreset(1)
                         }
-                        Button {
-                            text: "3 DAYS"; checkable: true
+                        HmiButton {
+                            text: "3 DAYS"; checkable: true; compact: true
+                            darkMode: rootPopUPDeletedFileWave.isDarkTheme
                             checked: !rootPopUPDeletedFileWave.customMode && rootPopUPDeletedFileWave.presetDays === 3
+                            tone: checked ? "primary" : "normal"
                             onClicked: parent.setPreset(3)
                         }
-                        Button {
-                            text: "5 DAYS"; checkable: true
+                        HmiButton {
+                            text: "5 DAYS"; checkable: true; compact: true
+                            darkMode: rootPopUPDeletedFileWave.isDarkTheme
                             checked: !rootPopUPDeletedFileWave.customMode && rootPopUPDeletedFileWave.presetDays === 5
+                            tone: checked ? "primary" : "normal"
                             onClicked: parent.setPreset(5)
                         }
-                        Button {
-                            text: "7 DAYS"; checkable: true
+                        HmiButton {
+                            text: "7 DAYS"; checkable: true; compact: true
+                            darkMode: rootPopUPDeletedFileWave.isDarkTheme
                             checked: !rootPopUPDeletedFileWave.customMode && rootPopUPDeletedFileWave.presetDays === 7
+                            tone: checked ? "primary" : "normal"
                             onClicked: parent.setPreset(7)
                         }
 
                         Item { Layout.fillWidth: true }
 
-                        Button {
+                        HmiButton {
                             text: "CUSTOM RANGE..."
                             checkable: true
+                            compact: true
+                            darkMode: rootPopUPDeletedFileWave.isDarkTheme
                             checked: rootPopUPDeletedFileWave.customMode
+                            tone: checked ? "primary" : "normal"
                             onClicked: {
                                 rootPopUPDeletedFileWave.customMode = !rootPopUPDeletedFileWave.customMode
                                 if (rootPopUPDeletedFileWave.customMode) {
                                     rootPopUPDeletedFileWave.presetDays = -1
-                                    if (tumblerDateTime && tumblerDateTime.today) tumblerDateTime.today()
+                                    if (tumblerDateTime && tumblerDateTime.setTodayAll) tumblerDateTime.setTodayAll()
                                 } else {
                                     rootPopUPDeletedFileWave.presetDays = 1
                                 }
@@ -293,7 +311,7 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 1
-                    color: "#20303A"
+                    color: hmiTheme.line
                 }
 
                 // ===== Actions =====
@@ -303,18 +321,21 @@ Item {
 
                     Item { Layout.fillWidth: true }
 
-                    Button {
-                        text: "Cancel"
-                        background: Rectangle { radius: 8; color: "#9c9798" }
+                    HmiButton {
+                        text: "CANCEL"
+                        compact: true
+                        darkMode: rootPopUPDeletedFileWave.isDarkTheme
                         onClicked:{
 //                            console.log("<<<<<<<<<<<<Cancel>>>>>>>>>>")
                             popUpbuttonDeletedFiles.close()
                         }
                     }
 
-                    Button {
-                        text: "Delete"
-                        background: Rectangle { radius: 8; color: "#ff004c" }
+                    HmiButton {
+                        text: "DELETE"
+                        compact: true
+                        tone: "danger"
+                        darkMode: rootPopUPDeletedFileWave.isDarkTheme
                         onClicked: {
 //                            console.log("<<<<<<<<<<<<Delete>>>>>>>>>>")
                             try {
@@ -343,7 +364,7 @@ Item {
             // default = preset 24hr
             rootPopUPDeletedFileWave.customMode = false
             rootPopUPDeletedFileWave.presetDays = 1
-            deviceCombo.rebuild()
+            deviceNumBox.rebuild()
         }
 
     }

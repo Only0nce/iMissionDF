@@ -1,13 +1,23 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
+import QtQuick.Controls.Material 2.12
 import App 1.0
+
+import "ui"
 
 Item {
     id: networkManager
-    width: 1920
-    height: 1080
+
+    Theme {
+        id: hmiTheme
+        darkMode: networkManager.Material.theme === Material.Dark
+    }
+    width: parent ? parent.width : 1920
+    height: parent ? parent.height : 1080
     clip: true
+    readonly property bool compactLayout: width < 1500
+    readonly property bool veryCompactLayout: width < 1100
 
     // KP-6JUL2026 : build flag controls only the top-bar drawer tab.
     // The complete Network Settings page remains available regardless of this flag.
@@ -134,23 +144,32 @@ Item {
     property bool hardwareHasWifi: (typeof HardwareHasWifi === "undefined") ? true : HardwareHasWifi
     property bool hardwareHas5G: (typeof HardwareHas5G === "undefined") ? true : HardwareHas5G
 
+    // Phase 4: Network Settings now consumes the same HMI design tokens as
+    // Radio/DoA.  Keep this compatibility object because the existing LAN
+    // workflow references ui.* throughout; only presentation ownership moves.
     QtObject {
         id: ui
-        property color bg: "#07101a"
-        property color topBar: "#101010"
-        property color mainPanel: "#101a26"
-        property color panel: "#132235"
-        property color card: "#122033"
-        property color field: "#0d1723"
-        property color border: "#2d4056"
-        property color borderSoft: "#203044"
-        property color text: "#e9f0f7"
-        property color subText: "#9aa8b8"
-        property color muted: "#667589"
-        property color accent: "#00c9a7"
-        property color warning: "#f59e0b"
-        property color danger: "#ef4444"
-        property color disabled: "#718096"
+        property color bg: hmiTheme.page
+        property color topBar: hmiTheme.topBar
+        property color mainPanel: hmiTheme.shell
+        property color panel: hmiTheme.panel
+        property color card: hmiTheme.cardAlt
+        property color field: hmiTheme.input
+        property color border: hmiTheme.lineStrong
+        property color borderSoft: hmiTheme.line
+        property color text: hmiTheme.text
+        property color subText: hmiTheme.textSecondary
+        property color muted: hmiTheme.muted
+        property color accent: hmiTheme.accent
+        property color warning: hmiTheme.warning
+        property color danger: hmiTheme.danger
+        property color info: hmiTheme.info
+        property color disabled: hmiTheme.disabled
+        property color accentText: "#061514"
+        property color selection: hmiTheme.darkMode ? Qt.lighter(hmiTheme.cardAlt, 1.10) : "#E3F2EF"
+        property color disabledField: hmiTheme.darkMode ? "#303740" : "#E9EFED"
+        property color disabledBorder: hmiTheme.darkMode ? "#46505C" : hmiTheme.line
+        property color warningFill: hmiTheme.darkMode ? "#3A2A0B" : "#FFF3D6"
     }
 
     function safeText(value, fallback) {
@@ -735,7 +754,7 @@ Item {
             width: 42
             height: 42
             radius: 21
-            color: "#17212e"
+            color: ui.card
             border.color: ui.border
             Repeater {
                 model: 3
@@ -784,6 +803,7 @@ Item {
 
     NetworkPasswordPopup {
         id: networkModePasswordPopup
+        darkMode: hmiTheme.darkMode
         titleText: "Switch to Admin"
         messageText: "Enter the administrator password to enable full LAN and VPN access"
         unlockButtonText: "Switch to Admin"
@@ -795,122 +815,101 @@ Item {
         modal: true
         focus: true
         closePolicy: Popup.NoAutoClose
-        width: 560
-        height: 360
+        width: Math.min(560, networkManager.width - 48)
+        height: Math.min(360, networkManager.height - 80)
         x: Math.max(24, (networkManager.width - width) / 2)
         y: Math.max(24, (networkManager.height - height) / 2 - 20)
         enter: Transition { NumberAnimation { property: "opacity"; from: 0.0; to: 1.0; duration: 140; easing.type: Easing.OutCubic } }
         exit: Transition { NumberAnimation { property: "opacity"; from: 1.0; to: 0.0; duration: 100; easing.type: Easing.InCubic } }
-        background: Rectangle { radius: 18; color: "#132235"; border.color: ui.accent; border.width: 1 }
+        background: Rectangle { radius: 18; color: ui.panel; border.color: ui.accent; border.width: 1 }
         contentItem: Item {
             Text { x: 28; y: 24; width: parent.width - 56; text: "Confirm Apply / Save"; color: ui.text; font.pixelSize: 24; font.bold: true }
             Text { x: 28; y: 64; width: parent.width - 56; text: "Review the network change before it is sent to the device."; color: ui.subText; font.pixelSize: 14; wrapMode: Text.WordWrap }
             Rectangle {
-                x: 28; y: 104; width: parent.width - 56; height: 148; radius: 12; color: "#0d1723"; border.color: ui.border
+                x: 28; y: 104; width: parent.width - 56; height: 148; radius: 12; color: ui.field; border.color: ui.border
                 Text { x: 18; y: 16; width: parent.width - 36; text: lanDisplayName() + " / " + interfaceName; color: ui.text; font.pixelSize: 18; font.bold: true; elide: Text.ElideRight }
-                Text { x: 18; y: 52; width: parent.width - 36; text: "Mode: " + (useDhcp ? "Using DHCP" : "Static Manual"); color: useDhcp ? ui.accent : "#63a4ff"; font.pixelSize: 14; font.bold: true }
+                Text { x: 18; y: 52; width: parent.width - 36; text: "Mode: " + (useDhcp ? "Using DHCP" : "Static Manual"); color: useDhcp ? ui.accent : ui.info; font.pixelSize: 14; font.bold: true }
                 Text { x: 18; y: 82; width: parent.width - 36; text: useDhcp ? "The device will request IPv4 settings automatically." : ("IPv4: " + safeText(ipAddress, "--") + "    Mask: " + safeText(netmask, "--") + "\nGateway: " + safeText(gateway, "--")); color: ui.subText; font.pixelSize: 13; wrapMode: Text.WordWrap }
             }
             Text { x: 28; y: 266; width: parent.width - 56; text: "This can temporarily interrupt network connectivity."; color: ui.warning; font.pixelSize: 13; font.bold: true }
             Row {
                 x: 28; y: 302; spacing: 16
-                Button {
+                HmiButton {
                     id: cancelLanApplyButton
                     width: 238
                     height: 44
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: 14
                     text: "Cancel"
-                    scale: pressed ? 0.96 : 1.0
-
-                    Behavior on scale {
-                        NumberAnimation { duration: 90 }
-                    }
-
                     onClicked: lanApplyConfirmPopup.close()
-
-                    background: Rectangle {
-                        radius: 10
-                        color: cancelLanApplyButton.pressed ? "#17283b" : ui.field
-                        border.color: ui.border
-                    }
-
-                    contentItem: Text {
-                        text: parent.text
-                        color: ui.text
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
                 }
 
-                Button {
+                HmiButton {
                     id: confirmLanApplyButton
                     width: 250
                     height: 44
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: 14
+                    tone: "primary"
                     text: "Confirm Apply"
-                    scale: pressed ? 0.96 : 1.0
-
-                    Behavior on scale {
-                        NumberAnimation { duration: 90 }
-                    }
-
                     onClicked: {
                         lanApplyConfirmPopup.close()
                         networkManager.applyLanSetting()
-                    }
-
-                    background: Rectangle {
-                        radius: 10
-                        color: confirmLanApplyButton.pressed ? Qt.darker(ui.accent, 1.15) : ui.accent
-                        border.color: ui.accent
-                    }
-
-                    contentItem: Text {
-                        text: parent.text
-                        color: "#001412"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
                     }
                 }
             }
         }
     }
 
+    HmiPanel {
+        id: networkHeaderPanel
+        x: 24
+        y: 78
+        width: parent.width - 48
+        height: 154
+        darkMode: hmiTheme.darkMode
+    }
+
     Text {
-        x: 36
+        x: 48
         y: 94
         text: "Network Settings"
         color: ui.text
-        font.pixelSize: 34
+        font.pixelSize: networkManager.compactLayout ? 28 : 34
         font.bold: true
     }
 
     Text {
-        x: 36
+        x: 48
         y: 136
+        width: Math.max(260, parent.width - 420)
         text: "Unified LAN, Service Endpoints, WiFi, 5G and VPN settings."
         color: ui.subText
-        font.pixelSize: 15
+        font.pixelSize: networkManager.compactLayout ? 13 : 15
+        elide: Text.ElideRight
     }
 
     Text {
-        x: 36
+        x: 48
         y: 176
+        width: Math.max(240, networkTabRow.x - x - 24)
         text: selectedTab === "lan" ? "LAN Interface Settings"
               : selectedTab === "endpoints" ? "Service Endpoints"
               : selectedTab === "wifi" ? "WiFi Settings"
               : selectedTab === "cellular" ? "5G Modem Settings"
               : "VPN Settings"
         color: ui.text
-        font.pixelSize: 40
+        font.pixelSize: networkManager.compactLayout ? 30 : 40
+        elide: Text.ElideRight
         font.bold: true
     }
 
     Button {
         id: networkAccessSwitchButton
-        x: 1030
+        anchors.right: parent.right
+        anchors.rightMargin: 48
         y: 96
-        width: 220
+        width: networkManager.compactLayout ? 190 : 220
         height: 48
         text: networkManager.networkAccessLabel()
         scale: pressed ? 0.96 : 1.0
@@ -919,17 +918,25 @@ Item {
         contentItem: Row {
             anchors.centerIn: parent
             spacing: 10
-            Text { text: networkAccessSwitchButton.text; color: networkManager.networkAdminMode ? ui.accent : "#63a4ff"; font.pixelSize: 13; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: networkAccessSwitchButton.text; color: networkManager.networkAdminMode ? ui.accent : ui.info; font.pixelSize: 13; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
             Text { text: networkManager.networkAdminMode ? "VIEWER" : "ADMIN"; color: ui.subText; font.pixelSize: 11; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
-            Text { text: "↔"; color: networkManager.networkAdminMode ? ui.accent : "#63a4ff"; font.pixelSize: 14; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
+            Text { text: "↔"; color: networkManager.networkAdminMode ? ui.accent : ui.info; font.pixelSize: 14; font.bold: true; anchors.verticalCenter: parent.verticalCenter }
         }
-        background: Rectangle { radius: 24; color: networkAccessSwitchButton.pressed ? (networkManager.networkAdminMode ? "#12413e" : "#15365f") : (networkManager.networkAdminMode ? "#0d302e" : "#10294a"); border.color: networkManager.networkAdminMode ? ui.accent : "#2f80ed"; border.width: 1 }
+        background: Rectangle {
+            radius: 24
+            color: networkAccessSwitchButton.pressed ? ui.selection : ui.card
+            border.color: networkManager.networkAdminMode ? ui.accent : ui.info
+            border.width: 1
+        }
     }
 
     Text {
-        x: 1266
+        anchors.left: parent.left
+        anchors.leftMargin: 520
+        anchors.right: networkAccessSwitchButton.left
+        anchors.rightMargin: 16
         y: 112
-        width: parent.width - x - 30
+        visible: !networkManager.compactLayout
         text: networkManager.networkAdminMode
               ? "Full network access · Endpoints editable · tap to switch Viewer"
               : "LAN1 + LAN2 + Endpoints + WiFi + 5G editable · tap for Admin"
@@ -941,9 +948,10 @@ Item {
 
     Row {
         id: networkTabRow
-        x: 1120
+        anchors.right: parent.right
+        anchors.rightMargin: 48
         y: 176
-        spacing: 16
+        spacing: networkManager.veryCompactLayout ? 8 : 16
 
         Repeater {
             model: [
@@ -953,28 +961,14 @@ Item {
                 { key: "cellular", label: "5G", enabled: networkManager.hardwareHasWireless && networkManager.hardwareHas5G },
                 { key: "vpn", label: "VPN", enabled: true }
             ]
-            Button {
-                width: 130
+            HmiButton {
+                width: networkManager.veryCompactLayout ? 104 : 130
                 height: 48
+                darkMode: hmiTheme.darkMode
                 enabled: modelData.enabled
                 text: modelData.label
-                scale: pressed ? 0.96 : 1.0
-                Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                tone: selectedTab === modelData.key ? "primary" : "normal"
                 onClicked: selectedTab = modelData.key
-                contentItem: Text {
-                    text: parent.text
-                    color: parent.enabled ? (selectedTab === modelData.key ? "#001412" : ui.text) : ui.disabled
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                    font.pixelSize: 16
-                    font.bold: true
-                }
-                background: Rectangle {
-                    radius: 12
-                    color: !parent.enabled ? "#0d1723" : selectedTab === modelData.key ? ui.accent : "#0d1723"
-                    border.color: selectedTab === modelData.key ? ui.accent : ui.border
-                    border.width: 1
-                }
             }
         }
     }
@@ -998,9 +992,9 @@ Item {
 
             Rectangle {
                 id: lanListPanel
-                x: 34
+                x: networkManager.compactLayout ? 18 : 34
                 y: 20
-                width: 330
+                width: networkManager.compactLayout ? 250 : 330
                 height: parent.height - 40
                 visible: true
                 enabled: true
@@ -1023,12 +1017,12 @@ Item {
                         id: lanInterfaceCard
                         x: 18
                         y: 62 + index * 90
-                        width: 294
+                        width: parent.width - 36
                         height: 76
                         radius: 14
                         scale: lanInterfaceMouse.pressed ? 0.985 : 1.0
                         Behavior on scale { NumberAnimation { duration: 80; easing.type: Easing.OutCubic } }
-                        color: interfaceName === modelData.iface ? "#16283d" : "#0d1723"
+                        color: interfaceName === modelData.iface ? ui.selection : ui.field
                         border.color: interfaceName === modelData.iface ? ui.accent : ui.border
                         border.width: interfaceName === modelData.iface ? 2 : 1
 
@@ -1080,15 +1074,23 @@ Item {
 
             Rectangle {
                 id: lanDetailPanel
-                x: 382
+                x: lanListPanel.x + lanListPanel.width + 18
                 y: 20
-                width: parent.width - 416
+                width: parent.width - x - (networkManager.compactLayout ? 18 : 34)
                 height: parent.height - 40
                 radius: 18
                 color: ui.panel
                 border.color: ui.border
 
-                Text { x: 30; y: 28; text: "Selected Interface: " + lanDisplayName() + " / " + interfaceName; color: ui.text; font.pixelSize: 28; font.bold: true }
+                Text {
+                    x: 30; y: 28
+                    width: Math.max(160, lanStatusBadge.x - x - 18)
+                    text: "Selected Interface: " + lanDisplayName() + " / " + interfaceName
+                    color: ui.text
+                    font.pixelSize: networkManager.compactLayout ? 20 : 28
+                    font.bold: true
+                    elide: Text.ElideRight
+                }
                 Text {
                     x: 30; y: 66
                     text: lanRoleScopeText(currentLanInfo())
@@ -1110,7 +1112,7 @@ Item {
                     x: parent.width - width - 40
 
                     radius: 16
-                    color: "#0d302e"
+                    color: ui.card
                     border.color: lanStatusColor()
 
                     Text {
@@ -1204,7 +1206,9 @@ Item {
                     id: ipv4ConfigCard
                     x: 30
                     y: 95
-                    width: 590
+                    width: networkManager.compactLayout
+                           ? Math.max(430, Math.min(520, parent.width * 0.62))
+                           : 590
                     height: 260
                     radius: 16
                     color: ui.card
@@ -1229,71 +1233,45 @@ Item {
                         height: 28
                         radius: 14
                         visible: !networkManager.canEditCurrentLan()
-                        color: "#3a2a0b"
+                        color: ui.warningFill
                         border.color: ui.warning
                         Text { anchors.centerIn: parent; text: "READ ONLY"; color: ui.warning; font.pixelSize: 11; font.bold: true }
                     }
 
                     Row {
+                        id: lanModeRow
                         x: 26
                         y: 62
+                        width: parent.width - 52
                         spacing: 10
 
-                        Button {
+                        HmiButton {
                             id: lanDhcpModeButton
-                            width: 260
+                            width: (lanModeRow.width - lanModeRow.spacing) / 2
                             height: 44
+                            darkMode: hmiTheme.darkMode
+                            fontPixelSize: 14
                             text: "Using DHCP"
-                            scale: pressed ? 0.96 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                            tone: useDhcp ? "primary" : "normal"
                             onClicked: {
                                 useDhcp = true
                                 lanModeDirty = true
                                 statusMessage = "DHCP selected. Press Apply / Save to apply this mode."
                             }
-
-                            contentItem: Text {
-                                text: parent.text
-                                color: useDhcp ? "#001412" : ui.text
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
-
-                            background: Rectangle {
-                                radius: 10
-                                color: useDhcp ? ui.accent : ui.field
-                                border.color: useDhcp ? ui.accent : ui.border
-                            }
                         }
 
-                        Button {
+                        HmiButton {
                             id: lanStaticModeButton
-                            width: 260
+                            width: (lanModeRow.width - lanModeRow.spacing) / 2
                             height: 44
+                            darkMode: hmiTheme.darkMode
+                            fontPixelSize: 14
                             text: "Static Manual"
-                            scale: pressed ? 0.96 : 1.0
-                            Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                            tone: !useDhcp ? "primary" : "normal"
                             onClicked: {
                                 useDhcp = false
                                 lanModeDirty = true
                                 statusMessage = "Static Manual selected. Press Apply / Save to apply this mode."
-                            }
-
-                            contentItem: Text {
-                                text: parent.text
-                                color: !useDhcp ? "#001412" : ui.text
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                                font.pixelSize: 14
-                                font.bold: true
-                            }
-
-                            background: Rectangle {
-                                radius: 10
-                                color: !useDhcp ? ui.accent : ui.field
-                                border.color: !useDhcp ? ui.accent : ui.border
                             }
                         }
                     }
@@ -1317,7 +1295,7 @@ Item {
                             ]
 
                             ColumnLayout {
-                                Layout.preferredWidth: 260
+                                Layout.preferredWidth: Math.max(150, (ipv4ConfigCard.width - 66) / 2)
                                 spacing: 6
 
                                 Text {
@@ -1330,7 +1308,7 @@ Item {
                                 }
 
                                 TextField {
-                                    Layout.preferredWidth: 260
+                                    Layout.preferredWidth: Math.max(150, (ipv4ConfigCard.width - 66) / 2)
                                     Layout.preferredHeight: 42
                                     text: modelData.value
                                     placeholderText: modelData.placeholder
@@ -1352,20 +1330,20 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: useDhcp ? "#303740" : ui.field
-                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
+                                        color: useDhcp ? ui.disabledField : ui.field
+                                        border.color: useDhcp ? ui.disabledBorder : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
                         }
 
                         RowLayout {
-                            Layout.preferredWidth: 260
+                            Layout.preferredWidth: Math.max(150, (ipv4ConfigCard.width - 66) / 2)
                             Layout.preferredHeight: 63
                             spacing: 8
 
                             ColumnLayout {
-                                Layout.preferredWidth: 126
+                                Layout.preferredWidth: Math.max(70, (parent.width - parent.spacing) / 2)
                                 spacing: 6
 
                                 Text {
@@ -1378,7 +1356,7 @@ Item {
                                 }
 
                                 TextField {
-                                    Layout.preferredWidth: 126
+                                    Layout.fillWidth: true
                                     Layout.preferredHeight: 42
                                     text: primaryDns
                                     placeholderText: "8.8.8.8"
@@ -1396,14 +1374,14 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: useDhcp ? "#303740" : ui.field
-                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
+                                        color: useDhcp ? ui.disabledField : ui.field
+                                        border.color: useDhcp ? ui.disabledBorder : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
 
                             ColumnLayout {
-                                Layout.preferredWidth: 126
+                                Layout.preferredWidth: Math.max(70, (parent.width - parent.spacing) / 2)
                                 spacing: 6
 
                                 Text {
@@ -1416,7 +1394,7 @@ Item {
                                 }
 
                                 TextField {
-                                    Layout.preferredWidth: 126
+                                    Layout.fillWidth: true
                                     Layout.preferredHeight: 42
                                     text: secondaryDns
                                     placeholderText: "8.8.4.4"
@@ -1434,8 +1412,8 @@ Item {
 
                                     background: Rectangle {
                                         radius: 9
-                                        color: useDhcp ? "#303740" : ui.field
-                                        border.color: useDhcp ? "#46505c" : (parent.activeFocus ? ui.accent : ui.border)
+                                        color: useDhcp ? ui.disabledField : ui.field
+                                        border.color: useDhcp ? ui.disabledBorder : (parent.activeFocus ? ui.accent : ui.border)
                                     }
                                 }
                             }
@@ -1445,9 +1423,9 @@ Item {
 
                 Rectangle {
                     id: deviceInfoCard
-                    x: 650
+                    x: ipv4ConfigCard.x + ipv4ConfigCard.width + 18
                     y: 250
-                    width: parent.width - 700
+                    width: Math.max(150, parent.width - x - 20)
                     height: 260
                     radius: 16
                     color: ui.card
@@ -1516,9 +1494,9 @@ Item {
 
                 Rectangle {
                     id: keyboardEditSummary
-                    x: 650
+                    x: ipv4ConfigCard.x + ipv4ConfigCard.width + 18
                     y: 95
-                    width: parent.width - 700
+                    width: Math.max(150, parent.width - x - 20)
                     height: 105
                     radius: 16
                     color: ui.card
@@ -1529,7 +1507,7 @@ Item {
                     Text {
                         x: 24
                         y: 18
-                        width: parent.width - 190
+                        width: Math.max(80, parent.width - (networkManager.lanKeyboardMode ? 180 : 48))
                         text: "Editing " + lanDisplayName() + " / " + interfaceName
                         color: ui.text
                         font.pixelSize: 21
@@ -1540,7 +1518,7 @@ Item {
                     Text {
                         x: 24
                         y: 52
-                        width: parent.width - 190
+                        width: Math.max(80, parent.width - (networkManager.lanKeyboardMode ? 180 : 48))
                         text: "Configured IPv4: " + safeText(ipAddress, "-") +
                               "  ·  " + (useDhcp ? "DHCP" : "Static Manual") +
                               (networkManager.canEditCurrentLan() ? "" : "  ·  VIEW ONLY")
@@ -1549,69 +1527,57 @@ Item {
                         elide: Text.ElideRight
                     }
 
-                    Button {
+                    HmiButton {
                         anchors.right: parent.right
                         anchors.rightMargin: 18
                         anchors.verticalCenter: parent.verticalCenter
                         width: 130
                         height: 46
+                        darkMode: hmiTheme.darkMode
+                        fontPixelSize: 14
+                        tone: "primary"
                         text: "Done"
                         visible: networkManager.lanKeyboardMode
                         enabled: visible
-                        scale: pressed ? 0.96 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: closeVirtualKeyboard()
-                        contentItem: Text {
-                            text: parent.text
-                            color: "#001412"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
-                        background: Rectangle {
-                            radius: 10
-                            color: ui.accent
-                            border.color: ui.accent
-                        }
                     }
                 }
 
-                Row {
+                Grid {
                     id: lanActionRow
-                    x: 650
-                    y: 220
-                    spacing: 20
-                    Button {
+                    x: ipv4ConfigCard.x + ipv4ConfigCard.width + 18
+                    y: networkManager.compactLayout ? 212 : 220
+                    width: Math.max(150, parent.width - x - 20)
+                    columns: networkManager.compactLayout ? 1 : 3
+                    spacing: networkManager.compactLayout ? 8 : 20
+                    HmiButton {
                         id: lanApplyButton
-                        width: 220
-                        height: 48
+                        width: networkManager.compactLayout ? lanActionRow.width : 220
+                        height: networkManager.compactLayout ? 42 : 48
+                        darkMode: hmiTheme.darkMode
+                        fontPixelSize: 15
+                        tone: "primary"
                         text: networkManager.canEditCurrentLan() ? "Apply / Save" : "View Only"
                         enabled: networkManager.canEditCurrentLan()
-                        scale: pressed ? 0.95 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: networkManager.requestLanApplyConfirmation()
-                        contentItem: Text { text: parent.text; color: parent.enabled ? "#001412" : ui.subText; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: !lanApplyButton.enabled ? ui.field : lanApplyButton.pressed ? Qt.darker(ui.accent, 1.15) : ui.accent; border.color: parent.enabled ? ui.accent : ui.border }
                     }
-                    Button {
+                    HmiButton {
                         id: lanRefreshButton
-                        width: 220; height: 48; text: "Refresh"
-                        scale: pressed ? 0.96 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
+                        width: networkManager.compactLayout ? lanActionRow.width : 220
+                        height: networkManager.compactLayout ? 42 : 48
+                        darkMode: hmiTheme.darkMode
+                        fontPixelSize: 15
+                        text: "Refresh"
                         onClicked: { lanModeDirty = false; loadLanInterfaces() }
-                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: lanRefreshButton.pressed ? "#17283b" : ui.field; border.color: ui.border }
                     }
-                    Button {
+                    HmiButton {
                         id: lanStatusButton
-                        width: 220; height: 48
+                        width: networkManager.compactLayout ? lanActionRow.width : 220
+                        height: networkManager.compactLayout ? 42 : 48
+                        darkMode: hmiTheme.darkMode
+                        fontPixelSize: 15
                         text: isExternalLanCurrent() ? "RFSoC Status" : "DHCP Info"
-                        scale: pressed ? 0.96 : 1.0
-                        Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: isExternalLanCurrent() ? refreshExternalLanStatus() : refreshDhcpInfo()
-                        contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
-                        background: Rectangle { radius: 10; color: lanStatusButton.pressed ? "#17283b" : ui.field; border.color: ui.border }
                     }
                 }
             }

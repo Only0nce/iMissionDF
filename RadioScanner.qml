@@ -2,8 +2,13 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.0
 import QtQuick.Controls.Material 2.4
+import "ui"
 Item {
     id: scanpage
+    // Theme is injected by HomeDisplay/MainPage so the analyzer and all local
+    // dialogs switch immediately and deterministically with the global shell.
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: scanpage.darkMode }
     // width: 1195
     // height: 400
     property real freqMin: 10e6
@@ -13,11 +18,14 @@ Item {
     property real freqScan: Number(mainWindows.receiver_freq())
     property bool frequencyUiSyncing: false
     property bool keyfreqEdit: false
-    property string buttonColor: "#aa009688"
-    property string buttonColorRotary: "#ee009688"
-    property string freqEditColor: "#aaaaaa"
+    property color buttonColor: hmiTheme.accent
+    property color buttonColorRotary: hmiTheme.accentHover
+    property color freqEditColor: hmiTheme.textSecondary
     property real frequencyUnitValueButton: frequencyUnitValue
     property bool componentNotCompleted: false
+    readonly property bool compactCommandBar: width < 1160
+    readonly property bool narrowCommandBar: width < 900
+    readonly property int commandFontPixelSize: narrowCommandBar ? 8 : (compactCommandBar ? 10 : 12)
 
     // True only while this receiver/spectrum page is the active navigation page.
     // HomeDisplay owns the authoritative binding because it knows both StackViews.
@@ -63,8 +71,13 @@ Item {
         updateFrequency()
         componentNotCompleted = true
 
-        scanpage.width = screenrotation==270 ? 1195 : 1920
-        scanpage.height  = screenrotation==270 ? 400 : 1080
+        // Let StackView/AppShell own normal landscape geometry so resize and
+        // navigation-rail changes remain live. Preserve only the legacy 270°
+        // hardware geometry when that mode is explicitly active.
+        if (screenrotation == 270) {
+            scanpage.width = 1195
+            scanpage.height = 400
+        }
     }
 
 
@@ -136,28 +149,63 @@ Item {
         }
         frequencyUiSyncing = false
     }
-    RowLayout {
+    // Phase 2 HMI: one command surface visually groups the tuned frequency
+    // and the high-use receiver controls.  The existing ToolButton IDs and
+    // handlers remain authoritative; this layer changes presentation only.
+    Rectangle {
+        id: radioCommandBarBackdrop
+        x: 6
         y: 4
-        height: 65
+        width: parent.width - 12
+        height: hmiTheme.radioCommandBarHeight
+        radius: hmiTheme.radiusLg
+        color: hmiTheme.panel
+        border.width: 1
+        border.color: hmiTheme.line
+        z: 0
+    }
+
+    RowLayout {
+        y: 8
+        height: 64
         anchors.left: parent.left
         anchors.right: parent.right
-        anchors.leftMargin: 4
-        anchors.rightMargin: 8
+        anchors.leftMargin: 12
+        anchors.rightMargin: 12
+        spacing: hmiTheme.gapSm
+        z: 2
 
 
         Rectangle {
             id: rectangle
-            color: gpiokeyProfile == 2 ? "#A0000000" : "#50000000"
-            border.width: gpiokeyProfile == 2 ? 1 : 0
-            border.color: "#80ffffff"
+            color: hmiTheme.input
+            border.width: gpiokeyProfile == 2 || freqEdit.activeFocus ? 2 : 1
+            border.color: gpiokeyProfile == 2 || freqEdit.activeFocus
+                          ? hmiTheme.accentHover : hmiTheme.lineStrong
+            radius: hmiTheme.radiusMd
             Layout.fillHeight: true
             clip: true
-            Layout.preferredWidth: 480
+            Layout.preferredWidth: scanpage.narrowCommandBar ? 245
+                                   : (scanpage.compactCommandBar ? 300 : hmiTheme.radioFrequencyCardWidth)
+
+            Text {
+                anchors.left: parent.left
+                anchors.top: parent.top
+                anchors.leftMargin: 10
+                anchors.topMargin: 5
+                visible: !scanpage.narrowCommandBar
+                text: "RECEIVER"
+                color: hmiTheme.muted
+                font.pixelSize: 9
+                font.bold: true
+                font.letterSpacing: 0.8
+                z: 2
+            }
 
             ToolButton {
                 id: toolButtonFUnit
                 x: 450
-                width: 65
+                width: scanpage.narrowCommandBar ? 52 : 65
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
@@ -166,21 +214,21 @@ Item {
                 Layout.preferredHeight: 35
 
                 Rectangle {
-                    color: "#00ffffff"
-                    border.color: "#ffffff"
-                    border.width: 0
                     anchors.fill: parent
+                    anchors.margins: 7
+                    radius: hmiTheme.radiusSm
+                    color: toolButtonFUnit.pressed ? hmiTheme.card : hmiTheme.cardAlt
+                    border.color: toolButtonFUnit.hovered ? hmiTheme.accentHover : hmiTheme.line
+                    border.width: 1
+
                     Label {
-                        width: 40
-                        color: "#aaaaaa"
+                        color: hmiTheme.accentHover
                         text: freqUnit
                         anchors.fill: parent
-                        horizontalAlignment: Text.AlignLeft
-                        verticalAlignment: Text.AlignBottom
-                        font.pointSize: 20
-                        anchors.topMargin: 0
-                        anchors.bottomMargin: 0
-                        font.bold: false
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                        font.pixelSize: 13
+                        font.bold: true
                     }
                 }
                 onClicked: {
@@ -197,14 +245,17 @@ Item {
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
-                font.pixelSize: 60
+                font.pixelSize: scanpage.narrowCommandBar ? 26 : (scanpage.compactCommandBar ? 32 : 42)
+                font.family: "monospace"
                 horizontalAlignment: Text.AlignRight
-                verticalAlignment: Text.AlignTop
-                topPadding: 0
-                bottomPadding: -20
+                verticalAlignment: Text.AlignVCenter
+                topPadding: 5
+                bottomPadding: 0
                 anchors.topMargin: 0
-                anchors.rightMargin: 72
+                anchors.rightMargin: scanpage.narrowCommandBar ? 58 : 72
+                anchors.leftMargin: scanpage.narrowCommandBar ? 10 : 16
                 placeholderText: "10 - 3200"
+                background: Rectangle { color: "transparent" }
                 validator: DoubleValidator {
                     bottom: 10.0
                     top: 3200.0
@@ -257,7 +308,7 @@ Item {
                         // console.log("onTextChanged",freqScan, freqMin, freqMax)
                         if ((freqScan >= freqMin) & (freqScan <= freqMax))
                         {
-                            freqEditColor = "#aaaaaa"
+                            freqEditColor = hmiTheme.textSecondary
                         }
                         else
                         {
@@ -279,8 +330,8 @@ Item {
             // ✅ ไม่ใช้ header/title ของ Dialog (ให้เป็นกล่องเดียว)
             title: ""
             standardButtons: Dialog.NoButton
-            x: (parent.width/2)-(width/2)
-            y: (parent.height/2)+width/2
+            x: Math.max(12, (parent.width - width) / 2)
+            y: Math.max(12, (parent.height - height) / 2)
             // anchors.centerIn: parent
 
             width: Math.min(parent.width - 60, 520)
@@ -295,8 +346,8 @@ Item {
 
             background: Rectangle {
                 radius: 22               // ✅ โค้งทั้งกล่อง
-                color: "#0B1220"
-                border.color: "#223049"
+                color: hmiTheme.panel
+                border.color: hmiTheme.lineStrong
                 border.width: 1
             }
 
@@ -342,7 +393,7 @@ Item {
                     // ✅ Title อยู่ “ในกล่องเดียวกัน” (ไม่แยก header)
                     Text {
                         text: "Enter Preset Name"
-                        color: "#F1F5F9"
+                        color: hmiTheme.text
                         font.pixelSize: 20
                         font.bold: true
                     }
@@ -355,8 +406,8 @@ Item {
                         height: 46
 
                         font.pixelSize: 16
-                        color: "#E5E7EB"
-                        placeholderTextColor: "#93A4B8"
+                        color: hmiTheme.text
+                        placeholderTextColor: hmiTheme.muted
 
                         leftPadding: 14
                         rightPadding: 14
@@ -366,9 +417,9 @@ Item {
 
                         background: Rectangle {
                             radius: 14
-                            color: "#0F172A"
+                            color: hmiTheme.input
                             border.width: 1
-                            border.color: presetNameField.activeFocus ? "#5A6A84" : "#334155"
+                            border.color: presetNameField.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                         }
 
                         Keys.onReturnPressed: nameDialog.doOk()
@@ -394,16 +445,16 @@ Item {
                                 anchors.fill: parent
                                 radius: height / 2
                                 color: cancelBtn.pressed
-                                       ? "#1E293B"
-                                       : (cancelBtn.hovered ? "#0F172A" : "transparent")
-                                border.color: cancelBtn.hovered ? "#94A3B8" : "#3B4B63"
+                                       ? hmiTheme.cardAlt
+                                       : (cancelBtn.hovered ? hmiTheme.input : "transparent")
+                                border.color: cancelBtn.hovered ? hmiTheme.accentHover : hmiTheme.lineStrong
                                 border.width: 1
                             }
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "CANCEL"
-                                color: cancelBtn.hovered ? "#FFFFFF" : "#F2F6FF"
+                                color: hmiTheme.text
                                 font.pixelSize: 14
                                 font.bold: true
                             }
@@ -430,16 +481,16 @@ Item {
                                 anchors.fill: parent
                                 radius: height / 2
                                 color: okBtn.pressed
-                                       ? "#064E3B"
-                                       : (okBtn.hovered ? "#0F766E" : "transparent")
-                                border.color: okBtn.hovered ? "#2DD4BF" : "#3B4B63"
+                                       ? Qt.darker(hmiTheme.accent, 1.18)
+                                       : (okBtn.hovered ? hmiTheme.accent : "transparent")
+                                border.color: okBtn.hovered ? hmiTheme.accentHover : hmiTheme.accent
                                 border.width: 1
                             }
 
                             Text {
                                 anchors.centerIn: parent
                                 text: "OK"
-                                color: okBtn.hovered ? "#ECFEFF" : "#2DD4BF"
+                                color: okBtn.hovered ? "#061514" : hmiTheme.accent
                                 font.pixelSize: 14
                                 font.bold: true
                             }
@@ -461,7 +512,8 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 76
+            Layout.preferredHeight: 60
+            spacing: 5
 
             ToolButton {
                 id: toolButtonScaner
@@ -472,23 +524,15 @@ Item {
                     openDrawer(4)
                     // drawerScanerOption.open()
                 }
-                Rectangle {
-                    color: "#aa009688"
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        width: 40
-                        text: "RF Scan"
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: false
-                        anchors.topMargin: 0
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: "RF SCAN"
+                    tone: "primary"
+                    hovered: toolButtonScaner.hovered
+                    pressed: toolButtonScaner.pressed
                 }
             }
 
@@ -501,23 +545,15 @@ Item {
                 }
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        width: 40
-                        text: receiverMode.get(scanReceiverModeSelected).mode
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: false
-                        anchors.topMargin: 0
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: receiverMode.get(scanReceiverModeSelected).mode
+                    tone: "primary"
+                    hovered: toolButtonAnalogDigital.hovered
+                    pressed: toolButtonAnalogDigital.pressed
                 }
             }
 
@@ -531,23 +567,15 @@ Item {
                 }
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        width: 40
-                        text: receiverMode.get(scanReceiverModeSelected).name
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: false
-                        anchors.topMargin: 0
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: receiverMode.get(scanReceiverModeSelected).name
+                    tone: "primary"
+                    hovered: toolButtonModSelect.hovered
+                    pressed: toolButtonModSelect.pressed
                 }
             }
 
@@ -562,23 +590,17 @@ Item {
                 }
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        width: 40
-                        text: (spectrumGLPlot.high_cut - spectrumGLPlot.low_cut) > 1000 ? ((spectrumGLPlot.high_cut - spectrumGLPlot.low_cut)/1e3).toFixed(1) + "kHz" : (spectrumGLPlot.high_cut - spectrumGLPlot.low_cut).toFixed(0) + "Hz"
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: false
-                        anchors.topMargin: 0
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: (spectrumGLPlot.high_cut - spectrumGLPlot.low_cut) > 1000
+                          ? ((spectrumGLPlot.high_cut - spectrumGLPlot.low_cut)/1e3).toFixed(1) + " kHz"
+                          : (spectrumGLPlot.high_cut - spectrumGLPlot.low_cut).toFixed(0) + " Hz"
+                    tone: "primary"
+                    hovered: toolButtonBandwidth.hovered
+                    pressed: toolButtonBandwidth.pressed
                 }
             }
             ToolButton
@@ -587,23 +609,16 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: gpiokeyProfile == 3 ? buttonColorRotary : buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        width: 40
-                        text: "SQL\n" + ((scanSqlLevel-255)/2).toFixed(1)+" dB"
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                        font.bold: false
-                        anchors.topMargin: 0
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: "SQL\n" + ((scanSqlLevel-255)/2).toFixed(1) + " dB"
+                    tone: "primary"
+                    active: gpiokeyProfile == 3
+                    hovered: toolButtonSql.hovered
+                    pressed: toolButtonSql.pressed
                 }
                 onClicked: {
                     indexGpiokeyProfile = 3
@@ -619,24 +634,16 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: gpiokeyProfile == 5 ? buttonColorRotary : buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        property string volText: scanMuteOn ? "Volume\nMute" : "Volume\n" + scanAudioLevel +" %"
-                        width: 40
-                        text: volText
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                        font.bold: false
-                        anchors.topMargin: 0
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: scanMuteOn ? "VOLUME\nMUTE" : "VOLUME\n" + scanAudioLevel + " %"
+                    tone: scanMuteOn ? "warning" : "primary"
+                    active: gpiokeyProfile == 5
+                    hovered: toolButtonVolSoftware.hovered
+                    pressed: toolButtonVolSoftware.pressed
                 }
                 onClicked: {
                     indexGpiokeyProfile = 2
@@ -652,24 +659,16 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: gpiokeyProfile == 1 ? buttonColorRotary : buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        property string phoneText: phoneMuteOn ? "Phone\nMute" : "Phone\n" + ((scanVolLevelHeadphone-255)/2).toFixed(1) +" dB"
-                        width: 40
-                        text: phoneText
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 12
-                        font.bold: false
-                        anchors.topMargin: 0
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: phoneMuteOn ? "PHONE\nMUTE" : "PHONE\n" + ((scanVolLevelHeadphone-255)/2).toFixed(1) + " dB"
+                    tone: phoneMuteOn ? "warning" : "primary"
+                    active: gpiokeyProfile == 1
+                    hovered: toolButtonPhone.hovered
+                    pressed: toolButtonPhone.pressed
                 }
                 onClicked:{
                     indexGpiokeyProfile = 1
@@ -685,26 +684,18 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: gpiokeyProfile == 0 ? buttonColorRotary : buttonColor
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Label {
-                        property string speakerText: scanMuteOn
-                                                     ? "Speaker\nMute"
-                                                     : "Speaker\n" + ((scanVolLevel-255)/2).toFixed(1) +" dB"
-                        width: 40
-                        text: speakerText
-                        anchors.fill: parent
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        anchors.bottomMargin: 0
-                        font.pixelSize: 13
-                        font.bold: false
-                        anchors.topMargin: 0
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: scanMuteOn
+                          ? "SPEAKER\nMUTE"
+                          : "SPEAKER\n" + ((scanVolLevel-255)/2).toFixed(1) + " dB"
+                    tone: scanMuteOn ? "warning" : "primary"
+                    active: gpiokeyProfile == 0
+                    hovered: toolButtonVol.hovered
+                    pressed: toolButtonVol.pressed
                 }
                 onClicked: {
                     indexGpiokeyProfile = 0
@@ -719,22 +710,35 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
-                Rectangle {
-                    color: "#aa009688"
-                    radius: 5
-                    border.color: "#ffffff"
-                    border.width: 0
+                hoverEnabled: true
+                HmiControlTile {
                     anchors.fill: parent
-                    Image {
-                        id: image
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        anchors.topMargin: 8
-                        anchors.bottomMargin: 8
-                        source: modifyPreset ? "images/save2.png" : "images/newfmradio.png"
-                        fillMode: Image.PreserveAspectFit
-                    }
+                    darkMode: hmiTheme.darkMode
+                    fontPixelSize: scanpage.commandFontPixelSize
+                    text: ""
+                    tone: "neutral"
+                    active: modifyPreset
+                    hovered: toolButtonNewPreset.hovered
+                    pressed: toolButtonNewPreset.pressed
+                }
+                Image {
+                    id: image
+                    anchors.centerIn: parent
+                    width: 30
+                    height: 30
+                    source: modifyPreset ? "images/save2.png" : "images/newfmradio.png"
+                    fillMode: Image.PreserveAspectFit
+                }
+                Text {
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.bottomMargin: 3
+                    text: modifyPreset ? "SAVE" : "PRESET"
+                    color: hmiTheme.textSecondary
+                    font.pixelSize: 8
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
                 }
                 onClicked: {
                     // console.log("toolButtonNewPreset onClick:",modifyPreset)
@@ -769,6 +773,7 @@ Item {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredHeight: 35
+                hoverEnabled: true
 
                 // R20.4 RADIO UX1.4: REC indication follows the actual recorder
                 // state reported by LogWatcher/Mainwindows, not SQL. SQL can gate
@@ -853,63 +858,46 @@ Item {
 
                 Rectangle {
                     color: toolButtonRec.recActualOn
-                           ? (toolButtonRec.blinkPhaseOn ? "#ccbf1b1b" : "#aa009688")
+                           ? (toolButtonRec.blinkPhaseOn ? hmiTheme.danger : Qt.darker(hmiTheme.danger, 1.18))
                            : (toolButtonRec.recExpectedOn
-                              ? (toolButtonRec.blinkPhaseOn ? "#cc7a4a00" : "#aa009688")
-                              : "#aa009688")
-                    radius: 5
+                              ? (toolButtonRec.blinkPhaseOn ? hmiTheme.warning : Qt.darker(hmiTheme.warning, 1.18))
+                              : hmiTheme.cardAlt)
+                    radius: hmiTheme.radiusSm
                     border.color: toolButtonRec.recActualOn
-                                  ? (toolButtonRec.blinkPhaseOn ? "#ffff4444" : "#55ff4444")
-                                  : (toolButtonRec.recExpectedOn
-                                     ? (toolButtonRec.blinkPhaseOn ? "#ffffaa33" : "#55ffaa33")
-                                     : "#ffffff")
-                    border.width: toolButtonRec.scanRecOn ? 2 : 0
+                                  ? hmiTheme.danger
+                                  : (toolButtonRec.recExpectedOn ? hmiTheme.warning
+                                                                 : (toolButtonRec.hovered ? hmiTheme.accentHover : hmiTheme.lineStrong))
+                    border.width: toolButtonRec.scanRecOn || toolButtonRec.hovered ? 2 : 1
                     anchors.fill: parent
 
-                    Image {
-                        id: image1
-                        anchors.fill: parent
-                        anchors.leftMargin: 8
-                        anchors.rightMargin: 8
-                        anchors.topMargin: 8
-                        anchors.bottomMargin: 8
-                        source: toolButtonRec.scanRecOn
-                                ? "images/recOn.png"
-                                : "images/recOff.png"
-                        fillMode: Image.PreserveAspectFit
-                        opacity: toolButtonRec.scanRecOn
-                                 ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.45)
-                                 : 0.6
-                    }
+                    Row {
+                        anchors.centerIn: parent
+                        spacing: 6
 
-                    Rectangle {
-                        id: recLiveDot
-                        width: 10
-                        height: 10
-                        radius: 5
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.topMargin: 4
-                        anchors.rightMargin: 4
-                        color: toolButtonRec.recActualOn ? "#ff2b2b" : "#ffaa33"
-                        border.color: "white"
-                        border.width: 1
-                        visible: toolButtonRec.scanRecOn
-                        opacity: toolButtonRec.blinkPhaseOn ? 1.0 : 0.20
-                    }
+                        Rectangle {
+                            id: recLiveDot
+                            width: 10
+                            height: 10
+                            radius: 5
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: toolButtonRec.recActualOn ? "#FFFFFF"
+                                  : (toolButtonRec.recExpectedOn ? "#2A1700" : hmiTheme.muted)
+                            visible: toolButtonRec.scanRecOn
+                            opacity: toolButtonRec.scanRecOn
+                                     ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.28)
+                                     : 0.0
+                        }
 
-                    Text {
-                        id: recLiveText
-                        anchors.left: parent.left
-                        anchors.bottom: parent.bottom
-                        anchors.leftMargin: 5
-                        anchors.bottomMargin: 3
-                        visible: toolButtonRec.scanRecOn
-                        text: toolButtonRec.recActualOn ? "REC" : "ARM"
-                        color: "white"
-                        font.pixelSize: 9
-                        font.bold: true
-                        opacity: toolButtonRec.blinkPhaseOn ? 1.0 : 0.35
+                        Text {
+                            id: recLiveText
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: toolButtonRec.recActualOn ? "REC"
+                                  : (toolButtonRec.recExpectedOn ? "ARM" : "REC")
+                            color: toolButtonRec.scanRecOn ? "#FFFFFF" : hmiTheme.textSecondary
+                            font.pixelSize: 12
+                            font.bold: true
+                            font.letterSpacing: 0.5
+                        }
                     }
 
                     Timer {
@@ -930,20 +918,34 @@ Item {
             }
             Rectangle {
                 id : cputempCard
-                color: "#aa009688"
-                radius: 5
-                border.color: "#80000000"
-                border.width: 0
-                Layout.preferredWidth: 80
+                color: hmiTheme.cardAlt
+                radius: hmiTheme.radiusSm
+                border.color: cpuDatatemperature > 70 ? hmiTheme.danger
+                              : (cpuDatatemperature > 50 ? hmiTheme.warning : hmiTheme.lineStrong)
+                border.width: 1
+                Layout.preferredWidth: 86
                 Layout.fillHeight: true
                 property real temperature: cpuDatatemperature
                 onTemperatureChanged: cputempCanvas.requestPaint()
-                Text {
+                Column {
                     anchors.centerIn: parent
-                    text: cpuDatatemperature + "°C"
-                    font.pixelSize: 16
-                    anchors.verticalCenterOffset: 7
-                    color: "white"
+                    anchors.verticalCenterOffset: 4
+                    spacing: 1
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: "TEMP"
+                        font.pixelSize: 8
+                        font.bold: true
+                        color: hmiTheme.muted
+                    }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: Number(cpuDatatemperature).toFixed(1) + "°C"
+                        font.pixelSize: 13
+                        font.bold: true
+                        color: cpuDatatemperature > 70 ? hmiTheme.danger
+                               : (cpuDatatemperature > 50 ? hmiTheme.warning : hmiTheme.text)
+                    }
                 }
 
                 // Optional: Visual temperature bar (circle fill)
@@ -995,16 +997,14 @@ Item {
                 // }
 
             }
-
-
-            spacing: 2
         }
     }
 
     SpectrumGLPlot {
         id: spectrumGLPlot
+        darkMode: hmiTheme.darkMode
         anchors.fill: parent
-        anchors.topMargin: 70
+        anchors.topMargin: 82
         runtimeActive: scanpage.runtimeActive
     }
 

@@ -1,6 +1,7 @@
 // RemoteSdrRow.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import "../../ui"
 
 Item {
     id: rowWrap
@@ -9,6 +10,9 @@ Item {
     height: deviceRow.implicitHeight > 0 ? deviceRow.implicitHeight : deviceRow.height
 
     // ===== Inputs =====
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: rowWrap.darkMode }
+
     property var view              // listView
     // มี model.* และ index จาก delegate context ให้ใช้ได้ตรง ๆ
 
@@ -27,6 +31,7 @@ Item {
         deviceStatus: model.status
         deviceRssi:   0
         rowIndex:     index
+        darkMode: rowWrap.darkMode
     }
 
     // ไฮไลต์เมื่อ current
@@ -35,7 +40,7 @@ Item {
         radius: 8
         color: "transparent"
         border.width: ListView.isCurrentItem ? 2 : 1
-        border.color: ListView.isCurrentItem ? "#3fe28a" : "#10331a"
+        border.color: ListView.isCurrentItem ? hmiTheme.accent : hmiTheme.line
         z: 1
     }
 

@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import iScan.Display 1.0
+import "../ui"
 
 // ============================================================
 // FftPlot.qml (solid colors, NO gradients / NO rgba alpha)
@@ -14,9 +15,11 @@ import iScan.Display 1.0
 
 Rectangle {
     id: root
+    property bool darkMode: true
+    Theme { id: theme; darkMode: root.darkMode }
     radius: 12
-    color: "#060B16"
-    border.color: "#1F2A44"
+    color: theme.plot
+    border.color: theme.analyzerBorder
     border.width: 1
     clip: true
 
@@ -97,17 +100,17 @@ Rectangle {
     property int labelInsetX: 10
 
     // Style (SOLID only)
-    property color cBg0:    "#060B16"
-    property color cGrid:   "#142033"
-    property color cText:   "#AAB7D1"
-    property color cLineA:  "#38BDF8"
-    property color cBand:   "#1B3A2A"
-    property color cBandLn: "#22C55E"
-    property color cBorder: "#24314C"
-    property color cMarkLn: "#F59E0B"
-    property color cWarnBg: "#2A0B0B"
-    property color cWarnBd: "#7F1D1D"
-    property color cWarnTx: "#FCA5A5"
+    property color cBg0:    theme.plot
+    property color cGrid:   theme.gridLine
+    property color cText:   theme.axisText
+    property color cLineA:  root.darkMode ? "#38BDF8" : "#2167BC"
+    property color cBand:   root.darkMode ? "#1B3A2A" : "#DDF3EC"
+    property color cBandLn: root.darkMode ? "#22C55E" : "#16824C"
+    property color cBorder: theme.gridLineStrong
+    property color cMarkLn: root.darkMode ? "#F59E0B" : "#B97910"
+    property color cWarnBg: root.darkMode ? "#2A0B0B" : "#FDECEE"
+    property color cWarnBd: root.darkMode ? "#7F1D1D" : "#D66B74"
+    property color cWarnTx: root.darkMode ? "#FCA5A5" : "#A92330"
 
     property int axisFontPx: 11
     property color cAxisText: cText
@@ -285,6 +288,7 @@ Rectangle {
     onYMaxDbChanged:       { if (!root.yAuto) { _markGridDirty(); _markPlotDirty() } }
     onWidthChanged:        { _markGridDirty(); _markPlotDirty() }
     onHeightChanged:       { _markGridDirty(); _markPlotDirty() }
+    onDarkModeChanged:     { _markGridDirty(); _markPlotDirty(); gridCanvas.requestPaint(); plotCanvas.requestPaint(); markerCanvas.requestPaint() }
 
     // =========================
     // FPS throttler
@@ -330,7 +334,7 @@ Rectangle {
             ctx.fillRect(0,0,width,height)
 
             if (root._n < 8 || !_isValidArray(root.magDb)) {
-                ctx.fillStyle = "#93A4C7"
+                ctx.fillStyle = root.cText
                 ctx.font = "14px Arial, Helvetica, sans-serif"
                 ctx.fillText("No FFT data", 14, 24)
                 return
@@ -412,7 +416,7 @@ Rectangle {
         viewStopFreq: root._fmax
         sampleRate: Math.max(1, root._fmax - root._fmin)
         spectrumColor: root.cLineA
-        fillColor: Qt.rgba(56 / 255, 189 / 255, 248 / 255, 0.18)
+        fillColor: root.darkMode ? Qt.rgba(56 / 255, 189 / 255, 248 / 255, 0.18) : Qt.rgba(33 / 255, 103 / 255, 188 / 255, 0.12)
     }
 
     function _requestCanvasPaintSafe(canvas, name) {
@@ -587,8 +591,8 @@ Rectangle {
         x: root.labelInsetX
         y: root.padTop - 2
         radius: 10
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: theme.analyzerHud
+        border.color: theme.analyzerBorder
         border.width: 1
         opacity: 0.85
         height: 22
@@ -611,8 +615,8 @@ Rectangle {
         x: root.labelInsetX
         y: root.padTop + root._plotH() - 18
         radius: 10
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: theme.analyzerHud
+        border.color: theme.analyzerBorder
         border.width: 1
         opacity: 0.85
         height: 22
@@ -635,8 +639,8 @@ Rectangle {
         x: root.labelInsetX
         y: root.height - 30
         radius: 10
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: theme.analyzerHud
+        border.color: theme.analyzerBorder
         border.width: 1
         opacity: 0.85
         height: 22
@@ -658,8 +662,8 @@ Rectangle {
         visible: root.enabled && root._n >= 8
         y: root.height - 30
         radius: 10
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: theme.analyzerHud
+        border.color: theme.analyzerBorder
         border.width: 1
         opacity: 0.85
         height: 22
@@ -685,8 +689,8 @@ Rectangle {
         width: 28
         height: 28
         radius: 8
-        color: "#0F172A"
-        border.color: "#2B3856"
+        color: theme.analyzerHud
+        border.color: theme.analyzerBorder
         border.width: 1
         anchors.right: parent.right
         anchors.rightMargin: 10
@@ -697,7 +701,7 @@ Rectangle {
         Text {
             anchors.centerIn: parent
             text: "Y"
-            color: "#E5E7EB"
+            color: theme.analyzerText
             font.pixelSize: 13
             font.bold: true
         }
@@ -848,11 +852,11 @@ Rectangle {
     Item {
         anchors.fill: parent
         visible: !root.enabled
-        Rectangle { anchors.fill: parent; color: Qt.rgba(2/255, 6/255, 23/255, 0.55) }
+        Rectangle { anchors.fill: parent; color: root.darkMode ? Qt.rgba(2/255, 6/255, 23/255, 0.55) : Qt.rgba(248/255, 251/255, 252/255, 0.78) }
         Text {
             anchors.centerIn: parent
             text: "FFT is OFF"
-            color: "#F87171"
+            color: theme.danger
             font.pixelSize: 18
             font.bold: true
         }
@@ -874,8 +878,8 @@ Rectangle {
 
         background: Rectangle {
             radius: 12
-            color: "#0B1220"
-            border.color: "#223049"
+            color: theme.analyzerPanel
+            border.color: theme.analyzerBorder
             border.width: 1
         }
 
@@ -892,14 +896,14 @@ Rectangle {
 
             Text {
                 text: "FFT Y-Axis"
-                color: "#E5E7EB"
+                color: theme.analyzerText
                 font.pixelSize: 14
                 font.bold: true
             }
 
             Row {
                 spacing: 8
-                Text { text: "Auto"; color: "#94A3B8"; width: 60 }
+                Text { text: "Auto"; color: theme.analyzerMuted; width: 60 }
                 Switch {
                     id: autoSwitch
                     checked: true
@@ -909,7 +913,7 @@ Rectangle {
 
             Row {
                 spacing: 8
-                Text { text: "Min dB"; color: "#94A3B8"; width: 60 }
+                Text { text: "Min dB"; color: theme.analyzerMuted; width: 60 }
                 TextField {
                     id: minField
                     width: 220
@@ -921,7 +925,7 @@ Rectangle {
 
             Row {
                 spacing: 8
-                Text { text: "Max dB"; color: "#94A3B8"; width: 60 }
+                Text { text: "Max dB"; color: theme.analyzerMuted; width: 60 }
                 TextField {
                     id: maxField
                     width: 220

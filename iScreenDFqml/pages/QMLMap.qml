@@ -17,6 +17,7 @@
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtLocation 5.15
 import QtPositioning 5.15
@@ -24,6 +25,7 @@ import QtQuick.Window 2.15
 import QtGraphicalEffects 1.15
 import Qt.labs.settings 1.1
 import "./"
+import "../../ui" as HMI
 
 Item {
 id: mapviewer
@@ -35,6 +37,9 @@ id: mapviewer
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
 signal requestScreenshot()
+
+// Phase 6 HMI shell theme. Map tile style remains independent from the app theme.
+HMI.Theme { id: hmiTheme; darkMode: mapviewer.Material.theme === Material.Dark }
 
 // ================== STYLE CONFIG (3 styles) ==================
 property int styleIndex: 2
@@ -2494,6 +2499,75 @@ anchors.fill: parent
 sourceComponent: null
 }
 
+// ================== MAP OPERATION STATUS ==================
+// Presentation-only overlay: all values are read from existing runtime state.
+Rectangle {
+    id: mapOperationStatus
+    z: 100002
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    // MainPage's global HMI bar overlays the StackView. Keep map status below it.
+    anchors.topMargin: 72
+    width: Math.min(Math.max(620, statusRow.implicitWidth + 32), Math.max(620, parent.width - 190))
+    height: 44
+    radius: hmiTheme.radiusMd
+    color: hmiTheme.analyzerHud
+    border.width: 1
+    border.color: hmiTheme.analyzerBorder
+
+    Row {
+        id: statusRow
+        anchors.centerIn: parent
+        spacing: 14
+
+        Text {
+            text: "MAP VISUALIZATION"
+            color: hmiTheme.analyzerText
+            font.pixelSize: 12
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+
+        Rectangle { width: 1; height: 22; color: hmiTheme.analyzerBorder; anchors.verticalCenter: parent.verticalCenter }
+
+        Text {
+            text: mapviewer.useOfflineStyle ? "CACHE / OFFLINE" : "ONLINE MAP"
+            color: mapviewer.useOfflineStyle ? hmiTheme.warning : hmiTheme.success
+            font.pixelSize: 11
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: (mapviewer.styleIndex === 0 ? "DARK" : (mapviewer.styleIndex === 1 ? "LIGHT" : "SATELLITE"))
+            color: hmiTheme.analyzerAccent
+            font.pixelSize: 11
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: gpsPinsModel.count + " GPS"
+            color: hmiTheme.analyzerText
+            font.pixelSize: 11
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: doaPinsModel.count + " DOA"
+            color: hmiTheme.analyzerText
+            font.pixelSize: 11
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+        Text {
+            text: mapviewer.txEstimate.valid ? "TX TRACK" : "TX WAIT"
+            color: mapviewer.txEstimate.valid ? hmiTheme.success : hmiTheme.muted
+            font.pixelSize: 11
+            font.bold: true
+            anchors.verticalCenter: parent.verticalCenter
+        }
+    }
+}
+
 // ============================================================
 // DoaHistoryViewer HUD Overlay
 // ============================================================
@@ -2644,8 +2718,10 @@ z: 100000
 Rectangle {
     anchors.fill: parent
     radius: width / 2
-    color: mapviewer.viewerVisible ? "#2ecc71" : "#C7C8CC"
-    opacity: 0.7
+    color: mapviewer.viewerVisible ? hmiTheme.success : hmiTheme.disabled
+    opacity: 0.92
+    border.width: 1
+    border.color: mapviewer.viewerVisible ? hmiTheme.success : hmiTheme.lineStrong
     MouseArea { anchors.fill: parent; onClicked: mapviewer.viewerVisible = !mapviewer.viewerVisible }
 }
 
@@ -2744,6 +2820,22 @@ Item {
             NumberAnimation { duration: 300; easing.type: Easing.InOutQuad }
         }
 
+        // StackView may destroy the map page immediately after a navigation.
+        // A child Timer is lifecycle-safe, unlike Qt.callLater closures that can
+        // execute after the QML context has already been invalidated.
+        Timer {
+            id: doaDeferredRefreshTimer
+            interval: 0
+            repeat: false
+            onTriggered: {
+                mapviewer.doaUpdateTick++
+                mapviewer.rebuildTxEstimateKrakenLike()
+                mapviewer.updateMaxDoaMonitor()
+                headingLineCanvas.safeRequestPaint()
+                maxDoaLineCanvas.safeRequestPaint()
+            }
+        }
+
         Connections {
             target: Krakenmapval
             function onUpdateGpsMarker(serial, controllerName, lat, lon, alt, dateStr, timeStr) {
@@ -2774,26 +2866,14 @@ Item {
                 if (thOk && spOk) mapviewer.upsertDoaFrame(s, n, thetaArray, spectrumArray, doaDeg, confidence, headingNow)
                 else              mapviewer.upsertMaxOnlyDoa(s, n, doaDeg, confidence, headingNow)
 
-                Qt.callLater(function() {
-                    mapviewer.doaUpdateTick++
-                    mapviewer.rebuildTxEstimateKrakenLike()
-                    mapviewer.updateMaxDoaMonitor()
-                    headingLineCanvas.safeRequestPaint()
-                    maxDoaLineCanvas.safeRequestPaint()
-                })
+                doaDeferredRefreshTimer.restart()
             }
         }
 
         Connections {
             target: doaPinsModel
             function onCountChanged() {
-                Qt.callLater(function() {
-                    mapviewer.doaUpdateTick++
-                    mapviewer.rebuildTxEstimateKrakenLike()
-                    mapviewer.updateMaxDoaMonitor()
-                    headingLineCanvas.safeRequestPaint()
-                    maxDoaLineCanvas.safeRequestPaint()
-                })
+                doaDeferredRefreshTimer.restart()
             }
         }
 
@@ -3976,8 +4056,8 @@ Item {
         }
 
         CompassCanvas {
-            width: 700
-            height: 700
+            width: Math.max(280, Math.min(700, parent.width - 80, parent.height - 80))
+            height: width
             anchors.centerIn: parent
             visible: mapviewer.compassVisible
             bearing: map.bearing
@@ -4017,7 +4097,9 @@ Item {
             Rectangle {
                 radius: width / 2
                 anchors.fill: parent
-                color: "#C7C8CC"; opacity: 0.6
+                color: hmiTheme.analyzerHud; opacity: 0.94
+                border.width: 1
+                border.color: hmiTheme.analyzerBorder
                 MouseArea { anchors.fill: parent; onClicked: map.bearing = 0 }
             }
 
@@ -4044,8 +4126,10 @@ Item {
             Rectangle {
                 radius: width / 2
                 anchors.fill: parent
-                color: mapviewer.followPositionEnabled ? "#3498db" : "#C7C8CC"
-                opacity: 0.6
+                color: mapviewer.followPositionEnabled ? hmiTheme.accent : hmiTheme.analyzerHud
+                opacity: 0.94
+                border.width: 1
+                border.color: mapviewer.followPositionEnabled ? hmiTheme.accentHover : hmiTheme.analyzerBorder
                 MouseArea {
                     anchors.fill: parent
                     onClicked: {
@@ -4069,7 +4153,7 @@ Item {
 }
 }
 
-// ================== THEME BUTTON ==================
+// ================== MAP STYLE BUTTON ==================
 Item {
 id: themeButton
 width: 48
@@ -4083,8 +4167,10 @@ z: 100000
 Rectangle {
     anchors.fill: parent
     radius: width / 2
-    color: "#C7C8CC"
-    opacity: 0.6
+    color: hmiTheme.analyzerHud
+    opacity: 0.94
+    border.width: 1
+    border.color: hmiTheme.analyzerBorder
 
     MouseArea {
         anchors.fill: parent
@@ -4118,10 +4204,10 @@ Item {
    anchors.topMargin: 120
 
    property int  hudMaxCards: 12
-   property int  cardW: 300
+   property int  cardW: mapviewer.width < 1100 ? 260 : 300
    property int  cardH: 190
    property int  cardGap: 10
-   property int  listMaxH: 790
+   property int  listMaxH: Math.max(220, Math.min(790, mapviewer.height - 190))
 
    // ✅ IMPORTANT: do not force selectedKey to be first => list won't jump
    property bool selectedFirst: false
@@ -4369,12 +4455,12 @@ Item {
            Rectangle {
                anchors.fill: parent
                radius: 16
-               color: "#0B1216"
-               opacity: card.isHidden ? 0.35 : 0.72
-               border.width: 2
+               color: hmiTheme.darkMode ? hmiTheme.analyzerHud : "#FDFEFE"
+               opacity: card.isHidden ? (hmiTheme.darkMode ? 0.42 : 0.72) : (hmiTheme.darkMode ? 0.94 : 0.98)
+               border.width: hmiTheme.darkMode ? 1 : 1.25
                border.color: card.isHidden
-                             ? "#2A3A44"
-                             : (card.isHi ? card.pinColor : "#2A3A44")
+                             ? hmiTheme.analyzerBorder
+                             : (card.isHi ? card.pinColor : (hmiTheme.darkMode ? hmiTheme.analyzerBorder : hmiTheme.lineStrong))
            }
 
            Row {
@@ -4397,7 +4483,7 @@ Item {
 
                Text {
                    text: cardKey && cardKey.length ? cardKey : "-"
-                   color: "#e6edf3"
+                   color: hmiTheme.analyzerText
                    opacity: card.isHidden ? 0.55 : 1.0
                    font.pixelSize: 11
                    font.bold: true
@@ -4471,7 +4557,7 @@ Item {
                    anchors.left: parent.left
                    anchors.top: parent.top
                    text: "COMPASS"
-                   color: "#9aa6b2"
+                   color: hmiTheme.textSecondary
                    font.pixelSize: 11
                    font.bold: true
                }
@@ -4490,6 +4576,14 @@ Item {
                            id: compassMini
                            anchors.fill: parent
                            antialiasing: true
+                           readonly property string ringMajorColor: hmiTheme.darkMode ? "rgba(255,255,255,0.35)" : "rgba(51,81,94,0.72)"
+                           readonly property string ringMinorColor: hmiTheme.darkMode ? "rgba(255,255,255,0.12)" : "rgba(76,109,121,0.28)"
+                           readonly property string tickMajorColor: hmiTheme.darkMode ? "rgba(255,255,255,0.60)" : "rgba(29,60,71,0.78)"
+                           readonly property string tickMidColor: hmiTheme.darkMode ? "rgba(255,255,255,0.32)" : "rgba(53,88,98,0.52)"
+                           readonly property string tickMinorColor: hmiTheme.darkMode ? "rgba(255,255,255,0.18)" : "rgba(71,102,111,0.34)"
+                           readonly property string labelColor: hmiTheme.darkMode ? "rgba(255,255,255,0.85)" : "rgba(17,40,46,0.96)"
+                           readonly property string centerDotColor: hmiTheme.darkMode ? "rgba(255,255,255,0.55)" : "rgba(21,54,63,0.90)"
+                           readonly property string offTextColor: hmiTheme.darkMode ? "rgba(255,255,255,0.20)" : "rgba(67,93,101,0.82)"
 
                            property real mapBearingDeg: (mapLoader.item && mapLoader.item.map)
                                                          ? Number(mapLoader.item.map.bearing || 0)
@@ -4526,13 +4620,13 @@ Item {
 
                                ctx.beginPath()
                                ctx.arc(cx, cy, r, 0, Math.PI * 2)
-                               ctx.strokeStyle = "rgba(255,255,255,0.35)"
+                               ctx.strokeStyle = compassMini.ringMajorColor
                                ctx.lineWidth = 2
                                ctx.stroke()
 
                                ctx.beginPath()
                                ctx.arc(cx, cy, r * 0.62, 0, Math.PI * 2)
-                               ctx.strokeStyle = "rgba(255,255,255,0.12)"
+                               ctx.strokeStyle = compassMini.ringMinorColor
                                ctx.lineWidth = 1
                                ctx.stroke()
 
@@ -4558,15 +4652,15 @@ Item {
                                    ctx.moveTo(x1, y1)
                                    ctx.lineTo(x2, y2)
                                    ctx.strokeStyle = isMajor
-                                                     ? "rgba(255,255,255,0.60)"
+                                                     ? compassMini.tickMajorColor
                                                      : (isMid
-                                                        ? "rgba(255,255,255,0.32)"
-                                                        : "rgba(255,255,255,0.18)")
+                                                        ? compassMini.tickMidColor
+                                                        : compassMini.tickMinorColor)
                                    ctx.lineWidth = isMajor ? 2 : 1
                                    ctx.stroke()
                                }
 
-                               ctx.fillStyle = "rgba(255,255,255,0.85)"
+                               ctx.fillStyle = compassMini.labelColor
                                ctx.font = "bold 12px sans-serif"
                                ctx.textAlign = "center"
                                ctx.textBaseline = "middle"
@@ -4585,7 +4679,7 @@ Item {
 
                                // if hidden -> do not draw doa line
                                if (card.isHidden) {
-                                   ctx.fillStyle = "rgba(255,255,255,0.20)"
+                                   ctx.fillStyle = compassMini.offTextColor
                                    ctx.font = "12px sans-serif"
                                    ctx.textAlign = "center"
                                    ctx.textBaseline = "middle"
@@ -4630,7 +4724,7 @@ Item {
                                        ctx.fillStyle = pc
                                        ctx.fill()
                                    } else {
-                                       ctx.fillStyle = "rgba(255,255,255,0.28)"
+                                       ctx.fillStyle = compassMini.offTextColor
                                        ctx.font = "12px sans-serif"
                                        ctx.textAlign = "center"
                                        ctx.textBaseline = "middle"
@@ -4640,7 +4734,7 @@ Item {
 
                                ctx.beginPath()
                                ctx.arc(cx, cy, 3.0, 0, Math.PI * 2)
-                               ctx.fillStyle = "rgba(255,255,255,0.55)"
+                               ctx.fillStyle = compassMini.centerDotColor
                                ctx.fill()
                            }
 
@@ -4683,7 +4777,7 @@ Item {
 
                        Text {
                            text: "Heading: " + mapviewer._fmtDeg(card.headingDeg)
-                           color: "#e6edf3"
+                           color: hmiTheme.analyzerText
                            opacity: card.isHidden ? 0.55 : 1.0
                            font.pixelSize: 16
                            font.bold: true
@@ -4695,7 +4789,7 @@ Item {
                            text: (card.doaIt && !card.isHidden)
                                  ? ("DoA: " + mapviewer._fmtDeg(Number(card.doaIt.doaDeg || 0)))
                                  : "DoA: -"
-                           color: card.isHidden ? "#69737C" : String(card.pinColor || "#1DCD9F")
+                           color: card.isHidden ? hmiTheme.muted : (hmiTheme.darkMode ? String(card.pinColor || "#1DCD9F") : Qt.darker(card.pinColor, 1.45))
                            font.pixelSize: 14
                            font.bold: true
                            elide: Text.ElideRight
@@ -4706,7 +4800,7 @@ Item {
                            text: (card.doaIt && !card.isHidden)
                                  ? ("Conf: " + mapviewer._fmtConf(Number(card.doaIt.confidence || 0)))
                                  : "Conf: -"
-                           color: card.isHidden ? "#69737C" : "#00FFAA"
+                           color: card.isHidden ? hmiTheme.muted : (hmiTheme.darkMode ? "#00FFAA" : hmiTheme.info)
                            font.pixelSize: 13
                            font.bold: true
                            elide: Text.ElideRight
@@ -4724,7 +4818,7 @@ Item {
                                            (mapLoader.item && mapLoader.item.map)
                                            ? Number(mapLoader.item.map.bearing || 0)
                                            : 0))
-                           color: "#9aa6b2"
+                           color: hmiTheme.textSecondary
                            font.pixelSize: 11
                            elide: Text.ElideRight
                            width: parent.width
@@ -4765,10 +4859,11 @@ Item {
 }
 
     Rectangle {
-    x: 0
-    y: 1048
-    width: 1920
-    height: 32
-    color: "#000000"
+        anchors.left: parent.left
+        anchors.right: parent.right
+        anchors.bottom: parent.bottom
+        height: 2
+        color: hmiTheme.analyzerBorder
+        opacity: 0.75
     }
 }

@@ -2,6 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../ui"
 
 Rectangle {
     id: card
@@ -9,11 +10,13 @@ Rectangle {
     property var    items: []      // [{DeviceName, IPAddress, Port, status, GroupsName, ...}]
     property bool   expanded: true
     property int    hMargin: 8     // ใช้ภายในถ้าต้องการ spacing เพิ่ม
+    property bool   darkMode: true
+    Theme { id: hmiTheme; darkMode: card.darkMode }
 
     radius: 12
-    color: "#0f141a"
+    color: hmiTheme.card
     border.width: 1
-    border.color: "#233240"
+    border.color: hmiTheme.line
 
     // อย่า bind กับ parent ที่นี่ เพื่อหลบ M205
     implicitWidth: 480
@@ -32,20 +35,20 @@ Rectangle {
             Layout.fillWidth: true
             height: 44
             radius: 8
-            color: expanded ? "#1a2633" : "#151e27"
+            color: expanded ? hmiTheme.cardAlt : hmiTheme.input
             border.width: 1
-            border.color: expanded ? "#2a6fb0" : "#223140"
+            border.color: expanded ? hmiTheme.accent : hmiTheme.lineStrong
 
             RowLayout {
                 anchors.fill: parent
                 anchors.margins: 10
                 spacing: 10
 
-                Label { text: expanded ? "▾" : "▸"; color: "#9fb6ca"; font.pixelSize: 16 }
-                Text  { text: title; color:"#e9f2f9"; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true }
+                Label { text: expanded ? "▾" : "▸"; color: hmiTheme.textSecondary; font.pixelSize: 16 }
+                Text  { text: title; color: hmiTheme.text; font.pixelSize: 16; font.bold: true; Layout.fillWidth: true }
                 Rectangle {
-                    radius: 10; color: "#22364a"; height: 24; width: countText.implicitWidth + 12
-                    Label { id: countText; anchors.centerIn: parent; text: items ? items.length : 0; color:"#cfe6fb"; font.pixelSize: 12 }
+                    radius: 10; color: hmiTheme.cardAlt; height: 24; width: countText.implicitWidth + 12
+                    Label { id: countText; anchors.centerIn: parent; text: items ? items.length : 0; color: hmiTheme.textSecondary; font.pixelSize: 12 }
                 }
             }
 
@@ -71,9 +74,9 @@ Rectangle {
                     model: items ? items.length : 0
                     delegate: Rectangle {
                         radius: 10
-                        color: "#141b22"
+                        color: hmiTheme.input
                         border.width: 1
-                        border.color: "#1f2b38"
+                        border.color: hmiTheme.line
 
                         // อย่าใช้ anchors.left/right ใน Column; กำหนดความกว้างตรง ๆ
                         width: parent.width
@@ -89,6 +92,7 @@ Rectangle {
                             deviceStatus: items[index].status
                             deviceRssi:   0
                             rowIndex:     index
+                            darkMode: card.darkMode
                         }
                     }
                 }

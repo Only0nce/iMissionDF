@@ -29,15 +29,38 @@ void Mainwindows::emitRecorderUiState(const QString &reason)
 {
     const bool expectedActive = recEnable && currentSQLValue;
 
-    qInfo().noquote() << "[REC-UI-STATE]"
-                      << "reason=" << reason
-                      << "expected=" << expectedActive
-                      << "actual=" << m_lastRecIsRecord
-                      << "sql=" << currentSQLValue
-                      << "recEnable=" << recEnable
-                      << "state=" << m_lastRecState;
+    const QString signature = QStringLiteral("%1|%2|%3|%4|%5")
+            .arg(expectedActive ? 1 : 0)
+            .arg(m_lastRecIsRecord ? 1 : 0)
+            .arg(currentSQLValue ? 1 : 0)
+            .arg(recEnable ? 1 : 0)
+            .arg(m_lastRecState);
+    const bool traceNow = signature != m_lastRecUiTraceSignature
+            || !m_recUiTraceTimer.isValid()
+            || m_recUiTraceTimer.elapsed() >= 10000;
+    if (traceNow) {
+        qInfo().noquote() << "[REC-UI-STATE]"
+                          << "reason=" << reason
+                          << "expected=" << expectedActive
+                          << "actual=" << m_lastRecIsRecord
+                          << "sql=" << currentSQLValue
+                          << "recEnable=" << recEnable
+                          << "state=" << m_lastRecState;
+        m_lastRecUiTraceSignature = signature;
+        m_recUiTraceTimer.restart();
+    }
 
-    emit recorderUiStateChanged(expectedActive, m_lastRecIsRecord, m_lastRecState);
+    const bool uiStateChanged = !m_recUiEmitValid
+            || m_lastRecUiEmittedExpected != expectedActive
+            || m_lastRecUiEmittedActual != m_lastRecIsRecord
+            || m_lastRecUiEmittedState != m_lastRecState;
+    if (uiStateChanged) {
+        m_recUiEmitValid = true;
+        m_lastRecUiEmittedExpected = expectedActive;
+        m_lastRecUiEmittedActual = m_lastRecIsRecord;
+        m_lastRecUiEmittedState = m_lastRecState;
+        emit recorderUiStateChanged(expectedActive, m_lastRecIsRecord, m_lastRecState);
+    }
 }
 
 void Mainwindows::reassertRecorderState(const QString &reason, bool force)
@@ -51,13 +74,25 @@ void Mainwindows::reassertRecorderState(const QString &reason, bool force)
 
     m_lastRecReassertTimer.restart();
 
-    qInfo().noquote() << "[REC-REASSERT]"
-                      << "reason=" << reason
-                      << "sql=" << currentSQLValue
-                      << "expected=" << (recEnable && currentSQLValue)
-                      << "actual=" << m_lastRecIsRecord
-                      << "state=" << m_lastRecState
-                      << "recEnable=" << recEnable;
+    const QString signature = QStringLiteral("%1|%2|%3|%4")
+            .arg(currentSQLValue ? 1 : 0)
+            .arg((recEnable && currentSQLValue) ? 1 : 0)
+            .arg(m_lastRecIsRecord ? 1 : 0)
+            .arg(m_lastRecState);
+    const bool traceNow = signature != m_lastRecReassertTraceSignature
+            || !m_recReassertTraceTimer.isValid()
+            || m_recReassertTraceTimer.elapsed() >= 10000;
+    if (traceNow) {
+        qInfo().noquote() << "[REC-REASSERT]"
+                          << "reason=" << reason
+                          << "sql=" << currentSQLValue
+                          << "expected=" << (recEnable && currentSQLValue)
+                          << "actual=" << m_lastRecIsRecord
+                          << "state=" << m_lastRecState
+                          << "recEnable=" << recEnable;
+        m_lastRecReassertTraceSignature = signature;
+        m_recReassertTraceTimer.restart();
+    }
 
     sendSquelchStatus(currentSQLValue);
     emitRecorderUiState(QStringLiteral("reassert:") + reason);
@@ -71,29 +106,54 @@ void Mainwindows::evaluateRecorderWatchdog(const QString &reason)
             || m_lastRecLogTimer.elapsed() > 5000;
 
     if (expectedActive && (!actualRecord || logStale)) {
-        qInfo().noquote() << "[REC-WATCHDOG]"
-                          << "reason=" << reason
-                          << "action=reassert-on"
-                          << "expected=" << expectedActive
-                          << "actual=" << actualRecord
-                          << "sql=" << currentSQLValue
-                          << "recEnable=" << recEnable
-                          << "logStale=" << logStale
-                          << "logAgeMs=" << (m_lastRecLogTimer.isValid()
-                                               ? m_lastRecLogTimer.elapsed()
-                                               : -1);
+        const QString signature = QStringLiteral("on|%1|%2|%3|%4|%5")
+                .arg(expectedActive ? 1 : 0)
+                .arg(actualRecord ? 1 : 0)
+                .arg(currentSQLValue ? 1 : 0)
+                .arg(recEnable ? 1 : 0)
+                .arg(logStale ? 1 : 0);
+        const bool traceNow = signature != m_lastRecWatchdogTraceSignature
+                || !m_recWatchdogTraceTimer.isValid()
+                || m_recWatchdogTraceTimer.elapsed() >= 10000;
+        if (traceNow) {
+            qInfo().noquote() << "[REC-WATCHDOG]"
+                              << "reason=" << reason
+                              << "action=reassert-on"
+                              << "expected=" << expectedActive
+                              << "actual=" << actualRecord
+                              << "sql=" << currentSQLValue
+                              << "recEnable=" << recEnable
+                              << "logStale=" << logStale
+                              << "logAgeMs=" << (m_lastRecLogTimer.isValid()
+                                                   ? m_lastRecLogTimer.elapsed()
+                                                   : -1);
+            m_lastRecWatchdogTraceSignature = signature;
+            m_recWatchdogTraceTimer.restart();
+        }
         reassertRecorderState(QStringLiteral("watchdog:") + reason);
         return;
     }
 
     if (!currentSQLValue && actualRecord) {
-        qInfo().noquote() << "[REC-WATCHDOG]"
-                          << "reason=" << reason
-                          << "action=reassert-off"
-                          << "expected=" << expectedActive
-                          << "actual=" << actualRecord
-                          << "sql=" << currentSQLValue
-                          << "recEnable=" << recEnable;
+        const QString signature = QStringLiteral("off|%1|%2|%3|%4")
+                .arg(expectedActive ? 1 : 0)
+                .arg(actualRecord ? 1 : 0)
+                .arg(currentSQLValue ? 1 : 0)
+                .arg(recEnable ? 1 : 0);
+        const bool traceNow = signature != m_lastRecWatchdogTraceSignature
+                || !m_recWatchdogTraceTimer.isValid()
+                || m_recWatchdogTraceTimer.elapsed() >= 10000;
+        if (traceNow) {
+            qInfo().noquote() << "[REC-WATCHDOG]"
+                              << "reason=" << reason
+                              << "action=reassert-off"
+                              << "expected=" << expectedActive
+                              << "actual=" << actualRecord
+                              << "sql=" << currentSQLValue
+                              << "recEnable=" << recEnable;
+            m_lastRecWatchdogTraceSignature = signature;
+            m_recWatchdogTraceTimer.restart();
+        }
         reassertRecorderState(QStringLiteral("watchdog-stop:") + reason);
     }
 }

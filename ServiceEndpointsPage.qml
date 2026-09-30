@@ -1,9 +1,14 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
+import QtQuick.Controls.Material 2.12
+
+import "ui"
 
 Item {
     id: root
+
+    Theme { id: hmiTheme; darkMode: root.Material.theme === Material.Dark }
 
     property string dfServerIp: ""
     property string appliedDfServerIp: ""
@@ -17,19 +22,21 @@ Item {
 
     QtObject {
         id: c
-        property color panel: "#132235"
-        property color card: "#122033"
-        property color field: "#0d1723"
-        property color border: "#2d4056"
-        property color borderSoft: "#203044"
-        property color text: "#e9f0f7"
-        property color sub: "#9aa8b8"
-        property color muted: "#667589"
-        property color accent: "#00c9a7"
-        property color warning: "#f59e0b"
-        property color info: "#38bdf8"
-        property color danger: "#ef4444"
-        property color purple: "#a855f7"
+        property color panel: hmiTheme.panel
+        property color card: hmiTheme.cardAlt
+        property color field: hmiTheme.input
+        property color border: hmiTheme.lineStrong
+        property color borderSoft: hmiTheme.line
+        property color text: hmiTheme.text
+        property color sub: hmiTheme.textSecondary
+        property color muted: hmiTheme.muted
+        property color accent: hmiTheme.accent
+        property color warning: hmiTheme.warning
+        property color info: hmiTheme.info
+        property color danger: hmiTheme.danger
+        property color purple: hmiTheme.info
+        property color accentText: "#061514"
+        property color pressedSurface: hmiTheme.darkMode ? Qt.lighter(hmiTheme.input, 1.18) : hmiTheme.cardAlt
     }
 
     function kraken() {
@@ -391,7 +398,7 @@ Item {
                         scale: pressed ? 0.96 : 1.0
                         Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: root.applyDfServer()
-                        contentItem: Text { text: parent.text; color: parent.enabled ? "#001412" : c.sub; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 15; font.bold: true }
+                        contentItem: Text { text: parent.text; color: parent.enabled ? c.accentText : c.sub; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 15; font.bold: true }
                         background: Rectangle { radius: 10; color: applyDfButton.enabled ? c.accent : c.field; border.color: applyDfButton.enabled ? c.accent : c.border }
                     }
 
@@ -405,7 +412,7 @@ Item {
                         Behavior on scale { NumberAnimation { duration: 90; easing.type: Easing.OutCubic } }
                         onClicked: root.reconnectDfServer()
                         contentItem: Text { text: parent.text; color: parent.enabled ? c.text : c.sub; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.pixelSize: 15; font.bold: true }
-                        background: Rectangle { radius: 10; color: reconnectDfButton.pressed ? "#15384f" : c.field; border.color: reconnectDfButton.enabled ? c.info : c.border }
+                        background: Rectangle { radius: 10; color: reconnectDfButton.pressed ? c.pressedSurface : c.field; border.color: reconnectDfButton.enabled ? c.info : c.border }
                     }
 
                     Item { Layout.fillWidth: true }
@@ -526,7 +533,7 @@ Item {
         height: statusText.length > 0 ? 38 : 0
         visible: statusText.length > 0
         radius: 19
-        color: "#0d1723"
+        color: c.field
         border.color: c.border
         Text { anchors.centerIn: parent; width: parent.width - 30; text: root.statusText; color: c.sub; font.pixelSize: 12; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight }
     }

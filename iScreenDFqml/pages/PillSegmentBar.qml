@@ -3,22 +3,25 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtGraphicalEffects 1.12
+import "../../ui"
 
 Item {
     id:  pillsegmentbar
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: pillsegmentbar.darkMode }
     property alias model: repeater.model          // [{iconSource:"", iconText:"", tooltip:""}, ...]
     property int currentIndex: 0
     signal triggered(int index)
 
-    implicitHeight: 35
+    implicitHeight: 40
     implicitWidth: Math.max(160, (model && model.length ? model.length : 0) * (implicitHeight + 18))
 
     Rectangle {
         id: bg
         anchors.fill: parent
         radius: height/2
-        color: "#2a2a2a"
-        border.color: "#2c2c31"
+        color: hmiTheme.navTile
+        border.color: hmiTheme.navTileBorder
         border.width: 1
     }
 
@@ -32,8 +35,8 @@ Item {
         anchors.verticalCenter: parent.verticalCenter
         radius: height/2
         height: parent.height - 8
-        color: "#768983"
-        border.color: "#44bb94"
+        color: hmiTheme.navTileActive
+        border.color: hmiTheme.remoteRowBorderActive
 
         Binding { target: highlight; property: "width"; value: segWidth }
         Binding { target: highlight; property: "x";     value: 4 + segWidth * pillsegmentbar.currentIndex }
@@ -68,8 +71,8 @@ Item {
                     anchors.top: parent.top
                     anchors.bottom: parent.bottom
                     width: index === repeater.count - 1 ? 0 : 1
-                    color: "#2c2c31"
-                    opacity: 0.9
+                    color: hmiTheme.navTileBorder
+                    opacity: pillsegmentbar.darkMode ? 0.9 : 1.0
                 }
 
                 MouseArea {
@@ -86,40 +89,53 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: height/2
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: ma.containsMouse ? 0.06 : 0.0
                     Behavior on opacity { NumberAnimation { duration: 120 } }
                 }
-
                 Item {
                     id: iconWrap
                     anchors.centerIn: parent
-                    width: 22; height: 22
+                    width: 24; height: 24
+
+                    readonly property bool active: pillsegmentbar.currentIndex === index
+                    readonly property color iconTint: pillsegmentbar.darkMode
+                                                     ? "#FFFFFF"
+                                                     : (active ? hmiTheme.navTileActiveText : hmiTheme.navTileText)
 
                     Image {
                         id: img
                         anchors.centerIn: parent
                         visible: !!(modelData.iconSource && modelData.iconSource.length)
+                        opacity: 0.0
                         source: modelData.iconSource
-                        sourceSize.width: 18
-                        sourceSize.height: 18
+                        sourceSize.width: 20
+                        sourceSize.height: 20
                         fillMode: Image.PreserveAspectFit
                         mipmap: true
                         antialiasing: true
                         layer.enabled: true
                         layer.smooth: true
-                        opacity: pillsegmentbar.currentIndex === index ? 1.0 : 0.75
+                    }
+
+                    ColorOverlay {
+                        anchors.fill: img
+                        source: img
+                        visible: img.visible
+                        cached: true
+                        color: iconWrap.iconTint
+                        opacity: iconWrap.active ? 1.0 : (pillsegmentbar.darkMode ? 0.94 : 0.92)
                     }
 
                     Text {
                         id: glyph
                         visible: !img.visible
                         anchors.centerIn: parent
-                        text: (modelData.iconText || "\u2713")
+                        text: (modelData.iconText || "✓")
                         font.pixelSize: 17
                         font.weight: Font.DemiBold
-                        color: pillsegmentbar.currentIndex === index ? "#e9e7f5" : "#b9b6c8"
-                        opacity: pillsegmentbar.currentIndex === index ? 1.0 : 0.85
+                        color: pillsegmentbar.darkMode ? "#FFFFFF" : (iconWrap.active ? hmiTheme.navTileActiveText : hmiTheme.navTileText)
+                        opacity: iconWrap.active ? 1.0 : 0.95
                         antialiasing: true
                     }
                 }

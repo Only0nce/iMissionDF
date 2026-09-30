@@ -7,11 +7,13 @@ Item {
     width: 300
     height: 75
 
-    Material.theme: Material.Dark
-    Material.accent: "#6EF2E8"
+    property bool darkMode: true
 
-    readonly property color primaryText: "#F4FBFF"
-    readonly property color secondaryText: "#D3E1E7"
+    Material.theme: darkMode ? Material.Dark : Material.Light
+    Material.accent: darkMode ? "#6EF2E8" : "#008B75"
+
+    readonly property color primaryText: darkMode ? "#F4FBFF" : "#102824"
+    readonly property color secondaryText: darkMode ? "#D3E1E7" : "#284640"
 
     // These will be bound to your waterfall logic
     property real waterfallMinDb: -130
@@ -60,7 +62,7 @@ Item {
                     Layout.leftMargin: 8
                     Layout.fillWidth: true
                     minimumPixelSize: 10
-                    font.pointSize: 11
+                    font.pixelSize: 13
                     font.bold: true
                     color: primaryText
                     text: "Min: "+waterfallMinDb.toFixed(1) +" dBFS"
@@ -72,7 +74,7 @@ Item {
                     Layout.fillWidth: true
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                     minimumPixelSize: 10
-                    font.pointSize: 11
+                    font.pixelSize: 13
                     font.bold: true
                     color: primaryText
                     text: "Max: "+waterfallMaxDb.toFixed(1) +" dBFS"
@@ -114,7 +116,7 @@ Item {
             Text {
                 text: "Intensity Scale · dBFS"
                 font.bold: true
-                font.pointSize: 11
+                font.pixelSize: 13
                 horizontalAlignment: Text.AlignHCenter
                 Layout.bottomMargin: 4
                 Layout.preferredHeight: 12

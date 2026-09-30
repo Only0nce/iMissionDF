@@ -1,8 +1,13 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
+import QtQuick.Controls.Material 2.12
+
+import "ui"
 
 Item {
     id: root
+
+    Theme { id: hmiTheme; darkMode: root.Material.theme === Material.Dark }
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
     clip: true
@@ -50,14 +55,14 @@ Item {
         height: 260
         radius: 18
         visible: pageLoader.status === Loader.Error
-        color: "#132235"
-        border.color: "#2d4056"
+        color: hmiTheme.panel
+        border.color: hmiTheme.lineStrong
 
         Text {
             x: 32
             y: 30
             text: "Wireless page failed to load"
-            color: "#e9f0f7"
+            color: hmiTheme.text
             font.pixelSize: 28
             font.bold: true
         }
@@ -66,7 +71,7 @@ Item {
             y: 86
             width: parent.width - 64
             text: "Wifi5GPage.qml or Wifi5GView.qml returned Loader.Error. Run from terminal and check QML console output."
-            color: "#9aa8b8"
+            color: hmiTheme.textSecondary
             font.pixelSize: 15
             wrapMode: Text.WordWrap
         }
@@ -76,12 +81,12 @@ Item {
             width: parent.width - 64
             height: 56
             radius: 8
-            color: "#0d1723"
-            border.color: "#2d4056"
+            color: hmiTheme.input
+            border.color: hmiTheme.lineStrong
             Text {
                 anchors.centerIn: parent
                 text: "QT_LOGGING_RULES=\"qt.qml.*=true;qt.quick.*=true\" ./your_app_name"
-                color: "#00c9a7"
+                color: hmiTheme.accent
                 font.pixelSize: 14
             }
         }

@@ -1,15 +1,20 @@
 // RegisterNewDevice.qml
 import QtQuick 2.12
 import QtQuick.Controls 2.5
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.12
+import "../ui"
 
 Item {
     id: root
-    width: 900
-    height: 600
+    width: parent ? parent.width : 900
+    height: parent ? parent.height : 600
 
     // ความกว้างช่องกรอกคงที่ทั้งซ้าย/ขวา
     property int fieldWidth: 230
+    property bool isDarkTheme: Material.theme === Material.Dark
+
+    Theme { id: hmiTheme; darkMode: root.isDarkTheme }
 
     signal cancelRequested()
     signal createRequested(string deviceName,
@@ -28,8 +33,8 @@ Item {
         id: panel
         anchors.fill: parent
         radius: 8
-        color: "#020617"
-        border.color: "#111827"
+        color: hmiTheme.panel
+        border.color: hmiTheme.lineStrong
         border.width: 1
 
         // ---------- header ----------
@@ -39,7 +44,7 @@ Item {
             anchors.right: parent.right
             anchors.top: parent.top
             height: 52
-            color: "#020617"
+            color: hmiTheme.panel
 
             RowLayout {
                 anchors.fill: parent
@@ -48,7 +53,7 @@ Item {
 
                 Label {
                     text: qsTr("Add New Device")
-                    color: "#F9FAFB"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                     Layout.alignment: Qt.AlignVCenter
@@ -86,7 +91,7 @@ Item {
             // ===== row 0: Device Name / SID =====
             Label {
                 text: qsTr("Device Name:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 0; Layout.column: 0
             }
@@ -105,15 +110,15 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
 
             Label {
                 text: qsTr("SID:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 0; Layout.column: 2
             }
@@ -130,8 +135,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -139,7 +144,7 @@ Item {
             // ===== row 1: Payload Size / Terminal Type =====
             Label {
                 text: qsTr("Payload Size:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 1; Layout.column: 0
             }
@@ -158,15 +163,15 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
 
             Label {
                 text: qsTr("Terminal Type:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 1; Layout.column: 2
             }
@@ -184,8 +189,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -193,7 +198,7 @@ Item {
             // ===== row 2: IP Address / URI =====
             Label {
                 text: qsTr("IP Address:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 2; Layout.column: 0
             }
@@ -225,8 +230,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -234,7 +239,7 @@ Item {
 
             Label {
                 text: qsTr("URI:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 2; Layout.column: 2
             }
@@ -252,8 +257,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -261,7 +266,7 @@ Item {
             // ===== row 3: Frequency / Group =====
             Label {
                 text: qsTr("Frequency (MHz):")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 3; Layout.column: 0
             }
@@ -288,15 +293,15 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
 
             Label {
                 text: qsTr("Group:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 3; Layout.column: 2
             }
@@ -314,15 +319,15 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
             // ===== row 4: Visible / Ambient =====
             Label {
                 text: qsTr("Visible:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 4; Layout.column: 0
             }
@@ -339,15 +344,15 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
 
             Label {
                 text: qsTr("Ambient:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 4; Layout.column: 2
             }
@@ -364,8 +369,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -374,7 +379,7 @@ Item {
             // ===== row 5: Chunk (ซ้ายอย่างเดียว) =====
             Label {
                 text: qsTr("Chunk:")
-                color: "#E5E7EB"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 14
                 Layout.row: 5; Layout.column: 0
             }
@@ -391,8 +396,8 @@ Item {
 
                 background: Rectangle {
                     radius: 4
-                    color: "#020617"
-                    border.color: "#1F2937"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.line
                     border.width: 1
                 }
             }
@@ -406,7 +411,7 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 64
-            color: "#020617"
+            color: hmiTheme.panel
 
             RowLayout {
                 anchors.right: parent.right
@@ -414,29 +419,22 @@ Item {
                 anchors.margins: 16
                 spacing: 8
 
-                Button {
+                HmiButton {
                     id: btnCancel
+                    darkMode: root.isDarkTheme
                     text: qsTr("Cancel")
+                    fontPixelSize: 14
                     onClicked: root.cancelRequested()
-                    background: Rectangle {
-                        radius: 4
-                        color: "#4B5563"
-                    }
-                    contentItem: Label {
-                        text: btnCancel.text
-                        color: "#E5E7EB"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 14
-                    }
                 }
 
-                Button {
+                HmiButton {
                     id: btnCreate
+                    darkMode: root.isDarkTheme
+                    tone: "primary"
                     text: qsTr("Create Device")
+                    fontPixelSize: 14
 
                     onClicked: {
-                        // ส่งข้อมูลออกไปผ่าน signal แทน
                         root.createRequested(
                             txtDeviceName.text,
                             txtSid.text,
@@ -450,19 +448,6 @@ Item {
                             txtAmbient.text,
                             txtChunk.text
                         )
-                    }
-
-                    background: Rectangle {
-                        radius: 4
-                        color: "#2563EB"
-                    }
-                    contentItem: Label {
-                        text: btnCreate.text
-                        color: "#FFFFFF"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 14
-                        font.bold: true
                     }
                 }
 

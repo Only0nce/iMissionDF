@@ -1,12 +1,15 @@
 // PopupSettingDrawer.qml  (FULL FILE - Responsive)
 import QtQuick 2.15
 import QtGraphicalEffects 1.12
+import "../../ui"
 
 Rectangle {
     id: popuppanel
 
     // ===== Public API =====
     property var krakenmapval: null
+    property bool darkMode: true
+    Theme { id: popupTheme; darkMode: popuppanel.darkMode }
 
     // ===== Visible / Focus =====
     visible: true
@@ -54,8 +57,8 @@ Rectangle {
     // Visual Style
     // =========================================================
     radius: dp(14)
-    color: "#111212"
-    border.color: "#111212"
+    color: popupTheme.card
+    border.color: popupTheme.lineStrong
     border.width: 1
 
     // =========================================================
@@ -71,12 +74,25 @@ Rectangle {
         }
     }
 
+    function _applyContextToLoadedItem() {
+        if (!contentLoader.item)
+            return
+        if (contentLoader.item.hasOwnProperty("krakenmapval"))
+            contentLoader.item.krakenmapval = popuppanel.krakenmapval
+        if (contentLoader.item.hasOwnProperty("darkMode"))
+            contentLoader.item.darkMode = popuppanel.darkMode
+    }
+
     function openWithMessage(msg) {
         contentType = msg
         pageUrl = urlFor(msg)
 
-        // ส่ง krakenmapval ให้หน้าลูก
-        contentLoader.setSource(pageUrl, { krakenmapval: popuppanel.krakenmapval })
+        // Do not pass initialProperties here: some legacy popup pages do not
+        // declare darkMode/krakenmapval. Passing unknown properties makes the
+        // Loader fail and leaves a blank colored popup.
+        contentLoader.source = ""
+        contentLoader.setSource(pageUrl)
+        _applyContextToLoadedItem()
 
         console.log("[PopupSettingDrawer] show content:", msg, "->", pageUrl)
         open()
@@ -85,6 +101,12 @@ Rectangle {
     onKrakenmapvalChanged: {
         if (contentLoader.item && contentLoader.item.hasOwnProperty("krakenmapval")) {
             contentLoader.item.krakenmapval = krakenmapval
+        }
+    }
+
+    onDarkModeChanged: {
+        if (contentLoader.item && contentLoader.item.hasOwnProperty("darkMode")) {
+            contentLoader.item.darkMode = popuppanel.darkMode
         }
     }
 
@@ -147,8 +169,25 @@ Rectangle {
     // =========================================================
     // Content
     // =========================================================
+    // V9: absorb clicks that happen on blank popup background so they do not
+    // fall through to the outside-click backdrop or the live page underneath.
+    // Loader/content is above this MouseArea, so TextField/SpinBox/Button input
+    // continues to work normally.
+    MouseArea {
+        id: popupInternalClickGuard
+        anchors.fill: parent
+        z: 0
+        acceptedButtons: Qt.AllButtons
+        hoverEnabled: true
+        preventStealing: false
+        propagateComposedEvents: false
+        onPressed: mouse.accepted = true
+        onReleased: mouse.accepted = true
+    }
+
     Loader {
         id: contentLoader
+        z: 1
         anchors.fill: parent
 
         // margin responsive (เดิม 20)
@@ -160,7 +199,7 @@ Rectangle {
 
         onStatusChanged: {
             if (status === Loader.Ready && item) {
-                // hook optional
+                popuppanel._applyContextToLoadedItem()
             }
         }
     }

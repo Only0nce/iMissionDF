@@ -3,6 +3,7 @@ import QtGraphicalEffects 1.12
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "../i18n" as I18n
+import "../../ui"
 
 Item {
     id: adddevice
@@ -21,14 +22,29 @@ Item {
     property var existingDeviceUids: []
 
     /* ====== Palette / Metrics ====== */
-    property color colBg:        "#0f1115"
-    property color colCard:      "#1a1e24"
-    property color colCardHi:    "#202633"
-    property color colBorder:    "#263041"
-    property color colAccent:    "#34d399"
-    property color colAccentDim: "#2aa57a"
-    property color colText:      "#e5e7eb"
-    property color colSubtext:   "#a3a9b3"
+    property bool darkMode: true
+    Theme { id: popupTheme; darkMode: adddevice.darkMode }
+
+    property color colBg:        popupTheme.page
+    property color colCard:      popupTheme.card
+    property color colCardHi:    popupTheme.cardAlt
+    property color colInput:     popupTheme.input
+    property color colListBg:    popupTheme.darkMode ? "#0f141b" : "#FFFFFF"
+    property color colBorder:    popupTheme.line
+    property color colBorderHi:  popupTheme.lineStrong
+    property color colAccent:    popupTheme.accent
+    property color colAccentDim: popupTheme.accentHover
+    property color colText:      popupTheme.text
+    property color colSubtext:   popupTheme.textSecondary
+    property color colRowHover:  popupTheme.darkMode ? "#18202a" : "#E8F2F0"
+    property color colButtonDisabled: popupTheme.disabled
+    property color colButtonDisabledText: popupTheme.muted
+    property color colPrimaryButtonText: "#ffffff"
+    property color colNeutralButtonText: popupTheme.text
+    property color colDanger:    popupTheme.danger
+    property color colWarning:   popupTheme.warning
+    property color colToastBg:   popupTheme.darkMode ? "#111827" : "#172624"
+    property color colToastText: "#ffffff"
     property int   rad: 12
     property int   pad: 10
     property int   rowH: 40
@@ -174,7 +190,7 @@ Item {
                 Layout.fillWidth: true
                 spacing: 10
                 Label {
-                    color: "#ffffff"
+                    color: colText
                     text: "Add Device"
                     font.pixelSize: 18
                     font.bold: true
@@ -185,7 +201,7 @@ Item {
                 Item { Layout.fillWidth: true }
 
                 RowLayout {
-                    width: 180
+                    Layout.preferredWidth: 180
                     Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
                     spacing: 6
 
@@ -248,6 +264,47 @@ Item {
                         onToggled: if (checked) stack.currentIndex = 1
                     }
                 }
+
+                Rectangle {
+                    id: closeBtn
+                    Layout.preferredWidth: 96
+                    Layout.preferredHeight: 34
+                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                    radius: height / 2
+                    color: closeMouse.containsMouse ? colAccentDim : colCardHi
+                    border.width: 1
+                    border.color: closeMouse.containsMouse ? colAccent : colBorderHi
+
+                    RowLayout {
+                        anchors.centerIn: parent
+                        spacing: 6
+
+                        Text {
+                            text: "✕"
+                            color: closeMouse.containsMouse ? colPrimaryButtonText : colText
+                            font.pixelSize: 14
+                            font.bold: true
+                        }
+
+                        Text {
+                            text: "Close"
+                            color: closeMouse.containsMouse ? colPrimaryButtonText : colText
+                            font.pixelSize: 13
+                            font.bold: true
+                        }
+                    }
+
+                    MouseArea {
+                        id: closeMouse
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (typeof popuppanel !== "undefined" && popuppanel)
+                                popuppanel.close()
+                        }
+                    }
+                }
             }
 
             // Content
@@ -285,7 +342,7 @@ Item {
                                     id: nameDupWarn
                                     visible: false
                                     text: "Name already exists"
-                                    color: "#eab308"
+                                    color: colWarning
                                     font.pixelSize: 14
                                 }
 
@@ -308,7 +365,7 @@ Item {
 
                                 background: Rectangle {
                                     radius: 8
-                                    color: "#141922"
+                                    color: colInput
                                     border.color: nameDupWarn.visible ? "#eab308" : colBorder
                                     border.width: 1
                                 }
@@ -347,14 +404,14 @@ Item {
                                         Label {
                                             id: ipError
                                             visible: false
-                                            color: "#ef4444"
+                                            color: colDanger
                                             text: "[Invalid IP]"
                                             font.pixelSize: 14
                                         }
                                         Label {
                                             id: ipDupWarn
                                             visible: false
-                                            color: "#ef4444"
+                                            color: colDanger
                                             text: "[Duplicate IP]"
                                             font.pixelSize: 14
                                         }
@@ -378,7 +435,7 @@ Item {
                                         inputMethodHints: Qt.ImhPreferNumbers
                                         background: Rectangle {
                                             radius: 8
-                                            color: "#141922"
+                                            color: colInput
                                             border.color: (ipError.visible || ipDupWarn.visible) ? "#ef4444" : colBorder
                                         }
                                         onTextChanged: {
@@ -424,7 +481,7 @@ Item {
 
                                         background: Rectangle {
                                             radius: 8
-                                            color: "#141922"
+                                            color: colInput
                                             border.color: colBorder
                                         }
                                     }
@@ -442,14 +499,14 @@ Item {
                                 Layout.fillWidth: true
                                 visible: _filteredDevices.length > 0
                                 radius: 8
-                                color: "#0f141b"
+                                color: colListBg
                                 border.color: colBorder
                                 border.width: 1
 
                                 property int rowH: 32
                                 property int headerH: 20
                                 property int gap: 8
-                                Layout.preferredHeight: headerH + 6 + (rowH * 5) + (gap * 4) + 12
+                                Layout.preferredHeight: existingBox.headerH + 6 + (existingBox.rowH * 5) + (existingBox.gap * 4) + 12
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -460,7 +517,7 @@ Item {
                                         text: "Existing devices"
                                         color: colSubtext
                                         font.pixelSize: 14
-                                        Layout.preferredHeight: headerH
+                                        Layout.preferredHeight: existingBox.headerH
                                     }
                                     GridView {
                                         id: deviceGrid
@@ -472,16 +529,14 @@ Item {
                                         property real sidePad: 6
                                         cellHeight: 60
                                         cellWidth: (width - sidePad * 2 - 12) / 2
-                                        anchors.margins: sidePad
                                         ScrollBar.vertical: ScrollBar { active: true }
 
                                         delegate: Rectangle {
                                             width: deviceGrid.cellWidth - 4
                                             height: deviceGrid.cellHeight - 4
                                             radius: 6
-                                            color: hovered ? "#18202a" : "transparent"
-                                            border.color: "#1f2b38"
-                                            anchors.margins: 2
+                                            color: hovered ? colRowHover : "transparent"
+                                            border.color: colBorder
 
                                             property bool hovered: false
                                             HoverHandler {
@@ -536,7 +591,7 @@ Item {
                                                     text: "Edit"
                                                     width: 64; height: 30
                                                     anchors.verticalCenter: parent.verticalCenter
-                                                    background: Rectangle { radius: 6; color: "#3b82f6" }
+                                                    background: Rectangle { radius: 6; color: popupTheme.info }
                                                     contentItem: Text {
                                                         text: parent.text
                                                         color: "white"
@@ -567,7 +622,7 @@ Item {
                                                     text: "Delete"
                                                     width: 70; height: 30
                                                     anchors.verticalCenter: parent.verticalCenter
-                                                    background: Rectangle { radius: 6; color: "#ef4444" }
+                                                    background: Rectangle { radius: 6; color: colDanger }
                                                     contentItem: Text {
                                                         text: parent.text
                                                         color: "white"
@@ -624,11 +679,11 @@ Item {
                         //         padding: 10
                         //         background: Rectangle {
                         //             radius: 10
-                        //             color: addManualBtn.enabled ? colAccent : "#2a3342"
+                        //             color: addManualBtn.enabled ? colAccent : colButtonDisabled
                         //         }
                         //         contentItem: Text {
                         //             text: addManualBtn.text
-                        //             color: addManualBtn.enabled ? "#0b1118" : "#6b7280"
+                        //             color: addManualBtn.enabled ? colPrimaryButtonText : colButtonDisabledText
                         //             font.bold: true
                         //             horizontalAlignment: Text.AlignHCenter
                         //             verticalAlignment: Text.AlignVCenter
@@ -725,7 +780,7 @@ Item {
 
                                 background: Rectangle {
                                     radius: 8
-                                    color: "#141922"
+                                    color: colInput
                                     border.color: colBorder
                                     border.width: 1
                                 }
@@ -758,7 +813,7 @@ Item {
 
                                 background: Rectangle {
                                     radius: 8
-                                    color: "#141922"
+                                    color: colInput
                                     border.color: colBorder
                                     border.width: 1
                                 }
@@ -773,14 +828,14 @@ Item {
                                 id: startIpError
                                 visible: false
                                 text: "Start IP invalid"
-                                color: "#ef4444"
+                                color: colDanger
                                 font.pixelSize: 11
                             }
                             Label {
                                 id: endIpError
                                 visible: false
                                 text: "End IP invalid"
-                                color: "#ef4444"
+                                color: colDanger
                                 font.pixelSize: 11
                             }
 
@@ -798,7 +853,7 @@ Item {
                                 }
                                 contentItem: Text {
                                     text: btnScan.text
-                                    color: "#0b1118"
+                                    color: colPrimaryButtonText
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -844,7 +899,7 @@ Item {
                             Layout.fillHeight: true
                             background: Rectangle {
                                 radius: 10
-                                color: "#141922"
+                                color: colInput
                                 border.color: colBorder
                             }
 
@@ -906,7 +961,7 @@ Item {
                                         Label {
                                             visible: isDupIp(ip) || isDupName(name)
                                             text: isDupIp(ip) ? "Duplicate IP" : "Duplicate Name"
-                                            color: "#ef4444"
+                                            color: colDanger
                                             font.pixelSize: 11
                                         }
 
@@ -936,12 +991,13 @@ Item {
                                 background: Rectangle { radius: 10; color: colAccent }
                                 contentItem: Text {
                                     text: btnSelectAll.text
-                                    color: "#0b1118"; font.bold: true
+                                    color: colPrimaryButtonText; font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
                                 }
-                                ToolTip.visible: hovered
-                                ToolTip.text: "เลือกทั้งหมด (ข้ามรายการที่ชื่อ/IP ซ้ำ)"
+                                // R1.7.4D: disable sticky tooltip on touch screens.
+                                ToolTip.visible: false
+                                ToolTip.text: ""
                             }
 
                             Button {
@@ -949,15 +1005,16 @@ Item {
                                 text: "Clear"
                                 padding: 10
                                 onClicked: clearSelection()
-                                background: Rectangle { radius: 10; color: "#2a3342" }
+                                background: Rectangle { radius: 10; color: colButtonDisabled }
                                 contentItem: Text {
                                     text: btnClear.text
-                                    color: "#cbd5e1"; font.bold: true
+                                    color: colNeutralButtonText; font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
                                 }
-                                ToolTip.visible: hovered
-                                ToolTip.text: "ล้างการเลือกทั้งหมด"
+                                // R1.7.4D: disable sticky tooltip on touch screens.
+                                ToolTip.visible: false
+                                ToolTip.text: ""
                             }
 
                             Item { Layout.fillWidth: true }
@@ -975,11 +1032,11 @@ Item {
                                 }
                                 background: Rectangle {
                                     radius: 10
-                                    color: addSelectedBtn.enabled ? colAccent : "#2a3342"
+                                    color: addSelectedBtn.enabled ? colAccent : colButtonDisabled
                                 }
                                 contentItem: Text {
                                     text: addSelectedBtn.text
-                                    color: addSelectedBtn.enabled ? "#0b1118" : "#6b7280"
+                                    color: addSelectedBtn.enabled ? colPrimaryButtonText : colButtonDisabledText
                                     font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
@@ -1040,10 +1097,11 @@ Item {
 
     ApplyButtonPopupSettingDrawer {
         id: applyBtn
+        darkMode: adddevice.darkMode
         anchors.right: parent.right
         anchors.bottom: parent.bottom
-        anchors.rightMargin: 5
-        anchors.bottomMargin: 0
+        anchors.rightMargin: 8
+        anchors.bottomMargin: 2
         onClicked: {
             if (typeof popuppanel !== "undefined" && popuppanel)
                 popuppanel.close()
@@ -1051,10 +1109,14 @@ Item {
     }
     Rectangle {
         id: addManualFloating
-        width: 120
-        height: 44
-        radius: 12
-        color: addManualBtnEnabled ? colAccent : "#2a3342"
+        width: applyBtn.width
+        height: applyBtn.height
+        radius: height / 2
+        color: addManualBtnEnabled
+               ? (addManualMouse.containsMouse ? colAccentDim : colAccent)
+               : colButtonDisabled
+        border.width: 1
+        border.color: addManualBtnEnabled ? colBorderHi : colBorder
         visible: stack.currentIndex === 0   // เฉพาะ manual mode
 
         property bool addManualBtnEnabled: {
@@ -1074,19 +1136,23 @@ Item {
         anchors.right: applyBtn.left
         anchors.rightMargin: 10
         anchors.bottom: parent.bottom
-        anchors.bottomMargin: -5
+        anchors.bottomMargin: 2
 
 
         Text {
             anchors.centerIn: parent
             text: "Add"
-            color: addManualFloating.addManualBtnEnabled ? "#0b1118" : "#6b7280"
+            color: addManualFloating.addManualBtnEnabled ? colPrimaryButtonText : colButtonDisabledText
+            font.pixelSize: 15
             font.bold: true
         }
 
         MouseArea {
+            id: addManualMouse
             anchors.fill: parent
             enabled: addManualFloating.addManualBtnEnabled
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
 
             onClicked: {
                 var newName = nameField.text.trim()
@@ -1141,8 +1207,8 @@ Item {
         property bool showing: false
         function show(msg) { textItem.text = msg; showing = true; toastTimer.restart() }
         radius: 10
-        color: "#111827"
-        border.color: "#1f2937"
+        color: colToastBg
+        border.color: colBorder
         opacity: showing ? 0.96 : 0
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
@@ -1155,7 +1221,7 @@ Item {
         Text {
             id: textItem
             anchors.centerIn: parent
-            color: "#e5e7eb"
+            color: colToastText
             font.pixelSize: 12
             text: ""
         }

@@ -4,6 +4,7 @@ import QtGraphicalEffects 1.12
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "../i18n" as I18n
+import "../../ui"
 
 Item {
     id: gropsetting
@@ -11,14 +12,29 @@ Item {
     property var krakenmapval: null
 
     /* ====== Palette / Metrics ====== */
-    property color colBg:        "#0f1115"
-    property color colCard:      "#1a1e24"
-    property color colCardHi:    "#202633"
-    property color colBorder:    "#263041"
-    property color colAccent:    "#34d399"     // teal green
-    property color colAccentDim: "#2aa57a"
-    property color colText:      "#e5e7eb"
-    property color colSubtext:   "#a3a9b3"
+    property bool darkMode: true
+    Theme { id: popupTheme; darkMode: gropsetting.darkMode }
+
+    property color colBg:        popupTheme.page
+    property color colCard:      popupTheme.card
+    property color colCardHi:    popupTheme.cardAlt
+    property color colHeader:    popupTheme.cardAlt
+    property color colInput:     popupTheme.input
+    property color colBorder:    popupTheme.line
+    property color colBorderHi:  popupTheme.lineStrong
+    property color colAccent:    popupTheme.accent
+    property color colAccentDim: popupTheme.accentHover
+    property color colText:      popupTheme.text
+    property color colSubtext:   popupTheme.textSecondary
+    property color colRowHover:  popupTheme.darkMode ? "#202733" : "#E8F2F0"
+    property color colRowDown:   popupTheme.darkMode ? "#27303d" : "#DCEAE7"
+    property color colSelected:  popupTheme.darkMode ? "#223042" : "#D7F1EC"
+    property color colBadgeBg:   popupTheme.darkMode ? "#1b2a22" : "#E2F6EE"
+    property color colButtonNeutral: popupTheme.darkMode ? "#232a35" : "#EEF4F3"
+    property color colButtonDisabled: popupTheme.disabled
+    property color colButtonText: popupTheme.darkMode ? "#ffefef" : popupTheme.text
+    property color colButtonDisabledText: popupTheme.muted
+    property color colPrimaryButtonText: "#ffffff"
     property int   rad: 12
     property int   pad: 10
     property int   rowH: 40
@@ -387,7 +403,7 @@ Item {
 
     // ====== Backdrop ======
     Rectangle {
-        color: "#0f1115"
+        color: colBg
         anchors.fill: parent
     }
 
@@ -411,9 +427,9 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 height: 52
-                color: "#00202633"
+                color: colHeader
                 radius: rad
-                border.color: "#00263041"
+                border.color: colBorder
 
                 RowLayout {
                     anchors.fill: parent
@@ -471,7 +487,7 @@ Item {
 
                         background: Rectangle {
                             radius: rad
-                            color: "#141922"
+                            color: colInput
                             border.color: colBorder
                             border.width: 1
                         }
@@ -483,13 +499,13 @@ Item {
                         onClicked: addGroup(newGroupField.text)
                         contentItem: Text {
                             text: parent.text
-                            color: "white"
+                            color: colPrimaryButtonText
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
-                            color: "#25c96e"
+                            color: colAccent
                             radius: rad
                             border.color: colAccentDim
                         }
@@ -502,14 +518,14 @@ Item {
                         onClicked: deleteGroup(selectedGroupIndex)
                         contentItem: Text {
                             text: parent.text
-                            color: enabled ? "#ffefef" : "#7d818a"
+                            color: enabled ? colButtonText : colButtonDisabledText
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
                             radius: rad
-                            color: enabled ? "#232a35" : "#1b212b"
+                            color: enabled ? colButtonNeutral : colButtonDisabled
                             border.color: colBorder
                         }
                     }
@@ -520,18 +536,60 @@ Item {
                         onClicked: renameSelectedGroup(newGroupField.text)
                         contentItem: Text {
                             text: parent.text
-                            color: enabled ? "#ffefef" : "#7d818a"
+                            color: enabled ? colButtonText : colButtonDisabledText
                             font.pixelSize: 14
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                         }
                         background: Rectangle {
                             radius: rad
-                            color: enabled ? "#2b3543" : "#1b212b"
+                            color: enabled ? colButtonNeutral : colButtonDisabled
                             border.color: colBorder
                         }
-                        ToolTip.visible: hovered
-                        ToolTip.text: "เปลี่ยนชื่อกลุ่มที่เลือก แล้วส่ง {payload:[{id, GroupsName, uniqueIdInGroup}]}"
+                        // R1.7.4D: disable sticky tooltip and remove Thai UI text.
+                        ToolTip.visible: false
+                        ToolTip.text: ""
+                    }
+
+                    Rectangle {
+                        id: closeBtn
+                        Layout.preferredWidth: 96
+                        Layout.preferredHeight: 34
+                        Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                        radius: height / 2
+                        color: closeMouse.containsMouse ? colAccentDim : colCardHi
+                        border.width: 1
+                        border.color: closeMouse.containsMouse ? colAccent : colBorderHi
+
+                        RowLayout {
+                            anchors.centerIn: parent
+                            spacing: 6
+
+                            Text {
+                                text: "✕"
+                                color: closeMouse.containsMouse ? colPrimaryButtonText : colText
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+
+                            Text {
+                                text: "Close"
+                                color: closeMouse.containsMouse ? colPrimaryButtonText : colText
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                        }
+
+                        MouseArea {
+                            id: closeMouse
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (typeof popuppanel !== "undefined" && popuppanel)
+                                    popuppanel.close()
+                            }
+                        }
                     }
                 }
             }
@@ -588,10 +646,10 @@ Item {
                                 background: Rectangle {
                                     radius: rad - 6
                                     color: groupRowDelegate.down
-                                           ? "#2e3746"
+                                           ? colRowDown
                                            : groupRowDelegate.hovered
-                                             ? "#262f3d"
-                                             : (index === groupListView.currentIndex ? "#223042" : "transparent")
+                                             ? colRowHover
+                                             : (index === groupListView.currentIndex ? colSelected : "transparent")
                                     border.color: index === groupListView.currentIndex ? colAccentDim : "transparent"
                                 }
 
@@ -615,8 +673,8 @@ Item {
                                         radius: 9
                                         height: 22
                                         width: 44
-                                        color: "#1b2a22"
-                                        border.color: "#234f3c"
+                                        color: colBadgeBg
+                                        border.color: colAccentDim
                                         Row {
                                             anchors.centerIn: parent
                                             spacing: 4
@@ -709,8 +767,8 @@ Item {
                                                 radius: rad - 6
                                                 color: {
                                                     if (!shouldShow) return "transparent"
-                                                    if (availDelegate.down) return "#27303d"
-                                                    if (availDelegate.hovered) return "#202733"
+                                                    if (availDelegate.down) return colRowDown
+                                                    if (availDelegate.hovered) return colRowHover
                                                     return "transparent"
                                                 }
                                                 border.color: "transparent"
@@ -770,13 +828,13 @@ Item {
                                 }
                                 contentItem: Text {
                                     text: parent.text
-                                    color: "white"
+                                    color: colPrimaryButtonText
                                     font.pixelSize: 14
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
                                 }
                                 background: Rectangle {
-                                    color: "#25c96e"
+                                    color: colAccent
                                     radius: rad
                                     border.color: colAccentDim
                                 }
@@ -799,14 +857,14 @@ Item {
                                 }
                                 contentItem: Text {
                                     text: parent.text
-                                    color: enabled ? "#ffefef" : "#7d818a"
+                                    color: enabled ? colButtonText : colButtonDisabledText
                                     font.pixelSize: 14
                                     horizontalAlignment: Text.AlignHCenter
                                     verticalAlignment: Text.AlignVCenter
                                 }
                                 background: Rectangle {
                                     radius: rad
-                                    color: enabled ? "#232a35" : "#1b212b"
+                                    color: enabled ? colButtonNeutral : colButtonDisabled
                                     border.color: colBorder
                                 }
                             }
@@ -853,9 +911,9 @@ Item {
                                             radius: rad - 6
                                             color: {
                                                 if (!shouldShow) return "transparent"
-                                                if (inGroupDelegate.down) return "#27303d"
-                                                if (inGroupDelegate.hovered) return "#202733"
-                                                if (index === inGroupListView.currentIndex) return "#1d2631"
+                                                if (inGroupDelegate.down) return colRowDown
+                                                if (inGroupDelegate.hovered) return colRowHover
+                                                if (index === inGroupListView.currentIndex) return colSelected
                                                 return "transparent"
                                             }
                                             border.color: index === inGroupListView.currentIndex ? colAccentDim : "transparent"
@@ -941,6 +999,7 @@ Item {
 }
     CancelButtonPopupSettingDrawer {
         id: cancelBtn
+        darkMode: gropsetting.darkMode
         anchors.right: parent.right
         anchors.bottom: parent.bottom
         anchors.rightMargin: 15

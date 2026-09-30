@@ -182,6 +182,15 @@
         <file>LogDeviceScanner.qml</file>
         <file>NewMemoryAddEdit.qml</file>
         <file>ui/Theme.qml</file>
+        <file>ui/HmiStatusPill.qml</file>
+        <file>ui/HmiNavButton.qml</file>
+        <file>ui/HmiButton.qml</file>
+        <file>ui/HmiPanel.qml</file>
+        <file>ui/HmiControlTile.qml</file>
+        <file>ui/HmiMetricChip.qml</file>
+        <file>ui/HmiTextField.qml</file>
+        <file>ui/HmiHorizontalScroll.qml</file>
+        <file>ui/HmiComboBox.qml</file>
         <file>images/rotate-right.png</file>
         <file>VolDrawer.qml</file>
         <file>AudioVolume.qml</file>
@@ -443,6 +452,18 @@
         <file>DoaViewer/ViewerPage.qml</file>
         <file>iScreenDFqml/images/chain_link.png</file>
         <file>iScreenDFqml/images/chain_unlink.png</file>
+        <file>iScreenDFqml/images/selectmode/light/radio.png</file>
+        <file>iScreenDFqml/images/selectmode/light/map.png</file>
+        <file>iScreenDFqml/images/selectmode/light/doa.png</file>
+        <file>iScreenDFqml/images/selectmode/light/network.png</file>
+        <file>iScreenDFqml/images/selectmode/light/recorder.png</file>
+        <file>iScreenDFqml/images/selectmode/light/diagnostic.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/radio.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/map.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/doa.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/network.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/recorder.png</file>
+        <file>iScreenDFqml/images/selectmode/dark/diagnostic.png</file>
         <file>iRecordManage/PopUPDeletedFileWave.qml</file>
         <file>iRecordManage/TumblerDateTime.qml</file>
         <file>DoaViewer/WaterfallCanvas.qml</file>

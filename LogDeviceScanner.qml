@@ -9,10 +9,21 @@
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
+import "ui"
 
 Item {
     id: root
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: root.darkMode }
+    property color popupBg: hmiTheme.darkMode ? "#111820" : "#FFFFFF"
+    property color popupBorder: hmiTheme.darkMode ? "#2A3A44" : hmiTheme.lineStrong
+    property color popupText: hmiTheme.darkMode ? "#E6EDF3" : hmiTheme.text
+    property color popupSub: hmiTheme.darkMode ? "#9AA6B2" : hmiTheme.textSecondary
+    property color popupHover: hmiTheme.darkMode ? "#1B2A33" : "#EEF6F4"
+    property color popupPress: hmiTheme.darkMode ? "#223742" : "#DCEEEA"
+    property color popupAccent: hmiTheme.accent
     width: 1205
     height: 400
     visible: true
@@ -102,8 +113,8 @@ Item {
 
         background: Rectangle {
             radius: 18
-            color: "#0E1520"
-            border.color: "#1C2A3D"
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
@@ -171,8 +182,8 @@ Item {
                     width: parent.width
                     height: 40
 
-                    color: "#E5E7EB"
-                    placeholderTextColor: "#93A4B8"
+                    color: "#FFFFFF"
+                    placeholderTextColor: hmiTheme.muted
                     font.pixelSize: 16
 
                     leftPadding: 12
@@ -181,8 +192,8 @@ Item {
 
                     background: Rectangle {
                         radius: 10
-                        color: "#0F172A"
-                        border.color: "#334155"
+                        color: hmiTheme.input
+                        border.color: hmiTheme.lineStrong
                         border.width: 1
                     }
 
@@ -210,16 +221,16 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: cancelBtn.pressed
-                                   ? "#1E293B"
-                                   : (cancelBtn.hovered ? "#0F172A" : "transparent")
-                            border.color: cancelBtn.hovered ? "#94A3B8" : "#3B4B63"
+                                   ? hmiTheme.cardAlt
+                                   : (cancelBtn.hovered ? hmiTheme.input : "transparent")
+                            border.color: cancelBtn.hovered ? hmiTheme.textSecondary : hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "CANCEL"
-                            color: cancelBtn.hovered ? "#FFFFFF" : "#F2F6FF"
+                            color: cancelBtn.hovered ? hmiTheme.text : hmiTheme.text
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -245,16 +256,16 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: okBtn.pressed
-                                   ? "#064E3B"
-                                   : (okBtn.hovered ? "#0F766E" : "transparent")
-                            border.color: okBtn.hovered ? "#2DD4BF" : "#3B4B63"
+                                   ? Qt.darker(hmiTheme.accent, 1.18)
+                                   : (okBtn.hovered ? hmiTheme.accent : "transparent")
+                            border.color: okBtn.hovered ? hmiTheme.accentHover : hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "OK"
-                            color: okBtn.hovered ? "#ECFEFF" : "#2DD4BF"
+                            color: okBtn.hovered ? (root.darkMode ? "#061514" : "#FFFFFF") : hmiTheme.accent
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -295,8 +306,8 @@ Item {
 
         background: Rectangle {
             radius: 18
-            color: "#0E1520"
-            border.color: "#1C2A3D"
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
@@ -310,14 +321,14 @@ Item {
 
                 Text {
                     text: "Confirm delete"
-                    color: "#FFFFFF"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                 }
 
                 Text {
                     text: "Delete this scan item?"
-                    color: "#BFD0E6"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 18
                     wrapMode: Text.WordWrap
                 }
@@ -341,16 +352,16 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: confirmDeleteCancelBtn.pressed
-                                   ? "#1E293B"
-                                   : (confirmDeleteCancelBtn.hovered ? "#0F172A" : "transparent")
-                            border.color: confirmDeleteCancelBtn.hovered ? "#94A3B8" : "#3B4B63"
+                                   ? hmiTheme.cardAlt
+                                   : (confirmDeleteCancelBtn.hovered ? hmiTheme.input : "transparent")
+                            border.color: confirmDeleteCancelBtn.hovered ? hmiTheme.textSecondary : hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "CANCEL"
-                            color: confirmDeleteCancelBtn.hovered ? "#FFFFFF" : "#F2F6FF"
+                            color: confirmDeleteCancelBtn.hovered ? hmiTheme.text : hmiTheme.text
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -379,7 +390,7 @@ Item {
                             color: confirmDeleteDeleteBtn.pressed
                                    ? "#7F1D1D"
                                    : (confirmDeleteDeleteBtn.hovered ? "#991B1B" : "transparent")
-                            border.color: confirmDeleteDeleteBtn.hovered ? "#FF5C5C" : "#3B4B63"
+                            border.color: confirmDeleteDeleteBtn.hovered ? "#FF5C5C" : hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -970,8 +981,8 @@ Item {
 
         background: Rectangle {
             radius: 18
-            color: "#0E1520"
-            border.color: "#1C2A3D"
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
@@ -985,7 +996,7 @@ Item {
 
                 Text {
                     text: deleteConfirmDialog.titleText
-                    color: "#FFFFFF"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                     elide: Text.ElideRight
@@ -993,7 +1004,7 @@ Item {
 
                 Text {
                     text: deleteConfirmDialog.messageText
-                    color: "#BFD0E6"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 24
                     wrapMode: Text.WordWrap
                 }
@@ -1012,14 +1023,14 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: "transparent"
-                            border.color: "#3B4B63"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "CANCEL"
-                            color: "#F2F6FF"
+                            color: hmiTheme.text
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -1040,7 +1051,7 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: "transparent"
-                            border.color: "#3B4B63"
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
                         }
 
@@ -1117,9 +1128,9 @@ Item {
 
             background: Rectangle {
                 radius: 8
-                border.color: "#0c4a3e"
+                border.color: hmiTheme.lineStrong
                 border.width: 1
-                color: "#169976"
+                color: widgetView ? hmiTheme.accent : hmiTheme.cardAlt
             }
 
             contentItem: Text {
@@ -1127,13 +1138,13 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: widgetView ? "#FFFFFF" : "#9CA3AF"
+                color: widgetView ? "#FFFFFF" : hmiTheme.text
                 font.pixelSize: 16
                 font.bold: true
             }
 
             onClicked: {
-                widgetView = false      // ✅ FIX: Scan = true
+                widgetView = true       // Scan workspace
                 if (inGroupView) leaveGroup()
             }
         }
@@ -1146,9 +1157,9 @@ Item {
 
             background: Rectangle {
                 radius: 8
-                border.color: "#0c4a3e"
+                border.color: hmiTheme.lineStrong
                 border.width: 1
-                color: "#169976"
+                color: widgetView ? hmiTheme.cardAlt : hmiTheme.accent
             }
 
             contentItem: Text {
@@ -1156,13 +1167,13 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: widgetView ? "#9CA3AF" : "#FFFFFF"
+                color: widgetView ? hmiTheme.text : "#FFFFFF"
                 font.pixelSize: 16
                 font.bold: true
             }
 
             onClicked: {
-                widgetView = false     // ✅ FIX: Memory = false
+                widgetView = false      // Memory workspace
                 if (inGroupView) leaveGroup()
             }
         }
@@ -1192,8 +1203,8 @@ Item {
 
             background: Rectangle {
                 radius: 8
-                color: "#F4320B"
-                border.color: "#0c4a3e"
+                color: hmiTheme.danger
+                border.color: hmiTheme.lineStrong
                 border.width: 1
                 opacity: 0.95
             }
@@ -1203,7 +1214,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: "#FFFFFF"
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -1218,15 +1229,15 @@ Item {
 
         ToolButton {
             id: deleteMemoryButton
-            visible: widgetView      // ✅ FIX: memory visible when !widgetView
+            visible: !widgetView     // Memory mode
             width: deleteButtons.btnW
             height: deleteButtons.btnH
             hoverEnabled: true
 
             background: Rectangle {
                 radius: 8
-                color: "#F4320B"
-                border.color: "#0c4a3e"
+                color: hmiTheme.danger
+                border.color: hmiTheme.lineStrong
                 border.width: 1
                 opacity: 0.95
             }
@@ -1236,7 +1247,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: "#FFFFFF"
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -1264,7 +1275,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: "#FFFFFF"
                 font.pixelSize: 16
                 font.bold: true
                 elide: Text.ElideRight
@@ -1272,8 +1283,8 @@ Item {
 
             background: Rectangle {
                 radius: 8
-                color: "#12568C"
-                border.color: "#0c4a3e"
+                color: hmiTheme.info
+                border.color: hmiTheme.lineStrong
                 border.width: 1
                 opacity: 0.95
             }
@@ -1296,13 +1307,13 @@ Item {
                 width: 520
                 height: Math.min(640, parent.height * 0.85)
 
-                property color dBg:     "#111820"
-                property color dBorder: "#2A3A44"
-                property color dText:   "#E6EDF3"
-                property color dSub:    "#9AA6B2"
-                property color dHover:  "#1B2A33"
-                property color dAccent: "#00c896"
-                property color dPress:  "#223742"
+                property color dBg:     root.popupBg
+                property color dBorder: root.popupBorder
+                property color dText:   root.popupText
+                property color dSub:    root.popupSub
+                property color dHover:  root.popupHover
+                property color dAccent: root.popupAccent
+                property color dPress:  root.popupPress
 
                 background: Rectangle {
                     radius: 16
@@ -1381,7 +1392,7 @@ Item {
                             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOn; active: true; width: 10 }
                         }
 
-                        Rectangle { Layout.fillWidth: true; height: 1; color: "#22313A"; opacity: 0.9 }
+                        Rectangle { Layout.fillWidth: true; height: 1; color: hmiTheme.line; opacity: 0.9 }
 
                         // ===== Sessions List (Time) =====
                         Text {
@@ -1483,8 +1494,8 @@ Item {
                                     width: 120
                                     height: 22
                                     radius: 11
-                                    color: "#000000"
-                                    opacity: 0.35
+                                    color: root.darkMode ? "#000000" : "#5E7873"
+                                    opacity: root.darkMode ? 0.35 : 0.18
                                 }
 
                                 Text {
@@ -1512,8 +1523,8 @@ Item {
                                     width: 120
                                     height: 22
                                     radius: 11
-                                    color: "#000000"
-                                    opacity: 0.35
+                                    color: root.darkMode ? "#000000" : "#5E7873"
+                                    opacity: root.darkMode ? 0.35 : 0.18
                                 }
 
                                 Text {
@@ -1640,8 +1651,8 @@ Item {
                             id: mainCard
                             anchors.fill: parent
                             radius: 18 * u
-                            color: "#0E1520"
-                            border.color: "#1C2A3D"
+                            color: hmiTheme.panel
+                            border.color: hmiTheme.lineStrong
                             border.width: Math.max(1, Math.round(1 * u))
 
                             property bool isHover: false
@@ -1653,7 +1664,7 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: parent.radius
-                                color: "#ffffff"
+                                color: hmiTheme.text
                                 opacity: mainCard.isPress ? 0.12 : (mainCard.isHover ? 0.06 : 0.0)
                                 visible: opacity > 0.001
                                 Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -1663,7 +1674,7 @@ Item {
                                 anchors.fill: parent
                                 radius: parent.radius
                                 color: "transparent"
-                                border.color: "#ffffff"
+                                border.color: hmiTheme.text
                                 border.width: 1
                                 opacity: mainCard.isHover ? 0.16 : 0.0
                                 visible: opacity > 0.001
@@ -1712,13 +1723,13 @@ Item {
                                     spacing: 6
                                     visible: isScanGroup
 
-                                    Text { text: "SCAN RESULT"; color: "#FFFFFF"; font.pixelSize: 16; font.bold: true }
-                                    Text { text: "Found " + count + " channels"; color: "#FFFFFF"; font.pixelSize: 16; font.bold: true }
-                                    Text { text: "Folder ID: " + folderId; color: "#BFD0E6"; font.pixelSize: 13 }
-                                    Text { text: timeKey; color: "#BFD0E6"; font.pixelSize: 13 }
+                                    Text { text: "SCAN RESULT"; color: hmiTheme.text; font.pixelSize: 16; font.bold: true }
+                                    Text { text: "Found " + count + " channels"; color: hmiTheme.text; font.pixelSize: 16; font.bold: true }
+                                    Text { text: "Folder ID: " + folderId; color: hmiTheme.textSecondary; font.pixelSize: 13 }
+                                    Text { text: timeKey; color: hmiTheme.textSecondary; font.pixelSize: 13 }
                                     Text {
                                         text: (minFreq > 0 && maxFreq > 0) ? (minFreq.toFixed(3) + " – " + maxFreq.toFixed(3) + " MHz") : "-"
-                                        color: "#BFD0E6"; font.pixelSize: 13
+                                        color: hmiTheme.textSecondary; font.pixelSize: 13
                                     }
                                 }
 
@@ -1727,8 +1738,8 @@ Item {
                                     visible: !isScanGroup
                                     spacing: 8
 
-                                    Text { text: "Frequency: " + n(centerMHz_mem,0).toFixed(6); color: "#F2F6FF"; font.pixelSize: 14; font.bold: true }
-                                    Text { text: "Bandwidth: " + bwLine_mem; color: "#BFD0E6"; font.pixelSize: 13 }
+                                    Text { text: "Frequency: " + n(centerMHz_mem,0).toFixed(6); color: hmiTheme.text; font.pixelSize: 14; font.bold: true }
+                                    Text { text: "Bandwidth: " + bwLine_mem; color: hmiTheme.textSecondary; font.pixelSize: 13 }
                                 }
                             }
                         }
@@ -1800,9 +1811,9 @@ Item {
                         height: detailGrid.cellHeight - gapY
 
                         property real u: height / 210.0
-                        property color cValue:   "#F2F6FF"
-                        property color cLabel:   "#BFD0E6"
-                        property color cOutline: "#081018"
+                        property color cValue:   hmiTheme.text
+                        property color cLabel:   hmiTheme.textSecondary
+                        property color cOutline: "transparent"
 
                         property string presetName: (model.Profile !== "" ? ("Profile " + model.Profile) : "Profile")
                         property real centerMHz: n(model.Freq, 0)
@@ -1812,8 +1823,8 @@ Item {
                             id: subCard
                             anchors.fill: parent
                             radius: 18 * u
-                            color: "#0E1520"
-                            border.color: "#1C2A3D"
+                            color: hmiTheme.panel
+                            border.color: hmiTheme.lineStrong
                             border.width: Math.max(1, Math.round(1 * u))
 
                             property bool isHover: false
@@ -1825,7 +1836,7 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: parent.radius
-                                color: "#ffffff"
+                                color: hmiTheme.text
                                 opacity: subCard.isPress ? 0.12 : (subCard.isHover ? 0.06 : 0.0)
                                 visible: opacity > 0.001
                                 Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -1835,7 +1846,7 @@ Item {
                                 anchors.fill: parent
                                 radius: parent.radius
                                 color: "transparent"
-                                border.color: "#ffffff"
+                                border.color: hmiTheme.text
                                 border.width: 1
                                 opacity: subCard.isHover ? 0.16 : 0.0
                                 visible: opacity > 0.001
@@ -1895,8 +1906,8 @@ Item {
                                     anchors.top: parent.top
                                     height: 122 * u
                                     radius: 12 * u
-                                    color: "#0E1520"
-                                    border.color: "#122033"
+                                    color: hmiTheme.panel
+                                    border.color: hmiTheme.line
                                     border.width: Math.max(1, Math.round(1 * u))
 
                                     Column {
@@ -1910,16 +1921,12 @@ Item {
                                                 color: cLabel
                                                 font.pixelSize: Math.round(20 * u)
                                                 font.bold: true
-                                                style: Text.Outline
-                                                styleColor: cOutline
                                             }
                                             Text {
                                                 text: n(centerMHz,0).toFixed(6) + " MHz"
                                                 color: cValue
                                                 font.pixelSize: Math.round(21 * u)
                                                 font.bold: true
-                                                style: Text.Outline
-                                                styleColor: cOutline
                                             }
                                         }
 
@@ -1930,16 +1937,12 @@ Item {
                                                 color: cLabel
                                                 font.pixelSize: Math.round(20 * u)
                                                 font.bold: true
-                                                style: Text.Outline
-                                                styleColor: cOutline
                                             }
                                             Text {
                                                 text: bwLine
                                                 color: cValue
                                                 font.pixelSize: Math.round(21 * u)
                                                 font.bold: true
-                                                style: Text.Outline
-                                                styleColor: cOutline
                                             }
                                         }
                                     }
@@ -1968,19 +1971,17 @@ Item {
                                             radius: height / 2
                                             color: scanSaveBtn.pressed
                                                    ? "#064E3B"
-                                                   : (scanSaveBtn.hovered ? "#0F766E" : "transparent")
-                                            border.color: scanSaveBtn.hovered ? "#28FF8B" : "#3B4B63"
+                                                   : (scanSaveBtn.hovered ? "#0F766E" : (root.darkMode ? "transparent" : "#ECF8F4"))
+                                            border.color: scanSaveBtn.hovered ? "#28FF8B" : (root.darkMode ? hmiTheme.lineStrong : "#6FB799")
                                             border.width: Math.max(1, Math.round(1.4 * u))
                                         }
 
                                         Text {
                                             anchors.centerIn: parent
                                             text: "SAVE"
-                                            color: scanSaveBtn.hovered ? "#ECFEFF" : "#28FF8B"
+                                            color: scanSaveBtn.hovered ? "#ECFEFF" : (root.darkMode ? "#28FF8B" : "#16824C")
                                             font.pixelSize: Math.round(17 * u)
                                             font.bold: true
-                                            style: Text.Outline
-                                            styleColor: cOutline
                                         }
 
                                         MouseArea {
@@ -2031,19 +2032,17 @@ Item {
                                             radius: height / 2
                                             color: scanDeleteBtn.pressed
                                                    ? "#7F1D1D"
-                                                   : (scanDeleteBtn.hovered ? "#991B1B" : "transparent")
-                                            border.color: scanDeleteBtn.hovered ? "#FF5C5C" : "#3B4B63"
+                                                   : (scanDeleteBtn.hovered ? "#991B1B" : (root.darkMode ? "transparent" : "#FDECEC"))
+                                            border.color: scanDeleteBtn.hovered ? "#FF5C5C" : (root.darkMode ? hmiTheme.lineStrong : "#D9A7AF")
                                             border.width: Math.max(1, Math.round(1.4 * u))
                                         }
 
                                         Text {
                                             anchors.centerIn: parent
                                             text: "DELETE"
-                                            color: scanDeleteBtn.hovered ? "#FFE4E6" : "#FF5C5C"
+                                            color: scanDeleteBtn.hovered ? "#FFE4E6" : (root.darkMode ? "#FF5C5C" : hmiTheme.danger)
                                             font.pixelSize: Math.round(17 * u)
                                             font.bold: true
-                                            style: Text.Outline
-                                            styleColor: cOutline
                                         }
 
                                         MouseArea {
@@ -2093,14 +2092,14 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: 8
-                            color: "#111A24"
-                            border.color: "#1C2A3D"
+                            color: hmiTheme.cardAlt
+                            border.color: hmiTheme.lineStrong
                             border.width: 1
 
                             Rectangle {
                                 anchors.fill: parent
                                 radius: parent.radius
-                                color: "#ffffff"
+                                color: hmiTheme.text
                                 opacity: backBtn.isPress ? 0.18 : (backBtn.isHover ? 0.10 : 0.0)
                                 visible: opacity > 0.001
                                 Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -2110,7 +2109,7 @@ Item {
                                 anchors.fill: parent
                                 radius: parent.radius
                                 color: "transparent"
-                                border.color: "#ffffff"
+                                border.color: hmiTheme.text
                                 border.width: 1
                                 opacity: backBtn.isHover ? 0.18 : 0.0
                                 visible: opacity > 0.001
@@ -2121,7 +2120,7 @@ Item {
                         Text {
                             anchors.centerIn: parent
                             text: "< Back"
-                            color: "#FFFFFF"
+                            color: hmiTheme.text
                             font.pixelSize: 13
                             font.bold: true
                         }
@@ -2142,12 +2141,12 @@ Item {
                     Rectangle {
                         width: parent.width
                         height: 1
-                        color: "#122033"
+                        color: hmiTheme.line
                     }
 
                     Text {
                         text: activeGroupTitle
-                        color: "#FFFFFF"
+                        color: hmiTheme.text
                         font.pixelSize: 16
                         font.bold: true
                         wrapMode: Text.WordWrap

@@ -1,6 +1,7 @@
 //TapBarRecordFiles.qml
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Controls.Material 2.15
 
 import QtWebSockets 1.0
 import QtQuick.Extras 1.4
@@ -11,15 +12,17 @@ import QtGraphicalEffects 1.0
 import QtQuick.Controls.Styles 1.4
 import QtQuick.Controls 1.4 as OldControls   // TabView, Tab, TabViewStyle
 import QtQuick.Controls 2.15 as Controls     // ToolButton, ScrollBar ฯลฯ
+import "../ui"
 
 Item {
     id: tapBarRecorderFilesRoot
     visible: true
-    width: 1980
-    height: 1080
+    width: parent ? parent.width : 1980
+    height: parent ? parent.height : 1080
     // เดิมสำหรับไฟล์
     signal waveFilesSelected(var filesArray)
-    property bool isDarkTheme: false
+    property bool isDarkTheme: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: tapBarRecorderFilesRoot.isDarkTheme }
     property bool muted: false
     property int  circleButton: 60
     property int  squareButton: 60
@@ -43,13 +46,14 @@ Item {
 
     Rectangle {
         id: rectangle
-        color: "#000405"
+        color: hmiTheme.page
         anchors.fill: parent
         anchors.topMargin: 60
         // ==== ใช้ Controls 1.4 ด้วย alias OldControls ====
         OldControls.TabView {
             id: tabView
             anchors.fill: parent
+            anchors.margins: 12
 
             // =============== TAB 0: RECORDING FILES ===============
             OldControls.Tab {
@@ -66,6 +70,7 @@ Item {
                     RecordFiles {
                         id: recordFiles
                         anchors.fill: parent
+                        isDarkTheme: tapBarRecorderFilesRoot.isDarkTheme
                         onWaveFilesSelected: tapBarRecorderFilesRoot.waveFilesSelected(filesArray)
 
                         onWavePlayToggleRequested: {
@@ -78,8 +83,11 @@ Item {
                         }
                     }
 
+                    // Outer workspace flickables fit on screen; the persistent
+                    // page-level scrollbar is unused and should stay hidden in
+                    // both dark and light themes.
                     Controls.ScrollBar.vertical: Controls.ScrollBar {
-                        policy: Controls.ScrollBar.AlwaysOn
+                        policy: Controls.ScrollBar.AlwaysOff
                     }
                 }
 
@@ -96,7 +104,7 @@ Item {
 
                 Rectangle {
                     anchors.fill: parent
-                    color: "#e7e6e6"
+                    color: hmiTheme.page
                 }
 
                 Flickable {
@@ -107,10 +115,14 @@ Item {
                     RegisterDevice {
                         id: registerDevice
                         anchors.fill: parent
+                        isDarkTheme: tapBarRecorderFilesRoot.isDarkTheme
                     }
 
+                    // Outer workspace flickables fit on screen; the persistent
+                    // page-level scrollbar is unused and should stay hidden in
+                    // both dark and light themes.
                     Controls.ScrollBar.vertical: Controls.ScrollBar {
-                        policy: Controls.ScrollBar.AlwaysOn
+                        policy: Controls.ScrollBar.AlwaysOff
                     }
                 }
 
@@ -158,19 +170,29 @@ Item {
 
             // =============== STYLE ของ TabView (ยังเป็น Controls 1.4) ===============
             style: TabViewStyle {
+                frameOverlap: 0
+                tabOverlap: 0
+                frame: Rectangle {
+                    color: hmiTheme.panel
+                    border.width: 1
+                    border.color: hmiTheme.line
+                    radius: hmiTheme.radiusLg
+                }
                 tab: Rectangle {
-                    implicitWidth: 200
-                    implicitHeight: 65
-                    color: styleData.selected ? "white" : "#d3d3d3"
-                    border.color: "black"
-                    radius: 5
+                    implicitWidth: 220
+                    implicitHeight: 52
+                    color: styleData.selected ? hmiTheme.accent : hmiTheme.cardAlt
+                    border.color: styleData.selected ? hmiTheme.accent : hmiTheme.lineStrong
+                    border.width: 1
+                    radius: hmiTheme.radiusSm
                     Text {
                         text: styleData.title
                         anchors.centerIn: parent
-                        font.pixelSize: 20
+                        font.pixelSize: 14
+                        font.bold: true
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
-                        color: styleData.selected ? "black" : "#555"
+                        color: styleData.selected ? "#061514" : hmiTheme.text
                     }
                 }
             }

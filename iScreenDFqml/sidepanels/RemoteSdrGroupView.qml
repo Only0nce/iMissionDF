@@ -2,12 +2,24 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../ui"
 
 Item {
     id: root
     anchors.fill: parent
 
     // ====== อินพุต ======
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: root.darkMode }
+
+    readonly property color groupBg:       hmiTheme.darkMode ? "#132A1E" : "#FFFFFF"
+    readonly property color groupSelected: hmiTheme.darkMode ? "#20633A" : "#DDF7EA"
+    readonly property color groupBorder:   hmiTheme.darkMode ? "#214A36" : hmiTheme.line
+    readonly property color groupBorderSelected: hmiTheme.accent
+    readonly property color groupText:     hmiTheme.text
+    readonly property color groupMuted:    hmiTheme.textSecondary
+    readonly property color frameBg:       hmiTheme.input
+
     // ส่งโมเดลเข้ามาจากภายนอก (ListModel ที่มี role: GroupsName, DeviceName, IPAddress, Port, status)
     property var model: null
 
@@ -35,8 +47,8 @@ Item {
         id: frame
         anchors.fill: parent
         radius: 10
-        color: "#00111212"
-        border.color: "#00111212"
+        color: frameBg
+        border.color: hmiTheme.line
 
         ListView {
             id: listView
@@ -55,8 +67,8 @@ Item {
                 width: ListView.view ? ListView.view.width : parent.width
                 height: 34
                 radius: 8
-                color: (root.selectedGroup === section) ? "#20633a" : "#132a1e"
-                border.color: (root.selectedGroup === section) ? "#48ff9a" : "#214a36"
+                color: (root.selectedGroup === section) ? groupSelected : groupBg
+                border.color: (root.selectedGroup === section) ? groupBorderSelected : groupBorder
 
                 Row {
                     anchors.fill: parent
@@ -64,13 +76,13 @@ Item {
                     spacing: 8
                     Text {
                         text: section
-                        color: "#e6f7ec"
+                        color: groupText
                         font.pixelSize: 14
                         font.bold: true
                     }
                     Text {
                         text: "(" + root.countInGroup(section) + ")"
-                        color: "#9bd9b3"
+                        color: groupMuted
                         font.pixelSize: 12
                     }
                     Item { Layout.fillWidth: true }
@@ -109,6 +121,7 @@ Item {
                     deviceStatus: model.status
                     deviceRssi:   0            // ถ้าไม่มี role rssi ในโมเดลนี้ ให้ 0 ไปก่อน (หรือเพิ่มในโมเดล)
                     rowIndex:     index
+                    darkMode: root.darkMode
                 }
 
                 // ไฮไลท์เมื่อเป็นแถวที่ถูกเลือก (ไม่ต้องแก้ RemoteSdrItem)
@@ -117,7 +130,7 @@ Item {
                     radius: 8
                     color: "transparent"
                     border.width: ListView.isCurrentItem ? 2 : 1
-                    border.color: ListView.isCurrentItem ? "#3fe28a" : "#10331a"
+                    border.color: ListView.isCurrentItem ? hmiTheme.accent : hmiTheme.line
                 }
 
                 MouseArea {

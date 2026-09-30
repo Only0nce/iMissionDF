@@ -2,6 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../ui"
 
 // Button {
 //     id: applyButton
@@ -31,16 +32,23 @@ import QtQuick.Layouts 1.15
 
 Rectangle {
     id: applyButtonPopupSettingDrawer
-    width: 70; height: 40
+    property bool darkMode: true
+    Theme { id: buttonTheme; darkMode: applyButtonPopupSettingDrawer.darkMode }
+    readonly property color normalBg: buttonTheme.accent
+    readonly property color hoverBg: buttonTheme.accentHover
+    readonly property color textColor: "#FFFFFF"
+    width: 78; height: 40
     radius: height/2
     anchors.right: parent.right
     anchors.rightMargin: 30
-    color: "#25303b"
+    color: normalBg
+    border.width: 1
+    border.color: buttonTheme.lineStrong
     Layout.alignment: Qt.AlignVCenter
 
     signal clicked()
 
-    Text { text: "Save"; anchors.centerIn: parent; color: "white"; font.pixelSize: 15; font.bold: true }
+    Text { text: "Save"; anchors.centerIn: parent; color: parent.textColor; font.pixelSize: 15; font.bold: true }
 
     MouseArea {
         anchors.fill: parent
@@ -51,7 +59,7 @@ Rectangle {
         }
 
         // Hover effect
-        onEntered: applyButtonPopupSettingDrawer.color = "#324152"
-        onExited:  applyButtonPopupSettingDrawer.color = "#25303b"
+        onEntered: applyButtonPopupSettingDrawer.color = applyButtonPopupSettingDrawer.hoverBg
+        onExited:  applyButtonPopupSettingDrawer.color = applyButtonPopupSettingDrawer.normalBg
     }
 }

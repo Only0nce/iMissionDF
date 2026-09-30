@@ -2,10 +2,14 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtGraphicalEffects 1.12
 import "../i18n" as I18n
+import "../../ui"
 
 Item {
     id: group
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: group.darkMode }
     anchors.fill: parent
 
     // groups: [{ groupId, name, uniqueIdInGroup, items: [...] }]
@@ -39,14 +43,17 @@ Item {
         if (_applying) return
         _applying = true
         try {
-            // ล้างทุกอย่างก่อนใส่ข้อมูลใหม่
-            resetUIBeforeApply()
-
             var obj = (typeof json === "string") ? JSON.parse(json) : json
             if (!obj || obj.objectName !== "RemoteGroups" || !obj.records) {
-                console.warn("[SideGroup] invalid payload:", json)
+                // Do not clear visible data on unrelated/malformed payloads.
+                // This prevents Remote Group / Remote SDR rows from disappearing
+                // during theme changes, reconnect races, or partial broadcasts.
+                console.warn("[SideGroup] invalid payload ignored, keep current model:", json)
                 return
             }
+
+            // ล้างเฉพาะหลังยืนยันแล้วว่า payload เป็น RemoteGroups จริง
+            resetUIBeforeApply()
 
             for (var i = 0; i < obj.records.length; ++i) {
                 var r = obj.records[i] || {}
@@ -62,7 +69,7 @@ Item {
             }
             rebuildGroups()
         } catch(e) {
-            console.warn("[SideGroup] applyRemoteGroups error:", e, json)
+            console.warn("[SideGroup] applyRemoteGroups error, keep current model:", e, json)
         } finally {
             _applying = false
         }
@@ -161,7 +168,7 @@ Item {
     }
 
     // ====== Header ======
-    Row {
+    RowLayout {
         id: header
         spacing: 10
         height: 36
@@ -173,8 +180,7 @@ Item {
         anchors.topMargin: 12
 
         Label {
-            anchors.verticalCenter: parent.verticalCenter
-            color: "#eeeeee"
+            color: hmiTheme.text
             text: "Remote Groups"
             font.pixelSize: 18
             font.bold: true
@@ -185,16 +191,27 @@ Item {
         Rectangle {
             id: addButton
             width: 50; height: 35; radius: height / 2
-            anchors.right: parent.right
-            anchors.rightMargin: 30
-            color: "#25303b"
+            Layout.preferredWidth: 50
+            Layout.preferredHeight: 35
+            color: hmiTheme.navTile
+            border.width: 1
+            border.color: hmiTheme.navTileBorder
             Layout.alignment: Qt.AlignVCenter
 
             Image {
+                id: addButtonGearSource
                 anchors.centerIn: parent
                 source: "qrc:/iScreenDFqml/images/gearicon.png"
-                width: 37; height: 37
+                width: 24; height: 24
                 fillMode: Image.PreserveAspectFit
+                visible: false
+            }
+
+            ColorOverlay {
+                anchors.fill: addButtonGearSource
+                source: addButtonGearSource
+                color: group.darkMode ? "#ECF6F4" : hmiTheme.navTileText
+                cached: true
             }
 
             MouseArea {
@@ -204,8 +221,8 @@ Item {
                     if (krakenmapval)
                         krakenmapval.openPopupSetting("Group Management")
                 }
-                onEntered: addButton.color = "#324152"
-                onExited:  addButton.color = "#25303b"
+                onEntered: addButton.color = hmiTheme.navTileHover
+                onExited:  addButton.color = hmiTheme.navTile
             }
         }
     }
@@ -267,6 +284,8 @@ Item {
         }
 
         delegate: GroupCard {
+            darkMode: group.darkMode
+            krakenmapval: group.krakenmapval
             width: groupListView.width
             property int groupId: modelData.groupId
             property string uniqueIdInGroup: modelData.uniqueIdInGroup   // ⭐ ใช้ใน Card ได้
@@ -321,6 +340,15 @@ Item {
                 if (krakenmapval) krakenmapval.groupSetting("settingbyGroup", 0, settingbyGroupJson)
             }
         }
+    }
+
+    Text {
+        anchors.centerIn: parent
+        visible: groups.length === 0
+        text: "No remote group data"
+        color: hmiTheme.textSecondary
+        font.pixelSize: 14
+        font.bold: true
     }
 
     // ====== Model แบน ======

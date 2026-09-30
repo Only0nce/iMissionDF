@@ -1,12 +1,14 @@
 // WaveEditor.qml — Qt 5.12
 import QtQuick 2.12
 import QtQuick.Controls 2.5
+import QtQuick.Controls.Material 2.5
 import QtQuick.Layouts 1.12
 import QtMultimedia 5.12
+import "../ui"
 
 Item {
     id: waveEditorRoot
-    width: 1200
+    width: parent ? parent.width : 1200
     height: 260
 
     /* ===== Public API / States ===== */
@@ -14,7 +16,11 @@ Item {
     property var  samples: []              // downsampled waveform for drawing
     property int  sampleCount: 0
     property int  durationMs: 0            // รวมทุกไฟล์เมื่อ concatMode=true (ms)
-    property bool isDarkTheme: true
+    property bool isDarkTheme: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: waveEditorRoot.isDarkTheme }
+    onIsDarkThemeChanged: {
+        if (canvas) canvas.requestPaint()
+    }
     property int  maxpointSamples16: 100000000
     property var  segList: []              // [{startSample,endSample,label,durationMs}, ...]
     property bool ended: false
@@ -44,51 +50,21 @@ Item {
         canvas.requestPaint()
     }
 
-    // Theme colors
-    function theme() {
-        return isDarkTheme ? {
-            cardBg:        "#161a1d",
-            cardFg:        "#e5e7eb",
-            subFg:         "#94a3b8",
-            rail:          "#2a2f37",
-            railBorder:    "#353b45",
-            waveColor:     "#12d27a",
-            midLineColor:  "#3b3b3b",
-            selectColor:   "#00b7ff55",
-            playheadColor: "#ed1fd5", //ffffff //6c1bf7 //E879F9
-            frameBorder:   "#000000",
-            segBorder:     "#f6ad55",
-            segLabel:      "#e5e7eb",
-            segBg:         "#00ffffff"
-        } : {
-            cardBg:        "#ffffff",
-            cardFg:        "#111827",
-            subFg:         "#4b5563",
-            rail:          "#e9eef5",
-            railBorder:    "#cad3df",
-            waveColor:     "#10b981",
-            midLineColor:  "#cbd5e1",
-            selectColor:   "#0099ff33",
-            playheadColor: "#e315eb", //111827 //e315eb //EF4444
-            frameBorder:   "#e5e7eb",
-            segBorder:     "#f59e0b",
-            segLabel:      "#111827",
-            segBg:         "#00ffffff"
-        }
-    }
-    property color cardBg:        theme().cardBg
-    property color cardFg:        theme().cardFg
-    property color subFg:         theme().subFg
-    property color rail:          theme().rail
-    property color railBorder:    theme().railBorder
-    property color waveColor:     theme().waveColor
-    property color midLineColor:  theme().midLineColor
-    property color selectColor:   theme().selectColor
-    property color playheadColor: theme().playheadColor
-    property color frameBorder:   theme().frameBorder
-    property color segBorder:     theme().segBorder
-    property color segLabel:      theme().segLabel
-    property color segBg:         theme().segBg
+    // Shared HMI theme. The waveform itself intentionally remains on the
+    // dark analyzer surface in both Light and Dark application themes.
+    property color cardBg:        hmiTheme.panel
+    property color cardFg:        hmiTheme.text
+    property color subFg:         hmiTheme.textSecondary
+    property color rail:          hmiTheme.input
+    property color railBorder:    hmiTheme.lineStrong
+    property color waveColor:     hmiTheme.analyzerAccent
+    property color midLineColor:  hmiTheme.gridLine
+    property color selectColor:   isDarkTheme ? "#334FC3A7" : "#332167BC"
+    property color playheadColor: hmiTheme.warning
+    property color frameBorder:   hmiTheme.line
+    property color segBorder:     hmiTheme.accentHover
+    property color segLabel:      hmiTheme.analyzerText
+    property color segBg:         "transparent"
 
     /* ===== View / Transport State ===== */
     property real zoom: 1.0
@@ -128,10 +104,10 @@ Item {
     }
     function iconSrc(name) {
         var map = {
-            play:       isDarkTheme ? "qrc:/images/playLight.png"     : "qrc:/images/playDark.png",
-            pause:      isDarkTheme ? "qrc:/images/puaseLight.png"    : "qrc:/images/puaseDark.png",
-            skipLeft:   isDarkTheme ? "qrc:/images/skipLeftLight.png" : "qrc:/images/skipLeftDark.png",
-            skipRight:  isDarkTheme ? "qrc:/images/skipRighLight.png" : "qrc:/images/skipRighDark.png"
+            play:       isDarkTheme ? "qrc:/iRecordManage/images/playLight.png"     : "qrc:/iRecordManage/images/playDark.png",
+            pause:      isDarkTheme ? "qrc:/iRecordManage/images/puaseLight.png"    : "qrc:/iRecordManage/images/puaseDark.png",
+            skipLeft:   isDarkTheme ? "qrc:/iRecordManage/images/skipLeftLight.png" : "qrc:/iRecordManage/images/skipLeftDark.png",
+            skipRight:  isDarkTheme ? "qrc:/iRecordManage/images/skipRighLight.png" : "qrc:/iRecordManage/images/skipRighDark.png"
         }
         return map[name] || ""
     }
@@ -1047,7 +1023,7 @@ Item {
         id: card
         anchors.fill: parent
         anchors.margins: 8
-        radius: 14
+        radius: hmiTheme.radiusLg
         color: cardBg
         border.color: frameBorder
         border.width: 1
@@ -1065,7 +1041,16 @@ Item {
                 Text {
                     text: "Wave Editor"
                     color: cardFg
-                    font.pixelSize: 16
+                    font.pixelSize: 17
+                    font.bold: true
+                    Layout.alignment: Qt.AlignVCenter
+                }
+
+                HmiStatusPill {
+                    darkMode: waveEditorRoot.isDarkTheme
+                    compact: true
+                    text: totalFiles <= 0 ? "NO SELECTION" : (concatMode ? "PLAYLIST " + totalFiles : "SINGLE FILE")
+                    tone: totalFiles <= 0 ? "neutral" : (concatMode ? "info" : "good")
                     Layout.alignment: Qt.AlignVCenter
                 }
 
@@ -1075,7 +1060,8 @@ Item {
                 Label {
                     id: totalsLabel
                     color: subFg
-                    font.pixelSize: 20
+                    font.pixelSize: 12
+                    font.bold: true
                     Layout.alignment: Qt.AlignVCenter
                     text: {
                         const totalSec = (durationMs > 0 ? durationMs/1000.0 : 0);
@@ -1151,6 +1137,30 @@ Item {
                         to: 1
                         // volumeLevel เป็น property ของ root (waveEditorRoot)
                         value: waveEditorRoot.volumeLevel
+                        background: Rectangle {
+                            x: volumeController.leftPadding
+                            y: volumeController.topPadding + volumeController.availableHeight / 2 - height / 2
+                            width: volumeController.availableWidth
+                            height: 6
+                            radius: 3
+                            color: hmiTheme.input
+                            border.color: hmiTheme.lineStrong
+                            Rectangle {
+                                width: volumeController.visualPosition * parent.width
+                                height: parent.height
+                                radius: 3
+                                color: hmiTheme.accent
+                            }
+                        }
+                        handle: Rectangle {
+                            x: volumeController.leftPadding + volumeController.visualPosition * (volumeController.availableWidth - width)
+                            y: volumeController.topPadding + volumeController.availableHeight / 2 - height / 2
+                            implicitWidth: 18
+                            implicitHeight: 18
+                            radius: 9
+                            color: hmiTheme.accentHover
+                            border.color: hmiTheme.accent
+                        }
 
                         onValueChanged: {
                             waveEditorRoot.volumeLevel = value
@@ -1193,9 +1203,10 @@ Item {
                 id: waveCard
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 10
-                color: isDarkTheme ? "#0f1318" : "#f8fafc"
-                border.color: isDarkTheme ? "#0b0e12" : "#e5e7eb"
+                radius: hmiTheme.radiusMd
+                color: hmiTheme.plot
+                border.color: hmiTheme.analyzerBorder
+                border.width: 1
 
                 Canvas {
                     id: canvas
@@ -1277,7 +1288,7 @@ Item {
 
                         // 1) วาดแถบพื้นหลัง (โปร่ง ๆ) ให้เห็นชัด
                         var bandW = 32  // ปรับความกว้างได้ (เช่น 18..40)
-                        ctx.fillStyle = "#31ffffff" //isDarkTheme ? "#31ffffff" : "#00000022"  // alpha ใน hex ได้
+                        ctx.fillStyle = isDarkTheme ? "#31ffffff" : "#20008B75"
                         ctx.fillRect(Math.round(phx - bandW/2), 0, bandW, height)
 
                         // 2) วาดเส้นกลางให้คม (เหมือนรูป 2)
@@ -1372,15 +1383,15 @@ Item {
                         Rectangle {
                             id: timeBg
                             radius: 6
-                            color: isDarkTheme ? "#1f2937" : "#ffffff"
-                            border.color: isDarkTheme ? "#0b0e12" : "#e5e7eb"
+                            color: hmiTheme.analyzerHud
+                            border.color: hmiTheme.analyzerBorder
                             anchors.horizontalCenter: parent.horizontalCenter
 
                             Text {
                                 id: timeText
                                 anchors.margins: 6
                                 anchors.centerIn: parent
-                                color: isDarkTheme ? "#e5e7eb" : "#111827"
+                                color: hmiTheme.analyzerText
                                 font.pixelSize: 12
                                 text: {
                                     var totalSec = (durationMs > 0 ? durationMs/1000.0 : 0)

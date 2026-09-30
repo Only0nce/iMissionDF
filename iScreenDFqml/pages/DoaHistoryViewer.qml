@@ -12,18 +12,23 @@
 import QtQuick 2.15
 import Qt.labs.settings 1.1
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtGraphicalEffects 1.15
+import "../../ui" as HMI
 
 Rectangle {
     id: viewer
-    width: 530
+    width: parent ? Math.min(530, Math.max(420, parent.width - 120)) : 530
     height: 440
     radius: 18
-    color: "#0B1216"
+
+    HMI.Theme { id: hmiTheme; darkMode: viewer.Material.theme === Material.Dark }
+
+    color: hmiTheme.analyzerHud
     border.width: 1
-    border.color: "#2A3A44"
-    opacity: active ? 0.86 : 0.62
+    border.color: active ? hmiTheme.analyzerAccent : hmiTheme.analyzerBorder
+    opacity: active ? 0.96 : 0.82
 
     property bool active: false
     property bool daqLocked: false
@@ -1142,7 +1147,7 @@ Rectangle {
 
             Text {
                 text: "DoA / TX Monitor"
-                color: "white"
+                color: hmiTheme.analyzerText
                 font.pixelSize: 14
                 font.bold: true
             }
@@ -1151,7 +1156,7 @@ Rectangle {
                 text: (txModel && txModel.count !== undefined)
                       ? ("TX points: " + txModel.count)
                       : "TX points: -"
-                color: "#A9C1CC"
+                color: hmiTheme.analyzerMuted
                 font.pixelSize: 10
             }
         }
@@ -1181,9 +1186,9 @@ Rectangle {
 
             background: Rectangle {
                 radius: 12
-                color: lockFadeButton.checked ? "#1F6F4A" : "#0E1B22"
+                color: lockFadeButton.checked ? hmiTheme.success : hmiTheme.analyzerPanel
                 border.width: 1
-                border.color: lockFadeButton.checked ? "#2ECC71" : "#314f61"
+                border.color: lockFadeButton.checked ? hmiTheme.success : hmiTheme.analyzerBorder
             }
 
             contentItem: Image {
@@ -1221,9 +1226,9 @@ Rectangle {
             width: 200
             height: 44
             radius: 18
-            color: "#0E1B22"
+            color: hmiTheme.analyzerPanel
             border.width: 1
-            border.color: "#22313A"
+            border.color: hmiTheme.analyzerBorder
 
             Row {
                 anchors.fill: parent
@@ -1235,9 +1240,9 @@ Rectangle {
                     width: 90
                     height: parent.height
                     radius: 16
-                    color: tabs.tab === 0 ? "#FFB300" : "transparent"
+                    color: tabs.tab === 0 ? hmiTheme.warning : "transparent"
                     border.width: tabs.tab === 0 ? 0 : 1
-                    border.color: "#22313A"
+                    border.color: hmiTheme.analyzerBorder
 
                     property bool pressed: false
                     scale: pressed ? 0.98 : 1.0
@@ -1249,7 +1254,7 @@ Rectangle {
                     Text {
                         anchors.centerIn: parent
                         text: "TX"
-                        color: tabs.tab === 0 ? "#0B1216" : "#A9C1CC"
+                        color: tabs.tab === 0 ? "#061514" : hmiTheme.analyzerMuted
                         font.bold: true
                         font.pixelSize: 13
                     }
@@ -1274,9 +1279,9 @@ Rectangle {
                     width: 90
                     height: parent.height
                     radius: 16
-                    color: tabs.tab === 1 ? "#00FFAA" : "transparent"
+                    color: tabs.tab === 1 ? hmiTheme.analyzerAccent : "transparent"
                     border.width: tabs.tab === 1 ? 0 : 1
-                    border.color: "#22313A"
+                    border.color: hmiTheme.analyzerBorder
 
                     property bool pressed: false
                     scale: pressed ? 0.98 : 1.0
@@ -1288,7 +1293,7 @@ Rectangle {
                     Text {
                         anchors.centerIn: parent
                         text: "DOA"
-                        color: tabs.tab === 1 ? "#0B1216" : "#A9C1CC"
+                        color: tabs.tab === 1 ? "#061514" : hmiTheme.analyzerMuted
                         font.bold: true
                         font.pixelSize: 13
                     }
@@ -1315,9 +1320,9 @@ Rectangle {
             width: 236
             height: 44
             radius: 18
-            color: "#0E1B22"
+            color: hmiTheme.analyzerPanel
             border.width: 1
-            border.color: "#22313A"
+            border.color: hmiTheme.analyzerBorder
             visible: tabs.tab === 0
 
             Row {
@@ -1330,9 +1335,9 @@ Rectangle {
                     width: 110
                     height: parent.height
                     radius: 16
-                    color: viewer.txCoordMode === 0 ? "#FFB300" : "transparent"
+                    color: viewer.txCoordMode === 0 ? hmiTheme.warning : "transparent"
                     border.width: viewer.txCoordMode === 0 ? 0 : 1
-                    border.color: "#22313A"
+                    border.color: hmiTheme.analyzerBorder
 
                     property bool pressed: false
                     scale: pressed ? 0.98 : 1.0
@@ -1344,7 +1349,7 @@ Rectangle {
                     Text {
                         anchors.centerIn: parent
                         text: "lat/lon"
-                        color: viewer.txCoordMode === 0 ? "#0B1216" : "#A9C1CC"
+                        color: viewer.txCoordMode === 0 ? "#061514" : hmiTheme.analyzerMuted
                         font.pixelSize: 13
                         font.bold: true
                     }
@@ -1379,9 +1384,9 @@ Rectangle {
                     width: 110
                     height: parent.height
                     radius: 16
-                    color: viewer.txCoordMode === 1 ? "#00FFAA" : "transparent"
+                    color: viewer.txCoordMode === 1 ? hmiTheme.analyzerAccent : "transparent"
                     border.width: viewer.txCoordMode === 1 ? 0 : 1
-                    border.color: "#22313A"
+                    border.color: hmiTheme.analyzerBorder
 
                     property bool pressed: false
                     scale: pressed ? 0.98 : 1.0
@@ -1393,7 +1398,7 @@ Rectangle {
                     Text {
                         anchors.centerIn: parent
                         text: "MGRS"
-                        color: viewer.txCoordMode === 1 ? "#0B1216" : "#A9C1CC"
+                        color: viewer.txCoordMode === 1 ? "#061514" : hmiTheme.analyzerMuted
                         font.pixelSize: 13
                         font.bold: true
                     }
@@ -1443,10 +1448,10 @@ Rectangle {
             Rectangle {
                 anchors.fill: parent
                 radius: 14
-                color: "#0E1B22"
+                color: hmiTheme.analyzerPanel
                 border.width: 1
-                border.color: "#22313A"
-                opacity: 0.95
+                border.color: hmiTheme.analyzerBorder
+                opacity: 0.98
             }
 
             // ✅ TX MARK ON/OFF + CLEAR control
@@ -1463,14 +1468,14 @@ Rectangle {
                     width: 78
                     height: 28
                     radius: 10
-                    color: viewer.txMarkEnabled ? "#00FFAA" : "#211416"
+                    color: viewer.txMarkEnabled ? hmiTheme.success : hmiTheme.analyzerPanel
                     border.width: 1
-                    border.color: viewer.txMarkEnabled ? "#00FFAA" : "#5A2B2B"
+                    border.color: viewer.txMarkEnabled ? hmiTheme.success : hmiTheme.danger
 
                     Text {
                         anchors.centerIn: parent
                         text: viewer.txMarkEnabled ? "MARK ON" : "MARK OFF"
-                        color: viewer.txMarkEnabled ? "#0B1216" : "#FFB4B4"
+                        color: viewer.txMarkEnabled ? "#061514" : hmiTheme.danger
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -1493,15 +1498,15 @@ Rectangle {
                     width: 54
                     height: 28
                     radius: 10
-                    color: clearTxMarkMouse.pressed ? "#172A34" : "#0E1B22"
+                    color: clearTxMarkMouse.pressed ? hmiTheme.analyzerBorder : hmiTheme.analyzerPanel
                     border.width: 1
-                    border.color: "#314f61"
+                    border.color: hmiTheme.analyzerBorder
                     opacity: viewer.selectedTxLogKey.length > 0 ? 1.0 : 0.35
 
                     Text {
                         anchors.centerIn: parent
                         text: "CLEAR"
-                        color: "#A9C1CC"
+                        color: hmiTheme.analyzerMuted
                         font.pixelSize: 10
                         font.bold: true
                     }
@@ -1528,7 +1533,7 @@ Rectangle {
 
                     Text {
                         text: "No TX history yet"
-                        color: "white"
+                        color: hmiTheme.analyzerText
                         font.pixelSize: 13
                         font.bold: true
                         horizontalAlignment: Text.AlignHCenter
@@ -1536,7 +1541,7 @@ Rectangle {
 
                     Text {
                         text: "Waiting for 2+ DOA intersection..."
-                        color: "#A9C1CC"
+                        color: hmiTheme.analyzerMuted
                         font.pixelSize: 11
                         horizontalAlignment: Text.AlignHCenter
                     }

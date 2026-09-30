@@ -1,12 +1,16 @@
 // CalendarPopup.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.3
+import "../ui"
 
 Item {
     id: root
     width: 700
     height: 500
+    property bool isDarkTheme: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: root.isDarkTheme }
 
     /* ====== STATE ====== */
     readonly property var monthNames: ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
@@ -52,9 +56,9 @@ Item {
     Rectangle {
         id: rectangle
         anchors.fill: parent
-        color: "#0e1116"
-        radius: 10
-        border.color: "#ffffff"
+        color: hmiTheme.panel
+        radius: hmiTheme.radiusMd
+        border.color: hmiTheme.lineStrong
     }
 
     /* ====== TITLE ====== */
@@ -69,7 +73,7 @@ Item {
         font.bold: true
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        color: "#ffffff"
+        color: hmiTheme.text
     }
 
     /* ====== TOP ROW (Month / Year / Enter) ====== */
@@ -83,8 +87,9 @@ Item {
         height: 40
         spacing: 16
 
-        ComboBox {
+        HmiComboBox {
             id: comboBoxMonth
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 173
             Layout.preferredHeight: 40
             model: monthNames
@@ -133,8 +138,8 @@ Item {
     /* ====== CALENDAR AREA ====== */
     Rectangle {
         id: rectangleCalendarDate
-        color: "#ffffff"
-        radius: 10
+        color: hmiTheme.cardAlt
+        radius: hmiTheme.radiusMd
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
@@ -164,7 +169,7 @@ Item {
                     Text {
                         anchors.centerIn: parent
                         text: modelData
-                        color: "#2b2b2b"
+                        color: hmiTheme.textSecondary
                         font.pixelSize: 14
                         font.bold: true
                     }
@@ -216,9 +221,9 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         radius: 6
-                        color: "transparent"
-                        border.width: isSelected ? 2 : 0
-                        border.color: "black"
+                        color: isSelected ? hmiTheme.accent : "transparent"
+                        border.width: isSelected ? 2 : 1
+                        border.color: isSelected ? hmiTheme.accent : "transparent"
                     }
 
                     // ตัวเลขวัน
@@ -227,7 +232,7 @@ Item {
                         text: shownDay
                         font.pixelSize: 16
                         font.bold: isSelected
-                        color: inCurrent ? "#111111" : "#8aa0b5"
+                        color: isSelected ? "#061514" : (inCurrent ? hmiTheme.text : hmiTheme.muted)
                     }
 
                     MouseArea {
@@ -257,11 +262,13 @@ Item {
         height: 58
         spacing: 12
 
-        Button {
+        HmiButton {
             id: buttonReset
             text: qsTr("Reset")
+            compact: true
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 93
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: hmiTheme.minTouchTarget
             onClicked: {
                 const d = new Date()
                 selYear  = d.getFullYear()
@@ -275,11 +282,13 @@ Item {
             }
         }
 
-        Button {
+        HmiButton {
             id: buttonToday
             text: qsTr("Today")
+            compact: true
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 93
-            Layout.preferredHeight: 32
+            Layout.preferredHeight: hmiTheme.minTouchTarget
             onClicked: {
                 const d = new Date()
                 selYear  = d.getFullYear()
@@ -293,9 +302,10 @@ Item {
         Item { Layout.preferredWidth: 8 }
 
         // HH (00..23) — เลือกแล้ว AM/PM จะเปลี่ยนเอง
-        Text { text: "HH:"; color: "white"; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
-        ComboBox {
+        Text { text: "HH:"; color: hmiTheme.textSecondary; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
+        HmiComboBox {
             id: comboBoxHour
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 87
             Layout.preferredHeight: 32
             model: Array.from({length:24}, (_,i)=> (i<10?"0":"")+i ) // "00".."23"
@@ -304,9 +314,10 @@ Item {
         }
 
         // mm
-        Text { text: "mm:"; color: "white"; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
-        ComboBox {
+        Text { text: "mm:"; color: hmiTheme.textSecondary; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
+        HmiComboBox {
             id: comboBoxMinute
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 91
             Layout.preferredHeight: 32
             model: Array.from({length:60}, (_,i)=> (i<10?"0":"")+i )
@@ -315,9 +326,10 @@ Item {
         }
 
         // ss
-        Text { text: "ss:"; color: "white"; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
-        ComboBox {
+        Text { text: "ss:"; color: hmiTheme.textSecondary; font.pixelSize: 16; font.bold: true; verticalAlignment: Text.AlignVCenter }
+        HmiComboBox {
             id: comboBoxSecond
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 84
             Layout.preferredHeight: 32
             model: Array.from({length:60}, (_,i)=> (i<10?"0":"")+i )
@@ -326,8 +338,9 @@ Item {
         }
 
         // AM/PM (สลับแล้วแปลงชั่วโมง 24 ชม. ให้เอง)
-        ComboBox {
+        HmiComboBox {
             id: comboBoxAMPM
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 86
             Layout.preferredHeight: 32
             model: ["AM","PM"]
@@ -337,11 +350,14 @@ Item {
 
         Item { Layout.fillWidth: true }
 
-        Button {
+        HmiButton {
             id: buttonEnter
             text: qsTr("Enter")
+            compact: true
+            tone: "primary"
+            darkMode: root.isDarkTheme
             Layout.preferredWidth: 165
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: hmiTheme.minTouchTarget
             onClicked: {
                 const h24 = toH24()
                 const ymd = selYear + "/" + pad2(selMonth+1) + "/" + pad2(selDay)

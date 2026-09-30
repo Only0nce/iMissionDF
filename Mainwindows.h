@@ -652,6 +652,19 @@ private:
     QTimer *m_recorderWatchdogTimer = nullptr;
     QElapsedTimer m_lastRecLogTimer;
     QElapsedTimer m_lastRecReassertTimer;
+    // PERF-R1: recorder state is intentionally checked often, but repeating the
+    // same qInfo lines on EGLFS can become measurable console I/O load.  These
+    // fields throttle diagnostics only; watchdog/reassert behavior is unchanged.
+    QElapsedTimer m_recUiTraceTimer;
+    QElapsedTimer m_recWatchdogTraceTimer;
+    QElapsedTimer m_recReassertTraceTimer;
+    QString m_lastRecUiTraceSignature;
+    QString m_lastRecWatchdogTraceSignature;
+    QString m_lastRecReassertTraceSignature;
+    bool m_recUiEmitValid = false;
+    bool m_lastRecUiEmittedExpected = false;
+    bool m_lastRecUiEmittedActual = false;
+    QString m_lastRecUiEmittedState;
     bool m_emittedRecStatusOnRecord = false;
 
 

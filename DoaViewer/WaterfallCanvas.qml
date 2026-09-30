@@ -7,12 +7,15 @@
 
 import QtQuick 2.15
 import iScan.Display 1.0
+import "../ui"
 
 Rectangle {
     id: root
+    property bool darkMode: true
+    Theme { id: theme; darkMode: root.darkMode }
     radius: 12
-    color: "#060B16"
-    border.color: "#1F2A44"
+    color: theme.plot
+    border.color: theme.analyzerBorder
     border.width: 1
     clip: true
 
@@ -156,18 +159,27 @@ Rectangle {
         return ok
     }
 
+    // Qt.callLater() can outlive this page while StackView destroys the DoA
+    // workspace, leaving a delayed closure with an invalid QML context.  Use a
+    // zero-delay child Timer instead; its lifetime is tied to this component.
+    Timer {
+        id: nativeSubmitTimer
+        interval: 0
+        repeat: false
+        onTriggered: {
+            root._nativeSubmitQueued = false
+            root._submitNativeRow()
+        }
+    }
+
     function _requestNativeSubmit(reason) {
         if (!root.nativeRenderEnabled || !root.enabled || !root.visible) return
         if (root._nativeSubmitQueued) return
         root._nativeSubmitQueued = true
         // Let QML bindings settle first. The parent updates displayFftMagDb and
         // frameSequence in the same function; onFrameSequenceChanged can run
-        // before waterfallRowDb has delivered the new array to this child. A
-        // deferred submit keeps Spectrum and Waterfall on the same visible row.
-        Qt.callLater(function() {
-            root._nativeSubmitQueued = false
-            root._submitNativeRow()
-        })
+        // before waterfallRowDb has delivered the new array to this child.
+        nativeSubmitTimer.restart()
     }
 
     onFrameSequenceChanged: {
@@ -361,8 +373,8 @@ Rectangle {
         anchors.top: parent.top
         anchors.margins: 8
         radius: 8
-        color: Qt.rgba(2/255, 6/255, 23/255, 0.65)
-        border.color: "#24314C"
+        color: root.darkMode ? Qt.rgba(2/255, 6/255, 23/255, 0.65) : Qt.rgba(1, 1, 1, 0.88)
+        border.color: theme.analyzerBorder
         border.width: 1
         visible: root.showDebug
         width: dbg.paintedWidth + 18
@@ -371,7 +383,7 @@ Rectangle {
         Text {
             id: dbg
             anchors.centerIn: parent
-            color: "#E5E7EB"
+            color: theme.analyzerText
             font.pixelSize: 12
             text: "WF len=" + root._lastLen + "  frames=" + root._frames + "  enabled=" + root.enabled
         }
@@ -381,11 +393,11 @@ Rectangle {
     Item {
         anchors.fill: parent
         visible: !root.enabled
-        Rectangle { anchors.fill: parent; color: Qt.rgba(2/255, 6/255, 23/255, 0.55) }
+        Rectangle { anchors.fill: parent; color: root.darkMode ? Qt.rgba(2/255, 6/255, 23/255, 0.55) : Qt.rgba(248/255, 251/255, 252/255, 0.78) }
         Text {
             anchors.centerIn: parent
             text: "WATERFALL OFF"
-            color: "#F87171"
+            color: theme.danger
             font.pixelSize: 16
             font.bold: true
         }
@@ -433,6 +445,7 @@ Rectangle {
     }
     onEnabledChanged: if (enabled) _resetHistory("enabled", true)
     onWaterfallColorsChanged: root._rebuildColorCache()
+    onDarkModeChanged: root._resetHistory("theme", true)
 
     Component.onCompleted: {
         root._rebuildColorCache()

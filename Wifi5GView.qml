@@ -1,9 +1,14 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
 import QtQuick.Layouts 1.12
+import QtQuick.Controls.Material 2.12
+
+import "ui"
 
 Item {
     id: root
+
+    Theme { id: hmiTheme; darkMode: root.Material.theme === Material.Dark }
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
     clip: true
@@ -87,25 +92,30 @@ Item {
 
     QtObject {
         id: ui
-        property color bg: "#07101a"
-        property color mainPanel: "#101a26"
-        property color panel: "#132235"
-        property color card: "#122033"
-        property color field: "#0d1723"
-        property color border: "#2d4056"
-        property color borderSoft: "#203044"
-        property color text: "#e9f0f7"
-        property color subText: "#9aa8b8"
-        property color muted: "#667589"
-        property color accent: "#00c9a7"
-        property color blue: "#2fa6ff"
-        property color warning: "#f59e0b"
-        property color danger: "#ef4444"
-        property color disabled: "#718096"
-        property color saved: "#38bdf8"
-        property color good: "#22c55e"
-        property color fair: "#eab308"
-        property color weak: "#f97316"
+        property color bg: hmiTheme.page
+        property color mainPanel: hmiTheme.shell
+        property color panel: hmiTheme.panel
+        property color card: hmiTheme.cardAlt
+        property color field: hmiTheme.input
+        property color border: hmiTheme.lineStrong
+        property color borderSoft: hmiTheme.line
+        property color text: hmiTheme.text
+        property color subText: hmiTheme.textSecondary
+        property color muted: hmiTheme.muted
+        property color accent: hmiTheme.accent
+        property color blue: hmiTheme.info
+        property color warning: hmiTheme.warning
+        property color danger: hmiTheme.danger
+        property color disabled: hmiTheme.disabled
+        property color saved: hmiTheme.info
+        property color good: hmiTheme.success
+        property color fair: hmiTheme.warning
+        property color weak: hmiTheme.darkMode ? "#F97316" : "#A95C0A"
+        property color accentText: "#061514"
+        property color selection: hmiTheme.darkMode ? Qt.lighter(hmiTheme.cardAlt, 1.10) : "#E3F2EF"
+        property color subtleFill: hmiTheme.darkMode ? "#263241" : "#EFF4F2"
+        property color subtleLine: hmiTheme.darkMode ? "#4A596C" : hmiTheme.line
+        property color dangerFill: hmiTheme.darkMode ? "#301515" : "#FBEAEC"
     }
 
     Component.onCompleted: {
@@ -787,7 +797,7 @@ Item {
                     text: "WiFi"
                     enabled: root.showWifiControls && !root.forceSingleNetworkPage
                     onClicked: root.selectedNetworkPage = "wifi"
-                    contentItem: Text { text: parent.text; color: root.selectedNetworkPage === "wifi" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
+                    contentItem: Text { text: parent.text; color: root.selectedNetworkPage === "wifi" ? ui.accentText : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
                     background: Rectangle { radius: 10; color: root.selectedNetworkPage === "wifi" ? ui.accent : ui.field; border.color: root.selectedNetworkPage === "wifi" ? ui.accent : ui.border }
                 }
                 Button {
@@ -796,7 +806,7 @@ Item {
                     text: "5G"
                     enabled: root.showCellularControls && !root.forceSingleNetworkPage
                     onClicked: root.selectedNetworkPage = "cellular"
-                    contentItem: Text { text: parent.text; color: root.selectedNetworkPage === "cellular" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
+                    contentItem: Text { text: parent.text; color: root.selectedNetworkPage === "cellular" ? ui.accentText : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
                     background: Rectangle { radius: 10; color: root.selectedNetworkPage === "cellular" ? ui.accent : ui.field; border.color: root.selectedNetworkPage === "cellular" ? ui.accent : ui.border }
                 }
             }
@@ -816,7 +826,7 @@ Item {
                     border.color: ui.border
 
                     Text { x: 28; y: 28; text: "WiFi"; color: ui.text; font.pixelSize: 28; font.bold: true }
-                    Rectangle { x: parent.width - 158; y: 30; width: 130; height: 32; radius: 16; color: currentWifiConnected ? "#0d302e" : "#301515"; border.color: wifiStatusColor()
+                    Rectangle { x: parent.width - 158; y: 30; width: 130; height: 32; radius: 16; color: currentWifiConnected ? ui.selection : ui.dangerFill; border.color: wifiStatusColor()
                         Text { anchors.centerIn: parent; text: wifiStatusText(); color: wifiStatusColor(); font.pixelSize: 13; font.bold: true }
                     }
 
@@ -830,11 +840,11 @@ Item {
                         border.color: ui.border
                         Text { x: 24; y: 20; text: wifiSsidText(); color: ui.text; font.pixelSize: 22; font.bold: true; width: parent.width - 48; elide: Text.ElideRight }
                         Text { x: 24; y: 55; text: "Interface " + safeText(wifiIface, "Detecting...") + " · " + wifiSecurityText(null); color: ui.subText; font.pixelSize: 15; width: parent.width - 48; elide: Text.ElideRight }
-                        Rectangle { x: 24; y: 91; width: 150; height: 8; radius: 4; color: "#263449"
+                        Rectangle { x: 24; y: 91; width: 150; height: 8; radius: 4; color: ui.borderSoft
                             Rectangle { height: parent.height; radius: parent.radius; color: wifiSignalColor(wifiSignalValue()); width: parent.width * wifiSignalLevel(wifiSignalValue()) / 5 }
                         }
                         Text { x: 24; y: 106; width: parent.width - 170; text: "Signal " + wifiSignalText(); color: wifiSignalColor(wifiSignalValue()); font.pixelSize: 15; font.bold: true; elide: Text.ElideRight }
-                        Rectangle { x: parent.width - 116; y: 86; width: 88; height: 28; radius: 14; visible: wifiSelectedKnown || (currentWifiRow() && isSavedWifi(currentWifiRow())); color: "#102b3d"; border.color: ui.saved
+                        Rectangle { x: parent.width - 116; y: 86; width: 88; height: 28; radius: 14; visible: wifiSelectedKnown || (currentWifiRow() && isSavedWifi(currentWifiRow())); color: ui.card; border.color: ui.saved
                             Text { anchors.centerIn: parent; text: "Saved"; color: ui.saved; font.pixelSize: 13; font.bold: true } }
 
                         MouseArea {
@@ -913,7 +923,7 @@ Item {
                         y: parent.height - 224
                         spacing: 10
                         visible: wifiPasswordFieldVisible() && wifiSelectedKnown
-                        Rectangle { width: 90; height: 28; radius: 14; color: "#102b3d"; border.color: ui.saved
+                        Rectangle { width: 90; height: 28; radius: 14; color: ui.card; border.color: ui.saved
                             Text { anchors.centerIn: parent; text: "Saved"; color: ui.saved; font.pixelSize: 13; font.bold: true }
                         }
                         Button { width: 155; height: 28; text: wifiChangeSavedPassword ? "Use saved password" : "Change password"
@@ -1000,7 +1010,7 @@ Item {
                         contentItem: Text { text: parent.text; color: ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15; elide: Text.ElideRight }
                         background: Rectangle { radius: 10; color: ui.field; border.color: ui.border } }
                     Button { x: parent.width - 190; y: 24; width: 160; height: 44; text: wifiEnabled ? "WiFi Off" : "WiFi On"; enabled: root.showWifiControls; onClicked: { console.log("[WiFiUI] WiFi enabled toggled:", !wifiEnabled); root.wifiToggleRequested(!wifiEnabled) }
-                        contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15; elide: Text.ElideRight }
+                        contentItem: Text { text: parent.text; color: ui.accentText; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15; elide: Text.ElideRight }
                         background: Rectangle { radius: 10; color: ui.accent; border.color: ui.accent } }
 
                     ListView {
@@ -1016,7 +1026,7 @@ Item {
                             width: ListView.view.width
                             height: 122
                             radius: 14
-                            color: root.isSelectedWifi(modelData) ? "#16283d" : ui.card
+                            color: root.isSelectedWifi(modelData) ? ui.selection : ui.card
                             border.color: root.isConnectedWifi(modelData) ? ui.accent : (root.isSavedWifi(modelData) ? ui.saved : ui.border)
                             border.width: root.isConnectedWifi(modelData) || root.isSelectedWifi(modelData) ? 2 : 1
                             MouseArea {
@@ -1032,9 +1042,9 @@ Item {
                             Text { x: root.isSavedWifi(modelData) ? 50 : 24; y: 50; width: parent.width - 390; text: root.wifiMetaText(modelData); color: ui.subText; font.pixelSize: 14; elide: Text.ElideRight }
                             Text { x: root.isSavedWifi(modelData) ? 50 : 24; y: 78; width: parent.width - 390; visible: root.isSavedWifi(modelData); text: "Previously connected"; color: ui.saved; font.pixelSize: 13; elide: Text.ElideRight }
 
-                            Rectangle { x: parent.width - 330; y: 20; width: 92; height: 28; radius: 14; visible: root.isConnectedWifi(modelData); color: "#0d302e"; border.color: ui.accent
+                            Rectangle { x: parent.width - 330; y: 20; width: 92; height: 28; radius: 14; visible: root.isConnectedWifi(modelData); color: ui.selection; border.color: ui.accent
                                 Text { anchors.centerIn: parent; text: "Active"; color: ui.accent; font.pixelSize: 13; font.bold: true } }
-                            Rectangle { x: parent.width - 228; y: 20; width: 88; height: 28; radius: 14; visible: root.isSavedWifi(modelData); color: "#102b3d"; border.color: ui.saved
+                            Rectangle { x: parent.width - 228; y: 20; width: 88; height: 28; radius: 14; visible: root.isSavedWifi(modelData); color: ui.card; border.color: ui.saved
                                 Text { anchors.centerIn: parent; text: "Saved"; color: ui.saved; font.pixelSize: 13; font.bold: true } }
 
                             Rectangle {
@@ -1043,7 +1053,7 @@ Item {
                                 width: 135
                                 height: 8
                                 radius: 4
-                                color: "#263449"
+                                color: ui.borderSoft
                                 Rectangle {
                                     height: parent.height
                                     radius: parent.radius
@@ -1130,7 +1140,7 @@ Item {
                         }
                         contentItem: Text {
                             text: parent.text
-                            color: "#001412"
+                            color: ui.accentText
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
                             font.bold: true
@@ -1165,7 +1175,7 @@ Item {
                             height: 40
                             text: "Using DHCP"
                             onClicked: wifiAdvancedIpv4Mode = "dhcp"
-                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "dhcp" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accentText : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
                             background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "dhcp" ? ui.accent : ui.border }
                         }
 
@@ -1174,7 +1184,7 @@ Item {
                             height: 40
                             text: "Static Manual"
                             onClicked: wifiAdvancedIpv4Mode = "manual"
-                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "manual" ? "#001412" : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            contentItem: Text { text: parent.text; color: wifiAdvancedIpv4Mode === "manual" ? ui.accentText : ui.text; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
                             background: Rectangle { radius: 10; color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.field; border.color: wifiAdvancedIpv4Mode === "manual" ? ui.accent : ui.border }
                         }
                     }
@@ -1218,7 +1228,7 @@ Item {
                                 Qt.inputMethod.commit()
                                 root.applyWifiConfigFromPanel()
                             }
-                            contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
+                            contentItem: Text { text: parent.text; color: ui.accentText; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 13; elide: Text.ElideRight }
                             background: Rectangle { radius: 10; color: enabled ? ui.accent : ui.disabled; border.color: enabled ? ui.accent : ui.disabled }
                         }
                     }
@@ -1240,7 +1250,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: wifiAdvancedIpAddress
                                 enabled: wifiAdvancedIpv4Mode === "manual"
-                                color: enabled ? ui.text : "#a9b4c2"
+                                color: enabled ? ui.text : ui.subText
                                 font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1251,8 +1261,8 @@ Item {
                                 onTextChanged: wifiAdvancedIpAddress = text
                                 background: Rectangle {
                                     radius: 9
-                                    color: parent.enabled ? ui.field : "#263241"
-                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                    color: parent.enabled ? ui.field : ui.subtleFill
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : ui.subtleLine
                                 }
                             }
                         }
@@ -1266,7 +1276,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: wifiAdvancedSubnetMask
                                 enabled: wifiAdvancedIpv4Mode === "manual"
-                                color: enabled ? ui.text : "#a9b4c2"
+                                color: enabled ? ui.text : ui.subText
                                 font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1277,8 +1287,8 @@ Item {
                                 onTextChanged: wifiAdvancedSubnetMask = text
                                 background: Rectangle {
                                     radius: 9
-                                    color: parent.enabled ? ui.field : "#263241"
-                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                    color: parent.enabled ? ui.field : ui.subtleFill
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : ui.subtleLine
                                 }
                             }
                         }
@@ -1292,7 +1302,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: wifiAdvancedGateway
                                 enabled: wifiAdvancedIpv4Mode === "manual"
-                                color: enabled ? ui.text : "#a9b4c2"
+                                color: enabled ? ui.text : ui.subText
                                 font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1303,8 +1313,8 @@ Item {
                                 onTextChanged: wifiAdvancedGateway = text
                                 background: Rectangle {
                                     radius: 9
-                                    color: parent.enabled ? ui.field : "#263241"
-                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                    color: parent.enabled ? ui.field : ui.subtleFill
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : ui.subtleLine
                                 }
                             }
                         }
@@ -1318,7 +1328,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: wifiAdvancedPrimaryDns
                                 enabled: !wifiAdvancedDnsAutomatic
-                                color: enabled ? ui.text : "#a9b4c2"
+                                color: enabled ? ui.text : ui.subText
                                 font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1334,8 +1344,8 @@ Item {
                                 }
                                 background: Rectangle {
                                     radius: 9
-                                    color: parent.enabled ? ui.field : "#263241"
-                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                    color: parent.enabled ? ui.field : ui.subtleFill
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : ui.subtleLine
                                 }
                             }
                         }
@@ -1349,7 +1359,7 @@ Item {
                                 Layout.preferredHeight: 40
                                 text: wifiAdvancedSecondaryDns
                                 enabled: !wifiAdvancedDnsAutomatic
-                                color: enabled ? ui.text : "#a9b4c2"
+                                color: enabled ? ui.text : ui.subText
                                 font.pixelSize: 14
                                 selectByMouse: true
                                 verticalAlignment: TextInput.AlignVCenter
@@ -1365,8 +1375,8 @@ Item {
                                 }
                                 background: Rectangle {
                                     radius: 9
-                                    color: parent.enabled ? ui.field : "#263241"
-                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : "#4a596c"
+                                    color: parent.enabled ? ui.field : ui.subtleFill
+                                    border.color: parent.enabled ? (parent.activeFocus ? ui.accent : ui.border) : ui.subtleLine
                                 }
                             }
                         }
@@ -1417,7 +1427,7 @@ Item {
                     border.color: ui.border
 
                     Text { x: 28; y: 28; text: "5G"; color: ui.text; font.pixelSize: 28; font.bold: true }
-                    Rectangle { x: parent.width - 158; y: 30; width: 130; height: 32; radius: 16; color: "#1a2434"; border.color: cellularBadgeColor()
+                    Rectangle { x: parent.width - 158; y: 30; width: 130; height: 32; radius: 16; color: ui.card; border.color: cellularBadgeColor()
                         Text { anchors.centerIn: parent; text: cellularBadgeText(); color: cellularBadgeColor(); font.pixelSize: 13; font.bold: true }
                     }
 
@@ -1447,7 +1457,7 @@ Item {
 
                     Row { x: 28; y: parent.height - 126; spacing: 12
                         Button { width: 130; height: 48; text: "Connect"; enabled: root.showCellularControls; onClicked: root.cellularConnectRequested(cellularApn, cellularIface, cellularAutoConnect)
-                            contentItem: Text { text: parent.text; color: "#001412"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
+                            contentItem: Text { text: parent.text; color: ui.accentText; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }
                             background: Rectangle { radius: 10; color: ui.accent; border.color: ui.accent } }
                         Button { width: 130; height: 48; text: "Disconnect"; enabled: root.showCellularControls; onClicked: root.cellularDisconnectRequested()
                             contentItem: Text { text: parent.text; color: "white"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter; font.bold: true; font.pixelSize: 15 }

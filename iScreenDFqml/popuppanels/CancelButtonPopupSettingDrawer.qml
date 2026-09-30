@@ -2,6 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../ui"
 // Button {
 //     id: cancelButton
 //     text: qsTr("Cancel")
@@ -30,18 +31,21 @@ import QtQuick.Layouts 1.15
 
 Rectangle {
     id: cancelButtonPopupSettingDrawer
+    property bool darkMode: true
+    Theme { id: popupTheme; darkMode: cancelButtonPopupSettingDrawer.darkMode }
+
     width: 70; height: 40
     radius: height/2
     anchors.right: parent.right
     anchors.rightMargin: 30
-    color: "#25303b"
+    color: popupTheme.accent
     Layout.alignment: Qt.AlignVCenter
 
     signal clicked()
     Text { text: "OK"; anchors.centerIn: parent; color: "white"; font.pixelSize: 15; font.bold: true }
     // Image {
     //     id: iconImg
-    //     source: "qrc:/images/delete.svg"   // ✅ ใส่รูปของคุณตรงนี้
+    //     source: "qrc:/iScreenDFqml/images/delete.svg"   // ✅ ใส่รูปของคุณตรงนี้
     //     anchors.centerIn: parent
     //     width: 22
     //     height: 22
@@ -58,7 +62,7 @@ Rectangle {
         }
 
         // Hover effect
-        onEntered: cancelButtonPopupSettingDrawer.color = "#324152"
-        onExited:  cancelButtonPopupSettingDrawer.color = "#25303b"
+        onEntered: cancelButtonPopupSettingDrawer.color = popupTheme.accentHover
+        onExited:  cancelButtonPopupSettingDrawer.color = popupTheme.accent
     }
 }

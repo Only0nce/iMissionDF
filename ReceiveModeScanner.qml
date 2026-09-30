@@ -1,13 +1,22 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.0
+import "ui"
 
 Item {
     id: item1
     width: 600
     height: 380
-    property string buttonColor: "#aa009688"
-    property string buttonColorUnselect: "#50009688"
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: item1.darkMode }
+    property color buttonColor: hmiTheme.darkMode ? "#0FA189" : "#12A487"
+    property color buttonColorUnselect: hmiTheme.darkMode ? "#553B4B48" : "#E7F1EF"
+
+    Rectangle {
+        anchors.fill: parent
+        radius: 12
+        color: hmiTheme.darkMode ? "#00000000" : "#00000000"
+    }
 
     MouseArea {
         id: mouseArea
@@ -33,6 +42,7 @@ Item {
             model: adMode
             delegate: MyToolButton {
                 buttonID: index
+                darkMode: item1.darkMode
                 bColor: scanAdModeSelected == buttonID ? buttonColor : buttonColorUnselect
                 bname: name
                 toolButton.onClicked: {
@@ -54,6 +64,7 @@ Item {
             model: scanAdModeSelected == 0 ? receiverAnalogMode : receiverDigitalMode
             delegate: MyToolButton {
                 buttonID: index
+                darkMode: item1.darkMode
                 bColor: scanReceiverModeSelected == buttonID ? buttonColor : buttonColorUnselect
                 bname: name
                 toolButton.onClicked: {
@@ -74,6 +85,7 @@ Item {
             model: bwModel
             delegate: MyToolButton {
                 buttonID: index
+                darkMode: item1.darkMode
                 bColor: scanBwSelected == buttonID ? buttonColor : buttonColorUnselect
                 bname: name
                 toolButton.onClicked: {
@@ -93,6 +105,7 @@ Item {
             Layout.preferredWidth: 120
             delegate: MyToolButton
             {
+                darkMode: item1.darkMode
                 bname: name
                 buttonID: index
                 bColor: buttonColor
@@ -194,6 +207,8 @@ Item {
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
         font.pointSize: 14
+        color: hmiTheme.text
+        font.bold: true
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 10
     }

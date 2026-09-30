@@ -1,5 +1,6 @@
 import QtQuick 2.0
 import QtQuick.Controls 2.15 as C2
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtWebSockets 1.0
 import QtQuick.Extras 1.4
@@ -9,14 +10,18 @@ import QtQuick.VirtualKeyboard.Styles 2.15
 import QtQuick.VirtualKeyboard.Settings 2.15
 import QtGraphicalEffects 1.0
 import QtQuick.Controls.Styles 1.4
+import "../ui"
 
 Item {
     id: registerDevice
-    width: 1980
-    height: 1080
+    width: parent ? parent.width : 1980
+    height: parent ? parent.height : 1080
     property int editRow: -1
     property int pendingDeleteRow: -1
     property string filterText: ""
+    property bool isDarkTheme: Material.theme === Material.Dark
+
+    Theme { id: hmiTheme; darkMode: registerDevice.isDarkTheme }
     // ====== Popup ยืนยันการลบ ======
     C2.Popup {
         id: confirmDeletePopup
@@ -30,9 +35,9 @@ Item {
 
         Rectangle {
             anchors.fill: parent
-            radius: 8
-            color: "#020617"
-            border.color: "#111827"
+            radius: hmiTheme.radiusMd
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
 
             ColumnLayout {
@@ -44,7 +49,7 @@ Item {
                     id: confirmDeleteText
                     Layout.fillWidth: true
                     text: qsTr("Do you want to delete this device?")
-                    color: "#F9FAFB"
+                    color: hmiTheme.text
                     font.pixelSize: 16
                     wrapMode: Text.WordWrap
                 }
@@ -56,8 +61,9 @@ Item {
                     spacing: 8
 
                     // ปุ่ม No (ไม่ต้องแต่ง background ก็ได้)
-                    C2.Button {
-                        text: qsTr("No")
+                    HmiButton {
+                        darkMode: registerDevice.isDarkTheme
+                        text: qsTr("Cancel")
                         onClicked: {
                             pendingDeleteRow = -1
                             confirmDeletePopup.close()
@@ -65,21 +71,11 @@ Item {
                     }
 
                     // ปุ่ม Yes ใช้ Controls2 เต็ม ๆ
-                    C2.Button {
+                    HmiButton {
                         id: btnYesDelete
-                        text: qsTr("Yes")
-                        background: Rectangle {
-                            radius: 4
-                            color: "#DC2626"
-                        }
-                        contentItem: Text {
-                            text: btnYesDelete.text
-                            color: "white"
-                            horizontalAlignment: Text.AlignHCenter
-                            verticalAlignment: Text.AlignVCenter
-                            font.pixelSize: 14
-                            font.bold: true
-                        }
+                        darkMode: registerDevice.isDarkTheme
+                        tone: "danger"
+                        text: qsTr("Delete")
 
                         onClicked: {
                             if (pendingDeleteRow >= 0 &&
@@ -109,7 +105,7 @@ Item {
         modal: true
         focus: true
         closePolicy: C2.Popup.CloseOnEscape | C2.Popup.CloseOnPressOutside
-        width: 1200
+        width: Math.min(1200, parent.width - 40)
         height: Math.min(600, parent.height - 80)
         x: (parent.width  - width)  / 2
         y: Math.max(40, (parent.height - height) / 2 - 60)
@@ -117,6 +113,7 @@ Item {
         EditDeviceLists {
             id: editForm
             anchors.fill: parent
+            isDarkTheme: registerDevice.isDarkTheme
 
             onCancelRequested: editPopup.close()
 
@@ -300,7 +297,7 @@ Item {
     Rectangle {
         id: rectangle1
         anchors.fill: parent
-        color: "#23404d"
+        color: hmiTheme.page
 
         Component {
             id: fieldCol
@@ -312,7 +309,7 @@ Item {
 
                 C2.Label {
                     id: lbl
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     text: "Label"
                 }
@@ -336,8 +333,10 @@ Item {
             anchors.bottom: parent.bottom
             anchors.topMargin: 85
             anchors.bottomMargin: 24 + (registerDevice.tableWantsInset ? Qt.inputMethod.keyboardRectangle.height : 0)
-            x: 42
-            width: 1814
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 18
+            anchors.rightMargin: 18
             color: "transparent"
 
             Behavior on anchors.bottomMargin {
@@ -362,16 +361,17 @@ Item {
                         id: cardFlow
                         width: parent.width
                         spacing: 24
+                        property int columns: width >= 1500 ? 4 : (width >= 1050 ? 3 : (width >= 650 ? 2 : 1))
 
                         Repeater {
                             model: listoFDevice
 
                             delegate: Rectangle {
                                 id: card
-                                width: (cardFlow.width - cardFlow.spacing * 3) / 4
-                                radius: 16
-                                color: "#020617"
-                                border.color: "#111827"
+                                width: (cardFlow.width - cardFlow.spacing * (cardFlow.columns - 1)) / cardFlow.columns
+                                radius: hmiTheme.radiusLg
+                                color: hmiTheme.cardAlt
+                                border.color: hmiTheme.line
                                 border.width: 1
                                 implicitHeight: contentColumn.implicitHeight + buttonsRow.height + 32
                                 // ---------- FILTER ตาม search ----------
@@ -405,7 +405,7 @@ Item {
 
                                     Text {
                                         text: name
-                                        color: "#F9FAFB"
+                                        color: hmiTheme.text
                                         font.pixelSize: 20
                                         font.bold: true
                                         horizontalAlignment: Text.AlignHCenter
@@ -415,43 +415,43 @@ Item {
                                     Rectangle {
                                         width: parent.width
                                         height: 1
-                                        color: "#0EA5E9"
+                                        color: hmiTheme.accent
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "Group:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(group); color: "#FFFFFF" }
+                                        Text { text: "Group:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(group); color: hmiTheme.text }
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "IP:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(ip); color: "#38BDF8" }
+                                        Text { text: "IP:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(ip); color: hmiTheme.info }
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "SID:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(sid); color: "#FFFFFF" }
+                                        Text { text: "SID:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(sid); color: hmiTheme.text }
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "URI:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(uri); color: "#22C55E" }
+                                        Text { text: "URI:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(uri); color: hmiTheme.success }
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "Frequency:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(freq) + " MHz"; color: "#FFFFFF" }
+                                        Text { text: "Frequency:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(freq) + " MHz"; color: hmiTheme.text }
                                     }
 
                                     Row {
                                         spacing: 8
-                                        Text { text: "Updated At:"; color: "#E5E7EB"; width: 110 }
-                                        Text { text: String(updated_at); color: "#FFFFFF" }
+                                        Text { text: "Updated At:"; color: hmiTheme.textSecondary; width: 110 }
+                                        Text { text: String(updated_at); color: hmiTheme.text }
                                     }
                                 }
 
@@ -466,7 +466,7 @@ Item {
 
                                     Rectangle {
                                         radius: 6
-                                        color: "#16A34A"
+                                        color: editMouse.containsMouse ? hmiTheme.accentHover : hmiTheme.accent
                                         width: (parent.width - 12) / 2
                                         height: parent.height
                                         Text {
@@ -476,12 +476,12 @@ Item {
                                             font.pixelSize: 14
                                             font.bold: true
                                         }
-                                        MouseArea { anchors.fill: parent; onClicked: registerDevice.openEditPopup(index) }
+                                        MouseArea { id: editMouse; anchors.fill: parent; hoverEnabled: true; onClicked: registerDevice.openEditPopup(index) }
                                     }
 
                                     Rectangle {
                                         radius: 6
-                                        color: "#DC2626"
+                                        color: deleteMouse.containsMouse ? Qt.lighter(hmiTheme.danger, 1.08) : hmiTheme.danger
                                         width: (parent.width - 12) / 2
                                         height: parent.height
                                         Text {
@@ -491,7 +491,7 @@ Item {
                                             font.pixelSize: 14
                                             font.bold: true
                                         }
-                                        MouseArea { anchors.fill: parent; onClicked: registerDevice.deleteDevice(index) }
+                                        MouseArea { id: deleteMouse; anchors.fill: parent; hoverEnabled: true; onClicked: registerDevice.deleteDevice(index) }
                                     }
                                 }
                             }
@@ -502,9 +502,13 @@ Item {
         }
         AddNewDevice {
             id: addNewDevice
-            anchors.fill: parent
-            anchors.rightMargin: 102
-            anchors.bottomMargin: 1001
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.leftMargin: 4
+            anchors.rightMargin: 4
+            height: 82
+            isDarkTheme: registerDevice.isDarkTheme
 
             // รับข้อความค้นหาจาก TextField ใน AddNewDevice.qml
             onSearchTextChanged: {

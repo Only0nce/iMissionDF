@@ -1,9 +1,14 @@
 import QtQuick 2.12
 import QtQuick.Controls 2.12
+import QtQuick.Controls.Material 2.12
 import QtQuick.Layouts 1.12
+import "ui"
 
 Popup {
     id: root
+
+    property bool darkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: root.darkMode }
 
     modal: true
     focus: true
@@ -18,15 +23,15 @@ Popup {
     property string messageText: "Enter password to continue"
     property string unlockButtonText: "Unlock"
 
-    property color backgroundColor: "#1a1f27"
-    property color borderColor: "#2a3444"
-    property color textColor: "#e6edf3"
-    property color subTextColor: "#9aa6b2"
-    property color fieldColor: "#212733"
-    property color fieldFocusColor: "#2b3342"
-    property color accentColor: "#00c896"
-    property color cancelColor: "#2980b9"
-    property color errorColor: "#f87171"
+    property color backgroundColor: hmiTheme.panel
+    property color borderColor: hmiTheme.lineStrong
+    property color textColor: hmiTheme.text
+    property color subTextColor: hmiTheme.textSecondary
+    property color fieldColor: hmiTheme.input
+    property color fieldFocusColor: hmiTheme.cardAlt
+    property color accentColor: hmiTheme.accent
+    property color cancelColor: hmiTheme.info
+    property color errorColor: hmiTheme.danger
 
     property var securityBackend:
         (typeof networkSecurity === "undefined") ? null : networkSecurity
@@ -163,7 +168,7 @@ Popup {
 
                 contentItem: Text {
                     text: cancelButton.text
-                    color: "white"
+                    color: root.darkMode ? "#FFFFFF" : "#061514"
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     font.bold: true
@@ -192,7 +197,7 @@ Popup {
 
                 contentItem: Text {
                     text: unlockButton.text
-                    color: "white"
+                    color: root.darkMode ? "#FFFFFF" : "#061514"
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
                     font.bold: true

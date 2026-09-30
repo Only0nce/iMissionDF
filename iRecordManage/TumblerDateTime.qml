@@ -1,12 +1,16 @@
 // TumblerDateTime.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
+import "../ui"
 
 Item {
     id: rootTumblerDateTime
     width: 900
     height: 420
+    property bool isDarkTheme: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: rootTumblerDateTime.isDarkTheme }
     property int wYear: 160
     property int wMonth: 160
     property int wDay: 160
@@ -150,7 +154,7 @@ Item {
             horizontalAlignment: Text.AlignHCenter
             verticalAlignment: Text.AlignVCenter
             text: (Number(modelData) < 10 ? "0" : "") + modelData
-            color: (Tumbler.tumbler.currentIndex === index) ? "white" : "#7f97a3"
+            color: (Tumbler.tumbler.currentIndex === index) ? hmiTheme.accentHover : hmiTheme.muted
             font.pixelSize: (Tumbler.tumbler.currentIndex === index) ? 18 : 14
             font.bold: (Tumbler.tumbler.currentIndex === index)
             opacity: 1.0 - Math.abs(Tumbler.displacement) / 3
@@ -159,9 +163,9 @@ Item {
 
     /* ===================== UI ===================== */
     Rectangle {
-        radius: 14
-        color: "#0B1216"
-        border.color: "#2A3A44"
+        radius: hmiTheme.radiusLg
+        color: hmiTheme.panel
+        border.color: hmiTheme.lineStrong
         border.width: 1
         anchors.fill: parent
 
@@ -171,23 +175,14 @@ Item {
             y: 10
             spacing: 10
 
-            Button {
-                text: "Today"
-                onClicked: setTodayAll()
-            }
-            Button {
-                text: "Reset Start"
-                onClicked: setFromNow()
-            }
-            Button {
-                text: "Reset End"
-                onClicked: setToNow()
-            }
+            HmiButton { text: "TODAY"; compact: true; darkMode: rootTumblerDateTime.isDarkTheme; onClicked: setTodayAll() }
+            HmiButton { text: "RESET START"; compact: true; darkMode: rootTumblerDateTime.isDarkTheme; onClicked: setFromNow() }
+            HmiButton { text: "RESET END"; compact: true; darkMode: rootTumblerDateTime.isDarkTheme; onClicked: setToNow() }
 
             // preview text
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                color: "#9FB0BA"
+                color: hmiTheme.textSecondary
                 font.pixelSize: 12
                 text: "From: " + fromText() + "   |   To: " + toText()
             }
@@ -201,10 +196,10 @@ Item {
             width: parent.width - 16
             height: 175
             radius: 10
-            color: "#0F1A20"
-            border.color: "#20303A"
+            color: hmiTheme.cardAlt
+            border.color: hmiTheme.line
 
-            Text { x: 8; y: 8; text: "From"; color: "#9FB0BA"; font.pixelSize: 12 }
+            Text { x: 8; y: 8; text: "From"; color: hmiTheme.textSecondary; font.pixelSize: 12 }
 
             RowLayout {
                 x: 8; y: 29
@@ -225,12 +220,12 @@ Item {
                         Layout.preferredHeight: 22
                         spacing: 10
 
-                        Rectangle { Layout.preferredWidth: wYear; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Year"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wMonth; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Month"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wDay; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Day"; color: "white"; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wYear; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Year"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wMonth; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Month"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wDay; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Day"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
                     }
 
                     RowLayout {
@@ -298,10 +293,10 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 22
                         spacing: 10
-                        Rectangle { Layout.preferredWidth: wHour; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Hour"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wMin; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Min"; color: "white"; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wHour; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Hour"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wMin; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Min"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
                     }
 
                     RowLayout {
@@ -351,10 +346,10 @@ Item {
             width: parent.width - 16
             height: 175
             radius: 10
-            color: "#0F1A20"
-            border.color: "#20303A"
+            color: hmiTheme.cardAlt
+            border.color: hmiTheme.line
 
-            Text { x: 8; y: 8; text: "To"; color: "#9FB0BA"; font.pixelSize: 12 }
+            Text { x: 8; y: 8; text: "To"; color: hmiTheme.textSecondary; font.pixelSize: 12 }
 
             RowLayout {
                 x: 8; y: 29
@@ -374,12 +369,12 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 22
                         spacing: 10
-                        Rectangle { Layout.preferredWidth: wYear; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Year"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wMonth; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Month"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wDay; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Day"; color: "white"; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wYear; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Year"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wMonth; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Month"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wDay; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Day"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
                     }
 
                     RowLayout {
@@ -447,10 +442,10 @@ Item {
                         Layout.fillWidth: true
                         Layout.preferredHeight: 22
                         spacing: 10
-                        Rectangle { Layout.preferredWidth: wHour; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Hour"; color: "white"; font.pixelSize: 12 } }
-                        Rectangle { Layout.preferredWidth: wMin; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: "#002a9cff"; border.width: 1
-                            Text { anchors.centerIn: parent; text: "Min"; color: "white"; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wHour; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Hour"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
+                        Rectangle { Layout.preferredWidth: wMin; Layout.fillWidth: true; Layout.fillHeight: true; color: "transparent"; border.color: hmiTheme.lineStrong; border.width: 1
+                            Text { anchors.centerIn: parent; text: "Min"; color: hmiTheme.textSecondary; font.pixelSize: 12 } }
                     }
 
                     RowLayout {

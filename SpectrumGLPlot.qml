@@ -16,6 +16,11 @@ Item {
     id: root
     anchors.fill: parent
 
+    // Theme contract is explicit. Do not infer from Material attached state here:
+    // this item lives below StackView/Loader boundaries where Popup/Material
+    // inheritance can diverge from the application shell on Qt 5.15.
+    property bool darkMode: true
+
 
     property real priStart: 0
     property real priStop: 0
@@ -41,11 +46,17 @@ Item {
     property real smeterLevel: -100
     // R20.4-SPECTRUM-A3: AstraRX WebV2-inspired analyzer palette.
     // The native renderer interpolates between stops for a smooth waterfall.
-    property var  waterfallColorMap: [
+    readonly property var defaultWaterfallColorMap: theme.darkMode ? [
         0x030712, 0x071B4D, 0x0A3B92, 0x0D72D8,
         0x12B6E8, 0x28D6C0, 0x54DC7B, 0xA6E34B,
         0xF0DE43, 0xF6A53A, 0xEF5B36, 0xE82F37, 0xFFF2D0
+    ] : [
+        0xF8FBFC, 0xEEF7F8, 0xDDEFF3, 0xC5E7ED,
+        0x98D8E4, 0x62C7DB, 0x31B0CC, 0x1B98B7,
+        0x1AA080, 0x55B85B, 0xA5C93A, 0xE0C332,
+        0xEE9D32, 0xE86634, 0xD83A3D
     ]
+    property var waterfallColorMap: defaultWaterfallColorMap
 
     // R20.4-SPECTRUM-CUDA1.8-READABILITY-PASS:
 // Waterfall remains the dominant analyzer surface (58%). Persistent bottom HUD
@@ -69,39 +80,45 @@ Item {
     // DIVIDER-FINAL: direct manipulation only. The divider line itself is the
     // interaction affordance, so there is no hold/unlock mode or button state.
     property bool spectrumDividerDragActive: false
-    readonly property color analyzerBackground: "#081018"
-    readonly property color analyzerPanel: "#0D1721"
-    readonly property color analyzerBorder: "#263948"
-    readonly property color analyzerAccent: "#35D5BD"
+    readonly property color analyzerBackground: theme.plot
+    readonly property color analyzerPanel: theme.analyzerPanel
+    readonly property color analyzerBorder: theme.analyzerBorder
+    readonly property color analyzerAccent: theme.analyzerAccent
     // DIVIDER-FINAL: the divider now shares the Ice Blue manipulation language
     // used by PAN. This visually separates interaction controls from RF traces.
     readonly property color dividerIdleColor: "#5FAFC4"
     readonly property color dividerHoverColor: "#7DE3F3"
     readonly property color dividerDragColor: "#D8FAFF"
     readonly property color dividerBorderColor: "#8ED5E0"
-    readonly property color panPanelColor: "#13262E"
-    readonly property color panBorderColor: "#72B4C6"
-    readonly property color panTrackColor: "#315E6B"
-    readonly property color panThumbColor: "#8ED5E0"
-    readonly property color panTextColor: "#E6FAFF"
+    readonly property color panPanelColor: theme.darkMode ? "#13262E" : "#F2F7F6"
+    readonly property color panBorderColor: theme.darkMode ? "#72B4C6" : "#8FBDB7"
+    readonly property color panTrackColor: theme.darkMode ? "#315E6B" : "#C4DAD6"
+    readonly property color panThumbColor: theme.darkMode ? "#8ED5E0" : theme.accent
+    readonly property color panTextColor: theme.darkMode ? "#E6FAFF" : theme.text
     // CUDA1.13 RF-instrument palette: live Spectrum is neon lime-green with a
     // green filled body; Max Hold is red-orange for instant visual separation.
     // Selection/HUD accent semantics remain unchanged.
-    readonly property color spectrumLiveColor: "#B7FF3C"
-    readonly property color spectrumMaxHoldColor: "#FF3B2F"
-    readonly property color analyzerText: "#EEF6FB"
-    readonly property color analyzerMuted: "#91A4B3"
+    readonly property color spectrumLiveColor: theme.spectrumLine
+    readonly property color spectrumMaxHoldColor: theme.maxHoldLine
+    readonly property color analyzerText: theme.analyzerText
+    readonly property color analyzerMuted: theme.analyzerMuted
     // CUDA1.8 readability pass: dynamic Waterfall content can become very bright
     // (cyan/green/yellow), so card chrome must provide stable contrast while
     // text/controls remain fully opaque. Hover raises contrast smoothly rather
     // than changing content opacity.
-    readonly property color waterfallHudCardColor: Qt.rgba(0.035, 0.055, 0.070, 0.72)
-    readonly property color waterfallHudCardHoverColor: Qt.rgba(0.040, 0.070, 0.090, 0.86)
-    readonly property color waterfallHudCardBorder: Qt.rgba(0.50, 0.68, 0.74, 0.28)
-    readonly property color waterfallHudCardHoverBorder: Qt.rgba(0.43, 0.90, 0.83, 0.68)
-    readonly property color hudPrimaryText: "#F4FBFF"
-    readonly property color hudSecondaryText: "#D3E1E7"
-    readonly property color hudAccentText: "#6EF2E8"
+    readonly property color waterfallHudCardColor: theme.darkMode ? Qt.rgba(0.035, 0.055, 0.070, 0.72) : Qt.rgba(1.0, 1.0, 1.0, 1.0)
+    readonly property color waterfallHudCardHoverColor: theme.darkMode ? Qt.rgba(0.040, 0.070, 0.090, 0.86) : Qt.rgba(0.98, 1.0, 0.995, 1.0)
+    readonly property color waterfallHudCardBorder: theme.darkMode ? Qt.rgba(0.50, 0.68, 0.74, 0.28) : Qt.rgba(0.24, 0.46, 0.42, 0.90)
+    readonly property color waterfallHudCardHoverBorder: theme.darkMode ? Qt.rgba(0.43, 0.90, 0.83, 0.68) : Qt.rgba(0.00, 0.55, 0.46, 0.75)
+    readonly property color hudPrimaryText: theme.darkMode ? "#F4FBFF" : "#122722"
+    readonly property color hudSecondaryText: theme.darkMode ? "#D3E1E7" : "#3D5853"
+    readonly property color hudAccentText: theme.darkMode ? "#6EF2E8" : theme.accent
+    readonly property color actionButtonFill: theme.darkMode ? theme.analyzerHud : "#FFFFFF"
+    readonly property color actionButtonFillActive: theme.darkMode ? "#243746" : "#E9F7F2"
+    readonly property color actionButtonBorder: theme.darkMode ? root.analyzerBorder : "#8EBDB3"
+    readonly property color actionButtonBorderHover: theme.darkMode ? root.analyzerAccent : theme.accent
+    readonly property color actionButtonPressFill: theme.darkMode ? Qt.lighter(theme.analyzerPanel, 1.35) : "#DDF3EC"
+    readonly property color actionButtonText: theme.darkMode ? root.analyzerText : theme.text
     readonly property real waterfallHudCardRadius: 8
 
     // Phase 4 runtime budgets. Full-span FFT is preserved; only UI delivery and
@@ -178,7 +195,7 @@ Item {
                                              && Math.min(selectionLeftX, selectionRightX) <= width
 
     property bool selectionMetricsLocked: false
-    readonly property real selectionMetricsPanelOpacity: selectionMetricsLocked ? 1.0 : 0.28
+    readonly property real selectionMetricsPanelOpacity: selectionMetricsLocked ? 0.98 : 0.88
     readonly property real selectionMetricsMargin: 8
     readonly property real selectionMetricsEdgeMargin: 8
 
@@ -232,7 +249,17 @@ Item {
     property int keptStart: 0
     property int profileViewIndex: 0
 
-    Theme { id: theme }
+    Theme { id: theme; darkMode: root.darkMode }
+    readonly property bool analyzerDarkMode: theme.darkMode
+    onDefaultWaterfallColorMapChanged: rebuildWaterfallPalette(defaultWaterfallColorMap)
+    onAnalyzerDarkModeChanged: {
+        rebuildWaterfallPalette(defaultWaterfallColorMap)
+        if (spectrumGridCanvas) spectrumGridCanvas.invalidate()
+        if (spectrumDividerGlyph) spectrumDividerGlyph.requestPaint()
+        if (waterfallScaleCanvas) waterfallScaleCanvas.requestPaint()
+        if (waterfallCompactScale) waterfallCompactScale.requestPaint()
+        if (overlayCanvas) overlayCanvas.requestPaint()
+    }
 
     // ============================================================
     // CUDA1.26/FPS90-SYNC: interaction-triggered invalidations are paired so
@@ -658,7 +685,7 @@ Item {
                                   Number(mainWindows.receiver_freq()))
 
         // Prime the fallback palette before the first server color message.
-        rebuildWaterfallPalette(waterfallColorMap)
+        rebuildWaterfallPalette(defaultWaterfallColorMap)
 
         // Enable the C++ FFT path only after all QML signal handlers are connected.
         syncFftRuntime()
@@ -938,6 +965,46 @@ Item {
         z: 0
     }
 
+    // Phase 2 HMI telemetry: compact view-state chips make the analyzer state
+    // readable at a glance without changing FFT ownership or issuing commands.
+    Row {
+        id: analyzerTelemetry
+        x: 10
+        y: Math.max(root.spectrumPlotTopPx + 8, 26)
+        spacing: 6
+        z: 18
+        visible: root.runtimeActive
+
+        HmiMetricChip {
+            darkMode: theme.darkMode
+            label: "FFT"
+            value: "LIVE"
+            tone: "good"
+        }
+
+        HmiMetricChip {
+            darkMode: theme.darkMode
+            label: "RATE"
+            value: (root.sampRate / 1e6).toFixed(2) + "M"
+            tone: "info"
+        }
+
+        HmiMetricChip {
+            darkMode: theme.darkMode
+            label: "SPAN"
+            value: root.visibleSpanHz >= 1e6
+                   ? (root.visibleSpanHz / 1e6).toFixed(2) + "M"
+                   : (root.visibleSpanHz / 1e3).toFixed(0) + "k"
+        }
+
+        HmiMetricChip {
+            darkMode: theme.darkMode
+            label: "ZOOM"
+            value: root.zoomFactor.toFixed(1) + "×"
+            visible: root.zoomFactor > 1.0001
+        }
+    }
+
     /* ============================================================
        ✅ Fix4: Cached grid canvas (X axis on TOP, works x86+Jetson)
        - DO NOT set visible:false (x86 often won't render => drawImage blank)
@@ -1126,6 +1193,10 @@ Item {
         backend: (typeof wsClient !== "undefined") ? wsClient : null
         mode: FftDisplayItem.Spectrum
         renderEnabled: root.runtimeActive
+        // PERF-R1: Spectrum may interpolate at the physical 60 Hz panel rate,
+        // while its source remains ~30 FPS.  The native presentation clock is
+        // capped to display refresh, so this never requests hidden 100 Hz work.
+        targetFps: 60
         // Raw FFT geometry follows the operator's Intensity range directly.
         // RF calibration is label-only, so changing Min/Max never changes the
         // latched offset and the scale never moves unless the operator moves it.
@@ -1342,8 +1413,8 @@ Item {
     // operator Intensity Min/Max only changes view range. SNR remains FFT-domain.
     Item {
         id: selectionMetricsOverlay
-        width: 218
-        height: 102
+        width: 228
+        height: 108
         z: 40
         visible: root.runtimeActive && root.selectionVisible
 
@@ -1406,7 +1477,7 @@ Item {
         Rectangle {
             id: selectionMetricsPanel
             anchors.fill: parent
-            radius: 7
+            radius: 10
             color: root.analyzerPanel
             opacity: root.selectionMetricsPanelOpacity
             border.width: 1
@@ -1543,7 +1614,7 @@ Item {
             anchors.rightMargin: 6
             anchors.bottom: parent.bottom
             anchors.bottomMargin: 5
-            color: root.selectionMetricsLocked ? root.analyzerAccent : "#99131F29"
+            color: root.selectionMetricsLocked ? root.analyzerAccent : (theme.darkMode ? "#99131F29" : "#F4F8F7")
             border.width: 1
             border.color: root.selectionMetricsLocked ? root.analyzerAccent : root.analyzerBorder
             z: 3
@@ -1551,7 +1622,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: root.selectionMetricsLocked ? "LOCKED" : "LOCK"
-                color: root.selectionMetricsLocked ? "#081018" : root.analyzerText
+                color: root.selectionMetricsLocked ? (theme.darkMode ? "#081018" : "#FFFFFF") : root.analyzerText
                 font.pixelSize: 8
                 font.bold: true
             }
@@ -1591,6 +1662,10 @@ Item {
         backend: (typeof wsClient !== "undefined") ? wsClient : null
         mode: FftDisplayItem.Waterfall
         renderEnabled: root.runtimeActive
+        // Waterfall rows arrive at roughly the FFT source cadence.  Presenting
+        // the painted history faster than that wastes GUI/FBO work without
+        // adding information; CUDA row processing remains fully enabled.
+        targetFps: 30
         minDb: root.waterfallMinDb
         maxDb: root.waterfallMaxDb
         fullStartFreq: root.fullStartFreq
@@ -1602,7 +1677,7 @@ Item {
         Connections {
             target: root
             function onWaterfallColorUpdate(colors) {
-                root.rebuildWaterfallPalette(colors)
+                root.rebuildWaterfallPalette(theme.darkMode ? colors : root.defaultWaterfallColorMap)
             }
         }
     }
@@ -1618,14 +1693,14 @@ Item {
 
         Text {
             text: "WATERFALL"
-            color: root.analyzerText
+            color: theme.darkMode ? root.analyzerText : theme.text
             font.pixelSize: 11
             font.bold: true
             font.letterSpacing: 1.0
         }
         Text {
             text: "SMOOTH · PERSISTENT"
-            color: root.analyzerAccent
+            color: theme.darkMode ? root.analyzerAccent : theme.accent
             font.pixelSize: 9
             font.bold: true
         }
@@ -1646,14 +1721,15 @@ Item {
             width: 96
             height: 40
             radius: 8
-            color: pauseWaterfallMouse.pressed ? "#304A5C"
-                                              : (waterfallCanvas.waterfallPaused ? "#243746" : "#CC0D1721")
-            border.width: 1
-            border.color: pauseWaterfallMouse.containsMouse ? root.analyzerAccent : root.analyzerBorder
+            color: pauseWaterfallMouse.pressed
+                   ? root.actionButtonPressFill
+                   : (waterfallCanvas.waterfallPaused ? root.actionButtonFillActive : root.actionButtonFill)
+            border.width: pauseWaterfallMouse.containsMouse ? 2 : 1
+            border.color: pauseWaterfallMouse.containsMouse ? root.actionButtonBorderHover : root.actionButtonBorder
             Text {
                 anchors.centerIn: parent
                 text: waterfallCanvas.waterfallPaused ? "RESUME" : "PAUSE"
-                color: root.analyzerText
+                color: root.actionButtonText
                 font.pixelSize: 12
                 font.bold: true
             }
@@ -1670,13 +1746,13 @@ Item {
             width: 88
             height: 40
             radius: 8
-            color: clearWaterfallMouse.pressed ? "#304A5C" : "#CC0D1721"
-            border.width: 1
-            border.color: clearWaterfallMouse.containsMouse ? root.analyzerAccent : root.analyzerBorder
+            color: clearWaterfallMouse.pressed ? root.actionButtonPressFill : root.actionButtonFill
+            border.width: clearWaterfallMouse.containsMouse ? 2 : 1
+            border.color: clearWaterfallMouse.containsMouse ? root.actionButtonBorderHover : root.actionButtonBorder
             Text {
                 anchors.centerIn: parent
                 text: "CLEAR"
-                color: root.analyzerText
+                color: root.actionButtonText
                 font.pixelSize: 12
                 font.bold: true
             }
@@ -1741,8 +1817,8 @@ Item {
         Rectangle {
             anchors.fill: parent
             radius: 6
-            color: "#D9081118"
-            border.color: "#70577B86"
+            color: theme.darkMode ? "#D9081118" : "#F4F8F7"
+            border.color: theme.darkMode ? "#70577B86" : theme.analyzerBorder
         }
 
         Item {
@@ -2078,6 +2154,7 @@ Item {
 
     Zoom {
         id:zoom
+        darkMode: theme.darkMode
         x: 1210
         width: 80
         height: 180
@@ -2099,7 +2176,7 @@ Item {
         buttonClear.width: btnSize
         buttonClear.height: btnSize
         z:96
-        opacity: zoomTimer.running ? 1 : 0.2
+        opacity: zoomTimer.running ? 1 : (theme.darkMode ? 0.2 : 0.58)
 
         Behavior on opacity {
             NumberAnimation { duration: 400; easing.type: Easing.InOutQuad }
@@ -2110,8 +2187,8 @@ Item {
             id: bg
             anchors.fill: parent
             radius: 12
-            color: "#000000"
-            opacity: 0.18           // <<< ปรับตรงนี้ (0.12–0.25 กำลังสวย)
+            color: theme.darkMode ? "#000000" : "#FFFFFF"
+            opacity: theme.darkMode ? 0.18 : 0.96           // <<< ปรับตรงนี้ (0.12–0.25 กำลังสวย)
             z: -1                   // อยู่หลังปุ่ม
         }
 
@@ -2211,6 +2288,7 @@ Item {
 
                     BandwidthScaleControl {
                         id: bandwidthScaleControl
+                        darkMode: theme.darkMode
                         anchors.fill: parent
                         anchors.margins: 3
                         visible: receiverMode.get(scanReceiverModeSelected).mode === "Analog"
@@ -2235,17 +2313,51 @@ Item {
                     Behavior on scale { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
                     HoverHandler { id: maxHoldCardHover }
 
-                    CheckBox {
+                    Item {
                         id: maxHoldCheckBox
                         anchors.centerIn: parent
-                        text: "Show Max Hold"
-                        opacity: 1.0
-                        Material.foreground: root.hudPrimaryText
-                        Material.accent: root.hudAccentText
-                        font.pixelSize: 12
-                        font.bold: true
-                        onCheckedChanged: spectrumCanvas.showMaxHold = checked
-                        checked: spectrumCanvas.showMaxHold
+                        width: Math.min(parent.width - 14, 140)
+                        height: 32
+                        property bool checked: spectrumCanvas.showMaxHold
+
+                        Rectangle {
+                            id: maxHoldIndicator
+                            width: 18
+                            height: 18
+                            radius: 4
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            color: maxHoldCheckBox.checked ? root.hudAccentText : (theme.darkMode ? "#10201E" : "#FFFFFF")
+                            border.width: 1
+                            border.color: maxHoldCheckBox.checked ? root.hudAccentText : root.waterfallHudCardBorder
+                            Text {
+                                anchors.centerIn: parent
+                                visible: maxHoldCheckBox.checked
+                                text: "✓"
+                                color: theme.darkMode ? "#071018" : "#FFFFFF"
+                                font.pixelSize: 13
+                                font.bold: true
+                            }
+                        }
+
+                        Text {
+                            anchors.left: maxHoldIndicator.right
+                            anchors.leftMargin: 8
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "Show Max Hold"
+                            color: root.hudPrimaryText
+                            font.pixelSize: 12
+                            font.bold: true
+                            elide: Text.ElideRight
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: spectrumCanvas.showMaxHold = !spectrumCanvas.showMaxHold
+                        }
                     }
                 }
             }
@@ -2288,6 +2400,7 @@ Item {
 
                     AnalogSMeter {
                         id: smeterOverlay
+                        darkMode: theme.darkMode
                         anchors.fill: parent
                         anchors.margins: 3
                     }
@@ -2313,6 +2426,7 @@ Item {
 
                     WaterfallScaleControl {
                         id: waterfallScaleControl
+                        darkMode: theme.darkMode
                         anchors.fill: parent
                         anchors.margins: 3
                         opacity: 1.0
@@ -2482,13 +2596,13 @@ Item {
                 height: floatingWorkspaceLauncher.buttonHeight
                 radius: 8
                 color: root.floatingWorkspaceOpen && widgetView
-                       ? "#F0189286"
-                       : (scanLaunchArea.pressed ? "#F0167F76"
-                          : (scanLaunchArea.containsMouse ? "#F0243E48" : "#D612252D"))
+                       ? theme.accent
+                       : (scanLaunchArea.pressed ? Qt.darker(theme.accent, 1.12)
+                          : (scanLaunchArea.containsMouse ? theme.cardAlt : (theme.darkMode ? theme.analyzerHud : "#FFFFFF")))
                 border.width: 1
                 border.color: root.floatingWorkspaceOpen && widgetView
-                              ? "#D06EF2E8"
-                              : (scanLaunchArea.containsMouse ? "#B066B9C3" : "#704B6973")
+                              ? theme.accentHover
+                              : (scanLaunchArea.containsMouse ? theme.accentHover : theme.analyzerBorder)
                 scale: scanLaunchArea.pressed ? 0.97 : (scanLaunchArea.containsMouse ? 1.025 : 1.0)
                 transformOrigin: Item.Center
                 Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -2497,7 +2611,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "SCAN"
-                    color: root.hudPrimaryText
+                    color: root.floatingWorkspaceOpen && widgetView ? "#FFFFFF" : root.hudPrimaryText
                     font.pixelSize: 14
                     font.bold: true
                     font.letterSpacing: 0.6
@@ -2515,13 +2629,13 @@ Item {
                 height: floatingWorkspaceLauncher.buttonHeight
                 radius: 8
                 color: root.floatingWorkspaceOpen && !widgetView
-                       ? "#F0189286"
-                       : (memoryLaunchArea.pressed ? "#F0167F76"
-                          : (memoryLaunchArea.containsMouse ? "#F0243E48" : "#D612252D"))
+                       ? theme.accent
+                       : (memoryLaunchArea.pressed ? Qt.darker(theme.accent, 1.12)
+                          : (memoryLaunchArea.containsMouse ? theme.cardAlt : (theme.darkMode ? theme.analyzerHud : "#FFFFFF")))
                 border.width: 1
                 border.color: root.floatingWorkspaceOpen && !widgetView
-                              ? "#D06EF2E8"
-                              : (memoryLaunchArea.containsMouse ? "#B066B9C3" : "#704B6973")
+                              ? theme.accentHover
+                              : (memoryLaunchArea.containsMouse ? theme.accentHover : theme.analyzerBorder)
                 scale: memoryLaunchArea.pressed ? 0.97 : (memoryLaunchArea.containsMouse ? 1.025 : 1.0)
                 transformOrigin: Item.Center
                 Behavior on color { ColorAnimation { duration: 150; easing.type: Easing.OutCubic } }
@@ -2530,7 +2644,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "MEMORY"
-                    color: root.hudPrimaryText
+                    color: root.floatingWorkspaceOpen && !widgetView ? "#FFFFFF" : root.hudPrimaryText
                     font.pixelSize: 13
                     font.bold: true
                     font.letterSpacing: 0.3
@@ -2580,9 +2694,9 @@ Item {
             id: floatingWorkspacePanel
             anchors.fill: parent
             radius: 14
-            color: "#F20B1C26"
+            color: theme.darkMode ? "#F20B1C26" : "#FCFFFFFF"
             border.width: 1
-            border.color: "#80548C98"
+            border.color: theme.analyzerBorder
             clip: true
 
             // R20.4-SPECTRUM-CUDA1.10: header text uses content-driven spacing;
@@ -2594,7 +2708,7 @@ Item {
                 anchors.right: parent.right
                 anchors.top: parent.top
                 height: 44
-                color: "#F20A1821"
+                color: theme.darkMode ? "#F20A1821" : "#F7FBFA"
                 border.width: 0
 
                 Text {
@@ -2619,9 +2733,9 @@ Item {
                     anchors.left: floatingWorkspaceTitleText.right
                     anchors.leftMargin: 12
                     anchors.verticalCenter: parent.verticalCenter
-                    color: "#401A8D83"
+                    color: theme.darkMode ? "#401A8D83" : "#14008B75"
                     border.width: 1
-                    border.color: "#5535D5BD"
+                    border.color: theme.darkMode ? "#5535D5BD" : theme.accent
 
                     Text {
                         anchors.fill: parent
@@ -2647,7 +2761,7 @@ Item {
                     anchors.right: parent.right
                     anchors.rightMargin: 8
                     anchors.verticalCenter: parent.verticalCenter
-                    color: floatingCloseArea.pressed ? "#36505E" : "#B21B2D38"
+                    color: floatingCloseArea.pressed ? theme.cardAlt : theme.analyzerHud
                     border.width: 1
                     border.color: root.analyzerBorder
                     Text { anchors.centerIn: parent; text: "×"; color: root.analyzerText; font.pixelSize: 20; font.bold: true }
@@ -2684,6 +2798,7 @@ Item {
             // not duplicated. Their Folder -> Group/Channel -> Detail behavior,
             // Delete, Filter and mode buttons all remain authoritative here.
             NewMemoryAddEdit {
+                darkMode: theme.darkMode
                 id: newMemoryAddEdit
                 anchors.fill: memorySlot
                 visible: root.floatingWorkspaceOpen && !widgetView
@@ -2693,6 +2808,7 @@ Item {
             }
 
             LogDeviceScanner {
+                darkMode: theme.darkMode
                 id: logDeviceScanner
                 anchors.fill: memorySlot
                 visible: root.floatingWorkspaceOpen && widgetView

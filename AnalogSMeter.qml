@@ -5,6 +5,7 @@ Item {
     id: _item
     width: 250
     height: 75
+    property bool darkMode: true
     Rectangle {
         id: rectangle
         color: "transparent"
@@ -20,9 +21,10 @@ Item {
             property real smeterBuffered: smeterLevel
 
             property int tickCount: 10
-            property color needleColor: "#FF4444"
-            property color tickColor: "#D3E1E7"
-            property color textColor: "#F4FBFF"
+            property color needleColor: darkMode ? "#FF4444" : "#D14545"
+            property color tickColor: darkMode ? "#D3E1E7" : "#284640"
+            property color textColor: darkMode ? "#F4FBFF" : "#102824"
+            property color labelUnderlayColor: darkMode ? "rgba(0,0,0,0.92)" : "rgba(255,255,255,0.96)"
 
             Timer {
                 interval: 100
@@ -53,7 +55,7 @@ Item {
                 ctx.stroke();
 
                 // --- Tick marks ---
-                ctx.font = "11px monospace";
+                ctx.font = "bold 11px monospace";
                 ctx.fillStyle = tickColor;
 
                 for (let i = 0; i <= tickCount; ++i) {
@@ -66,7 +68,7 @@ Item {
                     ctx.stroke();
 
                     const tickLabel = Math.round(db).toString();
-                    ctx.fillStyle = "rgba(0,0,0,0.90)";
+                    ctx.fillStyle = labelUnderlayColor;
                     ctx.fillText(tickLabel, x - 9, h / 2 + 17);
                     ctx.fillStyle = tickColor;
                     ctx.fillText(tickLabel, x - 10, h / 2 + 16);
@@ -87,7 +89,7 @@ Item {
                 const valueStr = smeterBuffered.toFixed(1) + " dBm";
                 const labelWidth = ctx.measureText(valueStr).width;
                 const safeX = Math.max(0, Math.min(w - labelWidth, needleX - labelWidth / 2));
-                ctx.fillStyle = "rgba(0,0,0,0.92)";
+                ctx.fillStyle = labelUnderlayColor;
                 ctx.fillText(valueStr, safeX + 1, h / 2 - 13);
                 ctx.fillStyle = textColor;
                 ctx.fillText(valueStr, safeX, h / 2 - 14);

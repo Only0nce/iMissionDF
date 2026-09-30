@@ -12,12 +12,21 @@ Item {
 
     // ==== PROPERTIES ====
     property string remoteStatus: "LOCAL"
+    // R1.7.4C: default disabled. MainPage can opt-in later if needed.
+    property bool popupEnabled: false
     property int waitSeconds: 20
     property int secondsLeft: 0
     property bool countdownCanceled: false
 
     // ==== PUBLIC API ====
     function open() {
+        if (!popupEnabled) {
+            autoTimer.stop()
+            countdownCanceled = true
+            visible = false
+            return
+        }
+
         visible = true
         countdownCanceled = false
 

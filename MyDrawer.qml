@@ -1,4 +1,5 @@
 import QtQuick 2.12
+import "ui"
 
 Item {
     id: root_drawerItem
@@ -15,6 +16,8 @@ Item {
     property alias toolLevel: toolLevel
     property alias sCanRf: sCanRf
     property bool opened: false
+    property bool darkMode: (typeof homeDisplay !== "undefined" && homeDisplay) ? homeDisplay.darkMode : true
+    Theme { id: hmiTheme; darkMode: root_drawerItem.darkMode }
 
     // // ในไฟล์ที่มี SQLDrawer นี้
     // property int scanSqlLevel: 0
@@ -66,7 +69,7 @@ Item {
     Rectangle {
         anchors.fill: parent
         visible: root_drawerItem.opened
-        color: "#50303030"
+        color: root_drawerItem.darkMode ? "#50303030" : "#40AAB8B5"
         MouseArea {
             anchors.fill: parent
             onClicked: root_drawerItem.close()
@@ -77,9 +80,10 @@ Item {
         width: itemWidth
         height: 380
         x: root_drawerItem.width
-        color: "#e6000000"
-        radius: 10
-        border.width: 0
+        color: hmiTheme.panel
+        radius: 12
+        border.width: 1
+        border.color: hmiTheme.lineStrong
         anchors.verticalCenter: parent.verticalCenter
         visible: true
         z: 99
@@ -222,6 +226,7 @@ Item {
         ReceiveModeScanner
         {
             id: toolLevel
+            darkMode: root_drawerItem.darkMode
             width: 600
             visible: itemShow == 3
             height: drawerItem.height
@@ -233,6 +238,7 @@ Item {
         FindBandsWithProfile
         {
             id: sCanRf
+            darkMode: root_drawerItem.darkMode
             width: 600
             visible: itemShow == 4
             height: drawerItem.height

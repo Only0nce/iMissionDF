@@ -1,15 +1,17 @@
 //RecordFiles.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.5 as C2
 import QtGraphicalEffects 1.15
 import "."
+import "../ui"
 
 Item {
     id: recordFiles
-    width: 1980
-    height: 1080
+    width: parent ? parent.width : 1980
+    height: parent ? parent.height : 1080
 
     /* ================== State ================== */
     property date startDT: new Date()
@@ -21,7 +23,10 @@ Item {
     property string endText:   Qt.formatDateTime(endDT,   fmt)
     property bool enableSearch: false
     property alias logView: logDataFIles
-    property bool isDarkTheme: true
+    property bool isDarkTheme: Material.theme === Material.Dark
+    readonly property bool compactLayout: width < 1500
+    readonly property bool shortLayout: height < 720
+    Theme { id: hmiTheme; darkMode: recordFiles.isDarkTheme }
     property int  iconSize: 28
     property int  squareButton: 44
     property var  selectedFiles: []
@@ -38,6 +43,7 @@ Item {
 
     PopUPDeletedFileWave {
         id: popupDeleteWave
+        isDarkTheme: recordFiles.isDarkTheme
 //        listoFDevice: listoFDevice
         deviceTexte: deviceTexte
         customMode: customMode
@@ -162,31 +168,37 @@ Item {
         }
     }
 
-    /* ================== Background ================== */
+    /* ================== Recorder workspace ================== */
     Rectangle {
         anchors.fill: parent
-        color: "#23404d" //"#1f2428"
+        color: hmiTheme.page
+
         LogDataFIles {
             id: logDataFIles
-            anchors.fill: parent
-            anchors.rightMargin: 90
-            anchors.leftMargin: 28
-            anchors.bottomMargin: 274
-            anchors.topMargin: 188
-
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.top: parent.top
+            anchors.bottom: editor.top
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            anchors.topMargin: recordFiles.shortLayout ? 196 : (recordFiles.compactLayout ? 220 : 198)
+            anchors.bottomMargin: 10
         }
+
         function uncheckAllChecks() {
             logDataFIles.uncheckAll()
         }
 
         WaveEditor {
             id: editor
-            y: 810
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.rightMargin: 66
-            height: 270
+            anchors.leftMargin: 14
+            anchors.rightMargin: 14
+            anchors.bottomMargin: 10
+            height: recordFiles.shortLayout ? 190 : (recordFiles.compactLayout ? 250 : 276)
+            isDarkTheme: recordFiles.isDarkTheme
             onPlayToggleRequested: {
                 console.log("[RecordFiles] playToggleRequested wantPlay=", wantPlay,
                             "concatMode=", concatMode, "filesArray.length=",
@@ -209,16 +221,18 @@ Item {
         height: 50
 
         background: Rectangle {
-            radius: 8
-            color: "#1f2633"
-            border.color: "#3a4757"
+            radius: hmiTheme.radiusSm
+            color: hmiTheme.cardAlt
+            border.width: 1
+            border.color: hmiTheme.lineStrong
         }
 
         Text {
             id: popupScanText
             anchors.centerIn: parent
-            color: "white"
-            font.pixelSize: 20
+            color: hmiTheme.text
+            font.pixelSize: 14
+            font.bold: true
             text: ""
         }
     }
@@ -234,16 +248,18 @@ Item {
         height: 50
 
         background: Rectangle {
-            radius: 8
-            color: "#1f2633"
-            border.color: "#3a4757"
+            radius: hmiTheme.radiusSm
+            color: hmiTheme.cardAlt
+            border.width: 1
+            border.color: hmiTheme.lineStrong
         }
 
         Text {
             id: popupStatusText
             anchors.centerIn: parent
-            color: "white"
-            font.pixelSize: 20
+            color: hmiTheme.text
+            font.pixelSize: 14
+            font.bold: true
             text: ""
         }
     }
@@ -268,393 +284,384 @@ Item {
     }
     // ======= พื้นที่แสดง Waveform ด้านล่าง =======
 
-    ColumnLayout {
-        height: 162
+    // ================== Search / filter command panel ==================
+    HmiPanel {
+        id: filterPanel
         anchors.left: parent.left
         anchors.right: parent.right
         anchors.top: parent.top
-        anchors.margins: 24
-        anchors.rightMargin: 8
-        anchors.leftMargin: 24
-        anchors.topMargin: -1
-        spacing: 2
+        anchors.leftMargin: 14
+        anchors.rightMargin: 14
+        anchors.topMargin: 8
+        height: recordFiles.shortLayout ? 180 : (recordFiles.compactLayout ? 204 : 180)
+        darkMode: recordFiles.isDarkTheme
+        z: 2
 
-        RowLayout {
-            spacing: 20
-            Layout.fillWidth: true
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.margins: 12
+            spacing: 8
 
-            // -------- Device ----------
-
-
-            ColumnLayout {
+            RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
-                Label { text: "Device"; color: "#b7c0ca" }
+                spacing: 10
 
-                ComboBox {
-                    id: deviceNumBox
-                    property var sourceModel: listoFDevice
-                    property var ids: []
-                    model: ids
+                Label {
+                    text: qsTr("Recording Browser")
+                    color: hmiTheme.text
                     font.pixelSize: 18
-                    Layout.preferredHeight: 55
-                    implicitWidth: 320
-                    Layout.preferredWidth: 320
-                    background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
-
-                    function rebuild() {
-                        const out = []
-                        if (sourceModel && sourceModel.count > 0) {
-                            for (var i = 0; i < sourceModel.count; ++i) {
-                                const it = sourceModel.get(i)
-                                if (!it || it.idDevice === undefined) continue
-                                const s = String(it.idDevice)
-                                if (out.indexOf(s) === -1) out.push(s)
-                            }
-                            out.sort(function(a,b){ return Number(a) - Number(b) })
-                        } else {
-                            for (var k = 1; k <= 24; ++k) out.push(String(k))
-                        }
-                        ids = out
-
-                        const wanted = String(deviceTexte || (ids[0] || "1"))
-                        const idx = ids.indexOf(wanted)
-                        currentIndex = (idx >= 0) ? idx : 0
-                    }
-
-                    Component.onCompleted: rebuild()
-                    onActivated: deviceTexte = currentText
-                    onCurrentIndexChanged: if (currentIndex >= 0 && currentIndex < ids.length)
-                                               deviceTexte = ids[currentIndex]
+                    font.bold: true
                 }
 
-                Connections {
-                    target: window
-                    function onDeviceListUpdated() { deviceNumBox.rebuild() }
+                HmiStatusPill {
+                    darkMode: recordFiles.isDarkTheme
+                    compact: true
+                    text: enableSearch ? "FILTER ACTIVE" : "LIVE LIST"
+                    tone: enableSearch ? "info" : "good"
+                }
+
+                HmiStatusPill {
+                    darkMode: recordFiles.isDarkTheme
+                    compact: true
+                    text: deviceFound ? "USB READY" : "USB NOT MOUNTED"
+                    tone: deviceFound ? "good" : "neutral"
+                }
+
+                Item { Layout.fillWidth: true }
+
+                Label {
+                    text: qsTr("Select recordings below to load the Wave Editor")
+                    color: hmiTheme.muted
+                    font.pixelSize: 11
+                    visible: !recordFiles.compactLayout
                 }
             }
 
-            // -------- Start Date/Time ----------
-
-            ColumnLayout {
+            RowLayout {
+                spacing: 10
                 Layout.fillWidth: true
-                spacing: 6
-                Label { text: "Start Date/Time"; color: "#b7c0ca" }
-                RowLayout {
-                    spacing: 8
-                    TextField {
-                        id: tfStart
-                        text: startText
-                        readOnly: true
-                        font.pixelSize: 18
-                        horizontalAlignment: Text.AlignHCenter
-                        background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
-                        implicitWidth: 320
-                        Layout.preferredWidth: 320
-                        onPressed: calendarOverlay.openFor("start")
-                    }
-                    Item {
-                        implicitWidth: 40; implicitHeight: 36
-                        Layout.preferredWidth: 40; Layout.preferredHeight: 36
 
-                        Image {
-                            anchors.centerIn: parent
-                            source: iconSrc("calendar")
-                            fillMode: Image.PreserveAspectFit
-                            width: 50; height: 50
-                            mipmap: true
+                // -------- Device ----------
+                ColumnLayout {
+                    Layout.preferredWidth: recordFiles.compactLayout ? 150 : 185
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label { text: "Device"; color: hmiTheme.textSecondary; font.pixelSize: 11; font.bold: true }
+
+                    HmiComboBox {
+                        id: deviceNumBox
+                        darkMode: recordFiles.isDarkTheme
+                        property var sourceModel: listoFDevice
+                        property var ids: []
+                        model: ids
+                        font.pixelSize: 15
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 42
+                        background: Rectangle {
+                            radius: hmiTheme.radiusSm
+                            color: hmiTheme.input
+                            border.width: 1
+                            border.color: deviceNumBox.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
+                        function rebuild() {
+                            const out = []
+                            if (sourceModel && sourceModel.count > 0) {
+                                for (var i = 0; i < sourceModel.count; ++i) {
+                                    const it = sourceModel.get(i)
+                                    if (!it || it.idDevice === undefined) continue
+                                    const s = String(it.idDevice)
+                                    if (out.indexOf(s) === -1) out.push(s)
+                                }
+                                out.sort(function(a,b){ return Number(a) - Number(b) })
+                            } else {
+                                for (var k = 1; k <= 24; ++k) out.push(String(k))
+                            }
+                            ids = out
+
+                            const wanted = String(deviceTexte || (ids[0] || "1"))
+                            const idx = ids.indexOf(wanted)
+                            currentIndex = (idx >= 0) ? idx : 0
+                        }
+
+                        Component.onCompleted: rebuild()
+                        onActivated: deviceTexte = currentText
+                        onCurrentIndexChanged: if (currentIndex >= 0 && currentIndex < ids.length)
+                                                   deviceTexte = ids[currentIndex]
+                    }
+
+                    Connections {
+                        target: window
+                        function onDeviceListUpdated() { deviceNumBox.rebuild() }
+                    }
+                }
+
+                // -------- Start Date/Time ----------
+                ColumnLayout {
+                    Layout.preferredWidth: recordFiles.compactLayout ? 225 : 270
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label { text: "Start Date / Time"; color: hmiTheme.textSecondary; font.pixelSize: 11; font.bold: true }
+                    RowLayout {
+                        spacing: 6
+                        HmiTextField {
+                            id: tfStart
+                            darkMode: recordFiles.isDarkTheme
+                            text: startText
+                            readOnly: true
+                            fontPixelSize: 14
+                            horizontalAlignment: Text.AlignHCenter
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 42
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: calendarOverlay.openFor("start")
+                            }
+                        }
+                        HmiButton {
+                            text: "CAL"
+                            compact: true
+                            darkMode: recordFiles.isDarkTheme
+                            Layout.preferredWidth: 54
+                            Layout.preferredHeight: 42
                             onClicked: calendarOverlay.openFor("start")
                         }
                     }
-
                 }
-            }
 
-            // -------- Interval ----------
-
-            ColumnLayout {
-                spacing: 6
-                Label { text: "Interval (minutes)"; color: "#b7c0ca" }
-                ComboBox {
-                    id: cbInterval
-                    model: ["Same Time", "+5 minutes", "+10 minutes", "+15 minutes", "+30 minutes", "+60 minutes", "Custom..."]
-                    currentIndex: 0
-                    implicitWidth: 220
-                    font.pixelSize: 18
-                    Layout.preferredHeight: 55
-                    background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
-
-                    onActivated: function(i){
-                        switch (i) {
-                        case 0: intervalMins = 0; break;
-                        case 1: intervalMins = 5; break;
-                        case 2: intervalMins = 10; break;
-                        case 3: intervalMins = 15; break;
-                        case 4: intervalMins = 30; break;
-                        case 5: intervalMins = 60; break;
-                        case 6: customIntervalPopup.open(); return;
+                // -------- Interval ----------
+                ColumnLayout {
+                    Layout.preferredWidth: recordFiles.compactLayout ? 155 : 180
+                    spacing: 4
+                    Label { text: "Interval"; color: hmiTheme.textSecondary; font.pixelSize: 11; font.bold: true }
+                    HmiComboBox {
+                        id: cbInterval
+                        darkMode: recordFiles.isDarkTheme
+                        model: ["Same Time", "+5 minutes", "+10 minutes", "+15 minutes", "+30 minutes", "+60 minutes", "Custom..."]
+                        currentIndex: 0
+                        font.pixelSize: 14
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 42
+                        background: Rectangle {
+                            radius: hmiTheme.radiusSm
+                            color: hmiTheme.input
+                            border.width: 1
+                            border.color: cbInterval.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                         }
-                        applyInterval();
+
+                        onActivated: function(i){
+                            switch (i) {
+                            case 0: intervalMins = 0; break;
+                            case 1: intervalMins = 5; break;
+                            case 2: intervalMins = 10; break;
+                            case 3: intervalMins = 15; break;
+                            case 4: intervalMins = 30; break;
+                            case 5: intervalMins = 60; break;
+                            case 6: customIntervalPopup.open(); return;
+                            }
+                            applyInterval();
+                        }
+                    }
+                }
+
+                // -------- End Date/Time ----------
+                ColumnLayout {
+                    Layout.preferredWidth: recordFiles.compactLayout ? 210 : 250
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label { text: "End Date / Time"; color: hmiTheme.textSecondary; font.pixelSize: 11; font.bold: true }
+                    HmiTextField {
+                        id: tfEnd
+                        darkMode: recordFiles.isDarkTheme
+                        text: endText
+                        readOnly: true
+                        fontPixelSize: 14
+                        horizontalAlignment: Text.AlignHCenter
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 42
+                    }
+                }
+
+                // -------- Export target ----------
+                ColumnLayout {
+                    id: toolsColumn
+                    Layout.preferredWidth: recordFiles.compactLayout ? 235 : 300
+                    Layout.fillWidth: true
+                    spacing: 4
+                    Label { text: "Export Device"; color: hmiTheme.textSecondary; font.pixelSize: 11; font.bold: true }
+
+                    RowLayout {
+                        spacing: 6
+                        Layout.fillWidth: true
+
+                        HmiComboBox {
+                            id: comboExportTarget
+                            darkMode: recordFiles.isDarkTheme
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 42
+                            model: exportDeviceList
+                            textRole: "text"
+                            font.pixelSize: 14
+                            background: Rectangle {
+                                radius: hmiTheme.radiusSm
+                                color: hmiTheme.input
+                                border.width: 1
+                                border.color: comboExportTarget.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
+                            }
+
+                            onModelChanged: {
+                                if (!model || model.length === undefined || model.length === 0) {
+                                    currentIndex = -1
+                                    selectedExportMountPoint = ""
+                                    selectedExportDevPath   = ""
+                                    return
+                                }
+
+                                currentIndex = 0
+                                var item = model[0]
+                                if (item) {
+                                    selectedExportMountPoint = item.mountPoint || ""
+                                    selectedExportDevPath   = item.devPath   || ""
+                                } else {
+                                    selectedExportMountPoint = ""
+                                    selectedExportDevPath   = ""
+                                }
+                            }
+
+                            onActivated: function(i) {
+                                if (!model || i < 0 || i >= model.length) return
+                                var item = model[i]
+                                selectedExportMountPoint = (item && item.mountPoint) ? item.mountPoint : ""
+                                selectedExportDevPath   = (item && item.devPath)   ? item.devPath   : ""
+                            }
+                        }
+
+                        HmiButton {
+                            id: scanUnmountButton
+                            text: deviceFound ? qsTr("UNMOUNT") : qsTr("MOUNT")
+                            compact: true
+                            fontPixelSize: 10
+                            darkMode: recordFiles.isDarkTheme
+                            tone: deviceFound ? "warning" : "normal"
+                            Layout.preferredWidth: 82
+                            Layout.preferredHeight: 42
+
+                            onClicked: {
+                                if (!deviceFound) {
+                                    popupScanText.text = statusDeviceScan
+                                    window.statusScan = "Scanning..."
+
+                                    var p = exportButton.mapToItem(recordFiles, 0, 0)
+                                    scanStatusPopup.x = p.x + exportButton.width + 10
+                                    scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
+                                    scanStatusPopup.open()
+
+                                    qmlCommand(JSON.stringify({ menuID: "scanDeivce" }))
+                                } else {
+                                    qmlCommand(JSON.stringify({ menuID: "unmountDeivce" }))
+                                    deviceFound = false
+                                    window.statusScan = ""
+                                    popupScanText.text = ""
+                                    scanStatusPopup.close()
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            // -------- End Date/Time ----------
-
-            ColumnLayout {
+            RowLayout {
                 Layout.fillWidth: true
-                spacing: 6
-                Label { text: "End Date/Time"; color: "#b7c0ca" }
-                TextField {
-                    id: tfEnd
-                    text: endText
-                    readOnly: true
-                    font.pixelSize: 18
-                    horizontalAlignment: Text.AlignHCenter
-                    background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
-                    implicitWidth: 320
-                    Layout.preferredWidth: 320
-                }
-            }
+                spacing: 7
 
-            // -------- Tools (Combo + Export + Scan) ----------
-
-            ColumnLayout {
-                id: toolsColumn
-                spacing: 4
-                Layout.alignment: Qt.AlignTop | Qt.AlignRight
-                Label { text: "Scan Device"; color: "#b7c0ca" }
-
-                RowLayout {
-                    spacing: 8
-
-                    ComboBox {
-                        id: comboExportTarget
-                        Layout.preferredWidth: 320
-
-                        model: exportDeviceList      // <= ใช้ property local
-                        textRole: "text"
-
-                        onModelChanged: {
-                            if (!model || model.length === undefined || model.length === 0) {
-                                currentIndex = -1
-                                selectedExportMountPoint = ""
-                                selectedExportDevPath   = ""
-//                                console.log("[comboExportTarget] cleared (empty model)")
-                                return
-                            }
-
-                            currentIndex = 0
-                            var item = model[0]
-                            if (item) {
-                                selectedExportMountPoint = item.mountPoint || ""
-                                selectedExportDevPath   = item.devPath   || ""
-//                                console.log("[comboExportTarget] auto-select", selectedExportMountPoint)
-                            } else {
-                                selectedExportMountPoint = ""
-                                selectedExportDevPath   = ""
-                            }
-                        }
-
-                        onActivated: function(i) {
-                            if (!model || i < 0 || i >= model.length) return
-                            var item = model[i]
-                            selectedExportMountPoint = (item && item.mountPoint) ? item.mountPoint : ""
-                            selectedExportDevPath   = (item && item.devPath)   ? item.devPath   : ""
-//                            console.log("[comboExportTarget] selected:", selectedExportMountPoint)
-                        }
+                HmiButton {
+                    id: buttonSearch
+                    text: qsTr("SEARCH")
+                    tone: "primary"
+                    compact: true
+                    darkMode: recordFiles.isDarkTheme
+                    onClicked: {
+                        popupSearching()
+                        clearSelections()
                     }
-                    Button {
-                        id: scanUnmountButton
-                        text: deviceFound ? qsTr("Unmount") : qsTr("Mount")
-                        Layout.preferredWidth: 100
-
-                        onClicked: {
-                            if (!deviceFound) {
-                                // SCAN
-                                popupScanText.text = statusDeviceScan
-                                window.statusScan = "Scanning..."
-
-                                var p = exportButton.mapToItem(recordFiles, 0, 0)
-                                scanStatusPopup.x = p.x + exportButton.width + 10
-                                scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
-                                scanStatusPopup.open()
-
-                                qmlCommand(JSON.stringify({ menuID: "scanDeivce" }))
-
-                            } else {
-                                // UNMOUNT
-                                qmlCommand(JSON.stringify({ menuID: "unmountDeivce" }))
-
-                                // ✅ กลับเป็น Scan ทันที
-                                deviceFound = false
-                                window.statusScan = ""
-                                popupScanText.text = ""
-                                scanStatusPopup.close()
-                            }
-                        }
-
-                    }
-
-//                    Button {
-//                        id: scanButton
-//                        text: qsTr("Scan")
-//                        Layout.preferredWidth: 100
-
-//                        onClicked: {
-//                            // ตั้งข้อความไว้ก่อนเลย
-//                            popupScanText.text = statusDeviceScan
-//                            window.statusScan = "Scanning..."
-
-//                            // ให้ popup ขึ้นตรงข้าง ๆ Export File
-//                            var p = exportButton.mapToItem(recordFiles, 0, 0)
-//                            scanStatusPopup.x = p.x + exportButton.width + 10
-//                            scanStatusPopup.y = p.y + (exportButton.height - scanStatusPopup.height) / 2
-//                            scanStatusPopup.open()
-
-//                            // ค่อยยิงคำสั่งไปหา C++
-//                            var msg = { menuID: "scanDeivce" }
-//                            qmlCommand(JSON.stringify(msg))
-//                        }
-//                    }
-
-
-
-//                    Button {
-//                        id: unmountButton
-//                        text: qsTr("Unmount")
-//                        Layout.preferredWidth: 100
-
-//                        onClicked: {
-//                            var msg = {
-//                                menuID: "unmountDeivce"
-//                            }
-//                            qmlCommand(JSON.stringify(msg))
-//                        }
-//                    }
-
                 }
-                Button {
+
+                HmiButton {
+                    id: buttonClear
+                    text: qsTr("CLEAR")
+                    compact: true
+                    darkMode: recordFiles.isDarkTheme
+                    onClicked: {
+                        freezeRecordFilesUpdate = false
+                        clearSelections()
+                        resetFiltersAndReload()
+                    }
+                }
+
+                HmiButton {
+                    id: btnRefresh
+                    text: qsTr("REFRESH")
+                    compact: true
+                    darkMode: recordFiles.isDarkTheme
+                    onClicked: {
+                        console.log("[QML] btnRefresh clicked")
+                        var msg = { menuID: "refreshpage" }
+                        var json = JSON.stringify(msg)
+                        console.log("[QML] send =", json)
+                        qmlCommand(json)
+                    }
+                }
+
+                Rectangle { width: 1; height: 28; color: hmiTheme.line; Layout.leftMargin: 3; Layout.rightMargin: 3 }
+
+                HmiButton {
                     id: exportButton
-                    text: qsTr("Export File")
-                    Layout.preferredWidth: comboExportTarget.implicitWidth
+                    text: qsTr("EXPORT SELECTED")
+                    compact: true
+                    tone: "primary"
+                    darkMode: recordFiles.isDarkTheme
 
                     onClicked: {
                         var items = collectSelectedFiles()
-                        if (items.length === 0) {
-//                            console.log("[Export] no file selected")
+                        if (items.length === 0)
                             return
-                        }
 
                         var now = new Date()
                         var defName = Qt.formatDateTime(now, "yyyyMMdd_hhmmss")
-
-                        // แค่เตือน แต่ "ไม่ return"
-                        if (!window.label || window.label === "") {
-//                            console.log("[Export] no USB target selected, open popup anyway")
-                        } else {
-//                            console.log("[Export] use mountPoint:", window.label)
-                        }
                         pathToSave = window.label
-//                        console.log("[Export] total size =", selectedTotalSizeBytes,"total dur_sec =", selectedTotalDurationSec)
-
-                        // ถ้าไม่มี mountPoint ก็ส่ง "" ไปก่อน
                         var mp = window.selectedExportMountPoint || ""
                         exportOverlay.openFor(items, mp, defName)
                     }
                 }
+
+                Item { Layout.fillWidth: true }
+
+                HmiButton {
+                    id: buttonDeletedFiles
+                    text: qsTr("DELETED FILES")
+                    compact: true
+                    tone: "danger"
+                    darkMode: recordFiles.isDarkTheme
+                    onClicked: {
+                        popupDeleteWave.customMode = false
+                        popupDeleteWave.presetDays = 1
+                        popupDeleteWave.open()
+                    }
+                }
+
+                HmiButton {
+                    id: buttonFormatDisk
+                    text: qsTr("FORMAT DISK")
+                    compact: true
+                    tone: "warning"
+                    darkMode: recordFiles.isDarkTheme
+                    onClicked: qmlCommand('{"menuID":"formatdisknow"}')
+                }
             }
         }
-
-        RowLayout {
-            // height: 80                   // <-- ลบออก
-            Layout.fillHeight: true
-            Layout.fillWidth: false          // <-- ให้เต็มความกว้างเหมือนแถวบน
-            Layout.alignment: Qt.AlignLeft  // ให้ชิดซ้ายใต้ deviceNumBox
-            spacing: 8                      // ช่องไฟระหว่างปุ่ม
-
-            Button {
-                id: buttonSearch
-                text: "Search"
-                background: Rectangle { radius: 6; color: "#1f8d4d" }
-                onClicked:{
-                    popupSearching()    // <-- เปลี่ยนมาเรียกฟังก์ชันนี้
-                    clearSelections()
-                }
-            }
-
-            Button {
-                id: buttonClear
-                text: "Clear"
-                Layout.fillHeight: false
-                background: Rectangle { radius: 6; color: "#727b87" }
-                onClicked: {
-                    freezeRecordFilesUpdate = false
-                    clearSelections()
-                    resetFiltersAndReload()
-                }
-            }
-            Button {
-                id: buttonDeletedFiles
-                x: 432
-                y: -71
-                text: "Deleted Files"
-                background: Rectangle { radius: 6; color: "#ff004c" }
-
-                onClicked: {
-                    popupDeleteWave.customMode = false
-                    popupDeleteWave.presetDays = 1
-                    popupDeleteWave.open()
-                }
-            }
-            Button {
-                id: buttonFormatDisk
-                x: 432
-                y: -71
-                text: "Format Disk"
-                background: Rectangle { radius: 6; color: "#ded418" }
-
-                onClicked: {
-                    qmlCommand('{"menuID":"formatdisknow"}')
-                }
-
-            }
-            ToolButton {
-                id: btnRefresh
-                width: squareButton; height: squareButton
-                Layout.fillHeight: true
-                Layout.fillWidth: false
-
-                background: Rectangle {
-                    color: "transparent"
-                    border.color: "transparent"
-                }
-                onClicked: {
-                    console.log("[QML] btnRefresh clicked")
-                    var msg = { menuID: "refreshpage" }
-                    var json = JSON.stringify(msg)
-                    console.log("[QML] send =", json)
-                    qmlCommand(json)
-                }
-                contentItem: Image {
-                    anchors.fill: parent
-                    width: iconSize; height: iconSize
-                    source: iconSrc("refresh")
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true
-                }
-            }
-
-
-        }
-
-        // ----- RowLayout ล่าง (Search / Clear / Select Files) ของคุณวางต่อได้เลย -----
     }
+
 
     /* ================== Calendar Overlay ================== */
     Rectangle {
@@ -672,8 +679,8 @@ Item {
 
         Rectangle {
             id: panel
-            width: 1000; height: 500; radius: 12
-            color: "#0e1116"; border.color: "#ffffff"
+            width: Math.min(1000, recordFiles.width - 80); height: Math.min(500, recordFiles.height - 80); radius: hmiTheme.radiusLg
+            color: hmiTheme.panel; border.color: hmiTheme.lineStrong
             anchors.centerIn: parent
 
             MouseArea { anchors.fill: parent; acceptedButtons: Qt.AllButtons; preventStealing: true }
@@ -685,6 +692,7 @@ Item {
                 active: calendarOverlay.visible
                 onLoaded: {
                     if (!item) return;
+                    if (item.isDarkTheme !== undefined) item.isDarkTheme = recordFiles.isDarkTheme;
                     var dt = (calendarOverlay.target === "start") ? startDT : endDT;
                     if (item.initialDate !== undefined) item.initialDate = dt;
 
@@ -721,23 +729,26 @@ Item {
         width: 320; height: 160
         x: (parent.width - width)/2
         y: (parent.height - height)/2
-        background: Rectangle { radius: 10; color: "#161a20"; border.color: "#2a2f37" }
+        background: Rectangle { radius: hmiTheme.radiusMd; color: hmiTheme.panel; border.color: hmiTheme.lineStrong }
 
         ColumnLayout {
             anchors.fill: parent
             anchors.margins: 16
             spacing: 12
 
-            Label { text: "Custom interval (minutes)"; color: "#b7c0ca" }
+            Label { text: "Custom interval (minutes)"; color: hmiTheme.textSecondary; font.bold: true }
             SpinBox { id: sbCustom; from: 1; to: 24*60; value: 5; Layout.preferredWidth: 140 }
 
             RowLayout {
                 Layout.fillWidth: true
                 spacing: 10
                 Item { Layout.fillWidth: true }
-                Button { text: "Cancel"; onClicked: customIntervalPopup.close() }
-                Button {
-                    text: "OK"
+                HmiButton { text: "CANCEL"; compact: true; darkMode: recordFiles.isDarkTheme; onClicked: customIntervalPopup.close() }
+                HmiButton {
+                    text: "APPLY"
+                    compact: true
+                    tone: "primary"
+                    darkMode: recordFiles.isDarkTheme
                     onClicked: {
                         intervalMins = sbCustom.value
                         applyInterval()
@@ -783,11 +794,11 @@ Item {
 
         Rectangle {
             id: exportPanel
-            width: 1000
-            height: 500
-            radius: 12
-            color: "#0e1116"
-            border.color: "#ffffff"
+            width: Math.min(1000, recordFiles.width - 80)
+            height: Math.min(500, recordFiles.height - 80)
+            radius: hmiTheme.radiusLg
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             anchors.centerIn: parent
 
             MouseArea {

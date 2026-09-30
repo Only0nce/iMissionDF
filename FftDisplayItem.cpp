@@ -53,17 +53,15 @@ public:
         m_requestedFps = envPositiveIntLocal("ISCAN_ANALYZER_PRESENT_FPS", 100, 120);
         QScreen *screen = QGuiApplication::primaryScreen();
         const double displayHz = screen ? screen->refreshRate() : 0.0;
-        Q_UNUSED(displayHz);
-        // R20.4-ASTRARX-SMOOTH100:
-        // Do not cap the presentation clock to the physical display refresh.
-        // Qt Quick/vsync still coalesces actual screen flips, but running the
-        // shared analyzer clock at 100 Hz gives Spectrum interpolation and
-        // Waterfall row-phase scrolling enough ticks to stay smooth when the
-        // AstraRX FFT source cadence falls at 7.68/15.36/30.72 MSPS.
-        m_effectiveFps = m_requestedFps;
-        // Run slightly ahead of the requested cadence and let Qt Quick/vsync
-        // coalesce onto the physical refresh boundary. This avoids choosing a
-        // 17 ms timer for a 60 Hz panel (58.8 Hz) while keeping 100 Hz at 10 ms.
+        // PERF-R1: never drive the GUI presentation clock faster than the
+        // physical panel can display.  The old 100 Hz clock on a 60 Hz EGLFS
+        // panel woke the GUI thread ~40 extra times/sec and forced redundant
+        // QQuickPaintedItem update checks.  CUDA/native processing remains
+        // source-rate driven; this clock is presentation only.
+        const int displayFps = (displayHz >= 20.0 && displayHz <= 240.0)
+                ? qBound(20, static_cast<int>(std::lround(displayHz)), 240)
+                : 60;
+        m_effectiveFps = qMin(m_requestedFps, displayFps);
         m_intervalMs = qMax(1, static_cast<int>(std::floor(1000.0
                                          / static_cast<double>(m_effectiveFps))));
         m_timer.setTimerType(Qt::PreciseTimer);
@@ -176,14 +174,12 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
     setRenderTarget(QQuickPaintedItem::Image);
 #endif
 
-    // DOA-VIEWER1.4: one shared low-rate presentation clock coordinates
-    // analyzer items, but each item repaints only when it has fresh data and
-    // its own targetFps budget allows it. This avoids a permanent 90 Hz
-    // update storm on Jetson.
+    // One shared presentation clock coordinates the legacy painted analyzer
+    // items.  PERF-R1 additionally removes hidden/paused items from this clock
+    // entirely so inactive pages do not wake the GUI thread.
     AnalyzerPresentationClock &presentClock = sharedAnalyzerPresentationClock();
     m_presentIntervalMs = presentClock.intervalMs();
     m_waterfallHistoryMaxBins = envPositiveIntLocal("ISCAN_WATERFALL_DISPLAY_BINS", 2048, 8192);
-    presentClock.add(this);
 
     m_palette = {
         QColor(QStringLiteral("#030712")),
@@ -238,6 +234,7 @@ FftDisplayItem::FftDisplayItem(QQuickItem *parent)
 FftDisplayItem::~FftDisplayItem()
 {
     sharedAnalyzerPresentationClock().remove(this);
+    m_presentClockRegistered = false;
     disconnectBackend();
     stopComputeWorker();
 }
@@ -438,9 +435,21 @@ void FftDisplayItem::setTargetFps(int fps)
 
 void FftDisplayItem::refreshPresentationClock()
 {
-    // CUDA1.26: presentation lifetime is centralized. Per-item state is checked
-    // in presentOnSharedClock(), so mode/pause/render changes cannot de-phase
-    // Spectrum and Waterfall by starting/stopping independent timers.
+    bool shouldRegister = false;
+    {
+        QMutexLocker locker(&m_dataMutex);
+        shouldRegister = m_renderEnabled
+                && !(m_mode == Waterfall && m_waterfallPaused);
+    }
+
+    AnalyzerPresentationClock &clock = sharedAnalyzerPresentationClock();
+    if (shouldRegister && !m_presentClockRegistered) {
+        clock.add(this);
+        m_presentClockRegistered = true;
+    } else if (!shouldRegister && m_presentClockRegistered) {
+        clock.remove(this);
+        m_presentClockRegistered = false;
+    }
 }
 
 void FftDisplayItem::setShowMaxHold(bool enabled)
@@ -854,13 +863,13 @@ void FftDisplayItem::presentOnSharedClock()
             return;
         }
 
-        // The QTimer can fire with small jitter around the 10 ms target.  A
-        // strict per-item 10 ms gate skipped every early tick and effectively
-        // divided the analyzer cadence down to ~40 FPS.  Use the shared clock
-        // interval with a small tolerance; Qt Quick/vsync still performs the
-        // final display-rate coalescing.
+        // PERF-R1: respect the per-item target FPS.  The previous implementation
+        // used min(itemBudget, sharedClockBudget), which effectively ignored a
+        // 30 FPS item budget whenever the shared clock ran faster.  Spectrum can
+        // explicitly request 60 FPS for interpolation while Waterfall remains at
+        // source-friendly 30 FPS, reducing QPainter/FBO work significantly.
         const int intervalMs = targetPresentIntervalMsLocked();
-        const int clockBudgetMs = qMax(1, qMin(intervalMs, qMax(1, m_presentIntervalMs - 2)));
+        const int clockBudgetMs = qMax(1, intervalMs - 2);
         if (m_lastPresentUpdateMs > 0 && (nowMs - m_lastPresentUpdateMs) < clockBudgetMs) {
             ++m_presentSkippedBudget;
             return;

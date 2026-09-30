@@ -25,6 +25,8 @@ import QtGraphicalEffects 1.0
 import QtQuick.VirtualKeyboard 2.4
 import Qt.labs.settings 1.1
 
+import "../../ui"
+
 import "../i18n" as I18n
 import "./"
 
@@ -42,6 +44,13 @@ Item {
 
     property string currentLang: (krakenmapval && krakenmapval.language)
                                  ? krakenmapval.language : "en"
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: settingsPanel.darkMode }
+
+    onDarkModeChanged: {
+        console.info("[DRAWER-THEME] onDarkModeChanged darkMode=", settingsPanel.darkMode)
+        applyThemeToLoadedPanels()
+    }
 
     // ===== Internal for side content =====
     property string sidePanelKey: "localdevice"
@@ -54,6 +63,28 @@ Item {
         case "datalogs":    return "qrc:/iScreenDFqml/sidepanels/SideLogsFile.qml"
         default:            return "qrc:/iScreenDFqml/sidepanels/SideLocal.qml"
         }
+    }
+
+    function _applyDarkModeToItem(item, tag) {
+        if (!item)
+            return
+
+        if (item.hasOwnProperty("darkMode")) {
+            item.darkMode = settingsPanel.darkMode
+            console.info("[DRAWER-THEME] panel=", tag,
+                         "darkMode=", settingsPanel.darkMode)
+        } else {
+            console.info("[DRAWER-THEME] panel=", tag,
+                         "hasNoDarkModeProperty")
+        }
+    }
+
+    function applyThemeToLoadedPanels() {
+        console.info("[DRAWER-THEME] drawer darkMode=", settingsPanel.darkMode,
+                     "sidePanelKey=", settingsPanel.sidePanelKey)
+
+        _applyDarkModeToItem(sideLoader.item, settingsPanel.sidePanelKey)
+        _applyDarkModeToItem(sideLogsBridgeLoader.item, "sideLogsBridge")
     }
 
     function _syncSidePanel() {
@@ -283,17 +314,20 @@ Item {
         var pages = [
             {
                 title: "RADIO",
-                icon: "qrc:/images/radioIcon.png",
+                iconLight: "qrc:/iScreenDFqml/images/selectmode/light/radio.png",
+                iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/radio.png",
                 source: "qrc:/HomeDisplay.qml"
             },
             {
                 title: "MAP\nVISUALIZATION",
-                icon: "qrc:/iScreenDFqml/images/earth-asia.png",
+                iconLight: "qrc:/iScreenDFqml/images/selectmode/light/map.png",
+                iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/map.png",
                 source: "qrc:/iScreenDFqml/pages/QMLMap.qml"
             },
             {
                 title: "DOA\nVIEWER",
-                icon: "qrc:/iScreenDFqml/images/dart-board.png",
+                iconLight: "qrc:/iScreenDFqml/images/selectmode/light/doa.png",
+                iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/doa.png",
                 source: "qrc:/DoaViewer/ViewerPage.qml"
             }
         ]
@@ -302,18 +336,21 @@ Item {
         // FEATURE_TOP_NETWORK_DRAWER controls only the top-bar drawer.
         pages.push({
                        title: "NETWORK\nSETTINGS",
-                       icon: "qrc:/iScreenDFqml/images/networkSetupIcon.png",
+                       iconLight: "qrc:/iScreenDFqml/images/selectmode/light/network.png",
+                       iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/network.png",
                        source: settingsPanel.wifi5gSourceUrl
                    })
 
         pages.push({
                        title: "RECORDER",
-                       icon: "qrc:/iRecordManage/images/IconRec.png",
+                       iconLight: "qrc:/iScreenDFqml/images/selectmode/light/recorder.png",
+                       iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/recorder.png",
                        source: "qrc:/iRecordManage/TapBarRecordFiles.qml"
                    })
         pages.push({
                        title: "DIAG\nNOSTIC",
-                       icon: "qrc:/images/Diagnostic.png",
+                       iconLight: "qrc:/iScreenDFqml/images/selectmode/light/diagnostic.png",
+                       iconDark: "qrc:/iScreenDFqml/images/selectmode/dark/diagnostic.png",
                        source: "qrc:/iRecordManage/MonitorDisplay.qml"
                    })
 
@@ -368,6 +405,8 @@ Item {
 
             if (item && km && item.hasOwnProperty("krakenmapval"))
                 item.krakenmapval = km
+
+            _applyDarkModeToItem(item, "sideLogsBridge")
 
             if (item) {
                 var why = settingsPanel._pendingBridgeReloadReason
@@ -441,9 +480,9 @@ Item {
     // ===== Drawer panel (TOPMOST) =====
     Rectangle {
         id: drawer
-        width: 500
+        width: Math.min(760, Math.max(560, settingsPanel.width * 0.72))
         height: parent.height
-        color: "#111212"
+        color: hmiTheme.panel
         z: 10000
         x: -width
 
@@ -543,9 +582,9 @@ Item {
                         padding: 6
 
                         background: Rectangle {
-                            color: settingsButton.pressed ? "#111212" :
-                                   settingsButton.hovered ? "#111212" : "#111212"
-                            border.color: "#373640"
+                            color: settingsButton.pressed ? hmiTheme.card :
+                                   settingsButton.hovered ? hmiTheme.cardAlt : hmiTheme.cardAlt
+                            border.color: hmiTheme.line
                             border.width: settingsButton.hovered ? 2 : 1
                             radius: 24
                             anchors.fill: parent
@@ -568,27 +607,28 @@ Item {
                                     width: 20
                                     height: 3
                                     radius: 1.5
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.accent
                                 }
 
                                 Rectangle {
                                     width: 20
                                     height: 3
                                     radius: 1.5
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.accent
                                 }
 
                                 Rectangle {
                                     width: 20
                                     height: 3
                                     radius: 1.5
-                                    color: "#7AE2CF"
+                                    color: hmiTheme.accent
                                 }
                             }
                         }
 
-                        ToolTip.visible: hovered
-                        ToolTip.text: qsTr("Menu")
+                        // R1.7.4C: disable tooltip in touch-first header.
+                        ToolTip.visible: false
+                        ToolTip.text: ""
 
                         onClicked: {
                             settingsPanel.close()
@@ -605,10 +645,10 @@ Item {
                         Layout.preferredWidth: 150
                         Layout.alignment: Qt.AlignVCenter
                         radius: height / 2
-                        color: hovered ? "#25303b" : "transparent"
+                        color: hovered ? hmiTheme.navTileHover : hmiTheme.navTile
                         border.width: 2
                         Layout.leftMargin: 70
-                        border.color: "#25303b"
+                        border.color: hmiTheme.navTileBorder
 
                         property bool isLocal: true
                         property bool hovered: false
@@ -620,7 +660,7 @@ Item {
 
                             Text {
                                 text: connSwitch.labelText
-                                color: "#ffffff"
+                                color: hmiTheme.navTileText
                                 font.pixelSize: 16
                                 font.bold: true
                                 verticalAlignment: Text.AlignVCenter
@@ -664,10 +704,10 @@ Item {
                         property bool useOffline: uiSettings.savedUseOfflineMap
                         property bool hovered: false
 
-                        readonly property color cOnline: "#163A35"
-                        readonly property color cOnline2: "#7AE2CF"
-                        readonly property color cOffline: "#3A2A16"
-                        readonly property color cOffline2: "#F3B25E"
+                        readonly property color cOnline: settingsPanel.darkMode ? "#163A35" : "#E8FBF8"
+                        readonly property color cOnline2: settingsPanel.darkMode ? "#7AE2CF" : "#008B75"
+                        readonly property color cOffline: settingsPanel.darkMode ? "#3A2A16" : "#FFF4DF"
+                        readonly property color cOffline2: settingsPanel.darkMode ? "#F3B25E" : "#B97910"
 
                         readonly property string labelText: useOffline ? "MAP OFFLINE" : "MAP ONLINE"
                         readonly property string subText: useOffline ? "tiles/cache mode" : "internet mode"
@@ -707,7 +747,7 @@ Item {
 
                                 Text {
                                     text: netStyleSwitch.labelText
-                                    color: "#FFFFFF"
+                                    color: settingsPanel.darkMode ? "#FFFFFF" : (useOffline ? "#4A2C04" : "#063B35")
                                     font.pixelSize: 14
                                     font.bold: true
                                     elide: Text.ElideRight
@@ -715,7 +755,9 @@ Item {
 
                                 Text {
                                     text: netStyleSwitch.subText
-                                    color: useOffline ? "#E9D8B5" : "#CFEFEA"
+                                    color: settingsPanel.darkMode
+                                           ? (useOffline ? "#E9D8B5" : "#CFEFEA")
+                                           : (useOffline ? "#76520D" : "#2E655F")
                                     font.pixelSize: 10
                                     opacity: 0.95
                                     elide: Text.ElideRight
@@ -744,10 +786,11 @@ Item {
                             }
                         }
 
-                        ToolTip.visible: hovered
-                        ToolTip.text: useOffline
-                                      ? "Map OFFLINE: use cached/offline tiles (no internet)"
-                                      : "Map ONLINE: use internet map tiles"
+                        // R1.7.4C: no tooltip on the mode switch.
+                        // Touch/EGLFS could leave this text stuck on screen
+                        // until the operator tapped the tooltip itself.
+                        ToolTip.visible: false
+                        ToolTip.text: ""
 
                         Connections {
                             target: Krakenmapval
@@ -769,63 +812,88 @@ Item {
                     text: "Select Mode"
                     font.pixelSize: 20
                     font.bold: true
-                    color: "#ffffff"
+                    color: hmiTheme.text
                 }
 
                 Row {
                     id: toolbar
-                    spacing: pages.length > 5 ? 8 : 16
+                    spacing: pages.length > 5 ? 8 : 12
                     Layout.alignment: Qt.AlignHCenter
                     Layout.margins: 10
+                    Layout.preferredWidth: availableWidth
+                    width: availableWidth
 
                     property int hoveredIndex: -1
 
                     property var pages: settingsPanel.toolbarPages()
 
                     property int currentIndex: 0
-                    property int buttonSize: pages.length > 5 ? 70 : 80
-                    property int iconSize: pages.length > 5 ? 34 : 40
-                    property int labelSize: pages.length > 5 ? 9 : 10
+                    property int availableWidth: Math.max(360, Math.min(drawer.width - 44, 720))
+                    property int buttonWidth: Math.floor((availableWidth - spacing * Math.max(0, pages.length - 1)) / Math.max(1, pages.length))
+                    property int buttonHeight: pages.length > 5 ? 104 : 108
+                    // Keep icons responsive: bigger on the widened drawer, but capped so they never hit the label or tile border.
+                    property int iconSize: Math.max(38, Math.min(pages.length > 5 ? 46 : 50,
+                                                                 Math.round(buttonWidth * 0.42)))
+                    property real labelSize: pages.length > 5 ? 9.5 : 10.5
 
                     Repeater {
                         model: toolbar.pages
 
                         ToolButton {
                             id: btn
-                            width: toolbar.buttonSize
-                            height: toolbar.buttonSize
+                            width: toolbar.buttonWidth
+                            height: toolbar.buttonHeight
                             checkable: true
                             checked: index === toolbar.currentIndex
                             hoverEnabled: true
 
                             contentItem: Column {
-                                spacing: 4
+                                spacing: 5
                                 anchors.centerIn: parent
 
-                                Image {
+                                Item {
                                     anchors.horizontalCenter: parent.horizontalCenter
-                                    source: modelData.icon
                                     width: toolbar.iconSize
                                     height: toolbar.iconSize
-                                    fillMode: Image.PreserveAspectFit
+
+                                    Image {
+                                        id: modeIconSource
+                                        anchors.fill: parent
+                                        sourceSize.width: toolbar.iconSize
+                                        sourceSize.height: toolbar.iconSize
+                                        source: hmiTheme.darkMode ? modelData.iconDark : modelData.iconLight
+                                        fillMode: Image.PreserveAspectFit
+                                        smooth: true
+                                        mipmap: true
+                                        opacity: btn.checked ? 1.0 : 0.98
+                                        scale: btn.checked ? 1.0 : (index === toolbar.hoveredIndex ? 1.025 : 1.0)
+                                    }
                                 }
 
                                 Text {
                                     anchors.horizontalCenter: parent.horizontalCenter
+                                    width: btn.width - 10
                                     text: modelData.title
-                                    color: (btn.checked || index === toolbar.hoveredIndex)
-                                           ? "#FFFFFF" : "#AAAAAA"
+                                    color: btn.checked
+                                           ? hmiTheme.navTileActiveText
+                                           : hmiTheme.navTileText
+                                    opacity: btn.checked ? 1.0 : 0.96
                                     font.pixelSize: toolbar.labelSize
+                                    font.bold: true
                                     horizontalAlignment: Text.AlignHCenter
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    lineHeight: 1.0
+                                    lineHeightMode: Text.ProportionalHeight
                                 }
                             }
 
                             background: Rectangle {
                                 radius: 8
                                 color: btn.checked
-                                       ? "#6c9386"
-                                       : (index === toolbar.hoveredIndex ? "#6c9386" : "transparent")
-                                border.color: (index === toolbar.hoveredIndex) ? "#6c9386" : "transparent"
+                                       ? hmiTheme.navTileActive
+                                       : (index === toolbar.hoveredIndex ? hmiTheme.navTileHover : hmiTheme.navTile)
+                                border.color: btn.checked ? hmiTheme.remoteRowBorderActive : hmiTheme.navTileBorder
                                 border.width: 1
                             }
 
@@ -854,8 +922,9 @@ Item {
 
                     PillSegmentBar {
                         id: bar
+                        darkMode: settingsPanel.darkMode
                         anchors.horizontalCenter: parent.horizontalCenter
-                        width: 320
+                        width: Math.max(360, Math.min(drawer.width - 72, 520))
 
                         model: [
                             {
@@ -904,7 +973,7 @@ Item {
                     text: "RF Receiver Configuration"
                     font.pixelSize: 20
                     font.bold: true
-                    color: "#ffffff"
+                    color: hmiTheme.text
                 }
 
                 GridLayout {
@@ -935,19 +1004,20 @@ Item {
                     Label {
                         text: "Frequency:"
                         font.pixelSize: 16
-                        color: "#ffffff"
+                        color: hmiTheme.text
                     }
 
                     RowLayout {
-                        Layout.preferredWidth: 260
-                        spacing: 8
+                        Layout.fillWidth: true
+                        spacing: 10
 
                         TextField {
                             id: offcentersetInput
-                            Layout.preferredWidth: 170
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 220
                             Layout.preferredHeight: 32
                             font.pixelSize: 16
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: Text.AlignLeft
                             leftPadding: 10
@@ -964,9 +1034,9 @@ Item {
                             }
 
                             background: Rectangle {
-                                color: "#111A1E"
+                                color: hmiTheme.input
                                 radius: 10
-                                border.color: offcentersetInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                                border.color: offcentersetInput.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                                 border.width: 1
                             }
 
@@ -988,7 +1058,7 @@ Item {
 
                             background: Rectangle {
                                 radius: 8
-                                color: connectBtn.hovered ? "#163A35" : "#111A1E"
+                                color: connectBtn.hovered ? hmiTheme.cardAlt : hmiTheme.input
                                 border.color: "transparent"
                                 border.width: 1
                             }
@@ -1036,7 +1106,7 @@ Item {
 
                         Text {
                             text: "MHz"
-                            color: "#9CA3AF"
+                            color: hmiTheme.muted
                             font.pixelSize: 14
                             Layout.alignment: Qt.AlignVCenter
                             Layout.preferredWidth: 36
@@ -1046,19 +1116,20 @@ Item {
                     Label {
                         text: "Bandwidth:"
                         font.pixelSize: 16
-                        color: "#ffffff"
+                        color: hmiTheme.text
                     }
 
                     RowLayout {
-                        Layout.preferredWidth: 260
-                        spacing: 8
+                        Layout.fillWidth: true
+                        spacing: 10
 
                         TextField {
                             id: bwInput
-                            Layout.preferredWidth: 200
+                            Layout.fillWidth: true
+                            Layout.minimumWidth: 220
                             Layout.preferredHeight: 32
                             font.pixelSize: 16
-                            color: "#7AE2CF"
+                            color: hmiTheme.darkMode ? "#7AE2CF" : hmiTheme.text
                             verticalAlignment: Text.AlignVCenter
                             horizontalAlignment: Text.AlignLeft
                             leftPadding: 10
@@ -1076,9 +1147,9 @@ Item {
                             }
 
                             background: Rectangle {
-                                color: "#111A1E"
+                                color: hmiTheme.input
                                 radius: 10
-                                border.color: bwInput.activeFocus ? "#7AE2CF" : "#1B8F77"
+                                border.color: bwInput.activeFocus ? hmiTheme.accent : hmiTheme.lineStrong
                                 border.width: 1
                             }
 
@@ -1093,7 +1164,7 @@ Item {
 
                         Text {
                             text: "kHz"
-                            color: "#9CA3AF"
+                            color: hmiTheme.muted
                             font.pixelSize: 14
                             Layout.preferredWidth: 40
                         }
@@ -1109,7 +1180,7 @@ Item {
                         font.bold: true
 
                         background: Rectangle {
-                            color: updateButton.pressed ? Qt.darker("#169976", 1.3) : "#169976"
+                            color: updateButton.pressed ? Qt.darker(hmiTheme.accent, 1.18) : hmiTheme.accent
                             radius: 6
                         }
 
@@ -1118,7 +1189,7 @@ Item {
                             anchors.fill: parent
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
-                            color: "#212121"
+                            color: hmiTheme.darkMode ? "#212121" : "#FFFFFF"
                             font.bold: true
                             font.pixelSize: updateButton.font.pixelSize
                         }
@@ -1170,11 +1241,14 @@ Item {
                 }
 
                 Rectangle {
+                    id: sidePanelContainer
                     Layout.fillWidth: true
                     Layout.fillHeight: true
+                    // V20: keep DOA Logs internal UI unchanged; only give the container a little more vertical room.
+                    Layout.minimumHeight: settingsPanel.sidePanelKey === "datalogs" ? Math.min(360, Math.max(300, drawer.height * 0.30)) : 220
                     Layout.leftMargin: 1
                     radius: 10
-                    color: "#111212"
+                    color: hmiTheme.panel
                     border.color: "#111212"
                     border.width: 1
 
@@ -1196,6 +1270,7 @@ Item {
                                     item.hasOwnProperty("krakenmapval")) {
                                     item.krakenmapval = settingsPanel.krakenmapval
                                 }
+                                _applyDarkModeToItem(item, settingsPanel.sidePanelKey)
 
                                 // ✅ ถ้าโหลด SideLogsFile.qml ขึ้นมาใน Drawer ขณะอยู่หน้า QMLMap
                                 // ให้ reload + ส่ง selected logs ไป map ทันที
@@ -1226,6 +1301,7 @@ Item {
     function open() {
         settingsPanel.state = "open"
         _syncSidePanel()
+        applyThemeToLoadedPanels()
 
         if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
             Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)
@@ -1247,7 +1323,9 @@ Item {
     }
 
     Component.onCompleted: {
+        console.info("[DRAWER-THEME] completed darkMode=", settingsPanel.darkMode)
         _syncSidePanel()
+        applyThemeToLoadedPanels()
 
         if (Krakenmapval && typeof Krakenmapval.setUseOfflineMapStyle === "function") {
             Krakenmapval.setUseOfflineMapStyle(uiSettings.savedUseOfflineMap)

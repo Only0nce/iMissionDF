@@ -1,13 +1,17 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
+import "ui"
 
 Item {
     id: item1
     width: 600
     height: 400
-    property string buttonColor: "#009688"
-    property string buttonColorUnselect: "#40666666"
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: item1.darkMode }
+
+    property color buttonColor: hmiTheme.accent
+    property color buttonColorUnselect: hmiTheme.darkMode ? "#40666666" : "#DDE9E6"
 
     // ===== ค่า property สำหรับ logic ภายนอก =====
     property real startFreqHz: 88000000      // 88 MHz default
@@ -18,7 +22,6 @@ Item {
         console.log("Component.onCompleted:profilesFromDb")
     }
 
-    // R20.2 / R16.1 restore: lifecycle-scoped signal subscriptions.
     Connections {
         target: mainWindows
         ignoreUnknownSignals: true
@@ -38,20 +41,9 @@ Item {
 
         for (var i = 0; i < (list).length; i++) {
             var p = (list)[i]
-
-            console.log(
-                "Profile", p.index,
-                "Freq =", p.frequency,
-                "BW =", p.bw,
-                "Mode =", p.mode,
-                "LowCut =", p.low_cut,
-                "HighCut =", p.high_cut,
-                "Time =", p.time
-            )
-
             profileScan.append({
-                index: p.index,                               // optional
-                freq:       p.frequency || p.freq,      // รองรับทั้ง frequency / freq
+                index: p.index,
+                freq:       p.frequency || p.freq,
                 unit:       p.unit || "MHz",
                 bw:         p.bw,
                 mode:       p.mode,
@@ -65,13 +57,9 @@ Item {
     function profileCardsfns() {
         var size = foundCards.count;
         if (size <= 0) return;
-
-        // สร้าง array เก็บข้อมูลทั้งหมด
         var profiles = [];
-
         for (var i = 0; i < size; i++) {
             var item = foundCards.get(i);
-
             profiles.push({
                 index:     item.index,
                 frequency: item.freq,
@@ -80,64 +68,41 @@ Item {
                 startHz:   item.startHz,
                 endHz:     item.endHz,
                 mode:      item.mode,
-                // mode:      mainWindows.start_mod(),
-
-                // ====== NEW: low/high cut จาก UI ปัจจุบัน ======
                 low_cut:  item.low_cut,
                 high_cut: item.high_cut
             });
-
-            // debug log
-            console.log(
-                "index:", item.index,
-                "freq:", item.freq,
-                "unit:", item.unit,
-                "bw:", item.bw,
-                "startHz:", item.startHz,
-                "endHz:", item.endHz,
-                "mode:", item.mode,
-                "lowCutNow:", item.low_cut,
-                "highCutNow:", item.high_cut
-            );
         }
-
-        var msg = {
-            objectName: "profilesCard",
-            profiles: profiles
-        };
-
+        var msg = { objectName: "profilesCard", profiles: profiles };
         profileWeb(JSON.stringify(msg, null, 2))
         close();
     }
 
     Label {
         id: title
-        width: 260
+        width: 320
         height: 35
         text: qsTr("RF Spectrum Analyzer")
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 27
-        color: "white"
+        color: hmiTheme.text
         font.bold: true
         font.pixelSize: 24
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        anchors.horizontalCenterOffset: 0
     }
 
-    // ===== กล่องใส่ค่า Start / Stop Frequency =====
     Rectangle {
         id: freqBox
         width: parent.width - 40
         height: 150
-        radius: 10
-        color: "#202020"
-        border.color: "#444"
+        radius: 12
+        color: hmiTheme.input
+        border.color: hmiTheme.lineStrong
+        border.width: 1
         anchors.top: title.bottom
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 39
-        anchors.horizontalCenterOffset: 0
 
         ColumnLayout {
             anchors.fill: parent
@@ -148,7 +113,7 @@ Item {
                 spacing: 10
                 Label {
                     text: "Start Frequency (MHz):"
-                    color: "white"
+                    color: hmiTheme.text
                     Layout.alignment: Qt.AlignVCenter
                 }
                 TextField {
@@ -158,9 +123,17 @@ Item {
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                     validator: DoubleValidator { bottom: 0; top: 6000; decimals: 6 }
                     Layout.fillWidth: true
-                    onEditingFinished: {
-                        item1.startFreqHz = text * 1e6
+                    color: hmiTheme.text
+                    placeholderTextColor: hmiTheme.muted
+                    selectedTextColor: hmiTheme.darkMode ? "#061514" : "#FFFFFF"
+                    selectionColor: hmiTheme.accent
+                    background: Rectangle {
+                        radius: 8
+                        color: hmiTheme.card
+                        border.color: hmiTheme.lineStrong
+                        border.width: 1
                     }
+                    onEditingFinished: item1.startFreqHz = Number(text) * 1e6
                 }
             }
 
@@ -168,7 +141,7 @@ Item {
                 spacing: 10
                 Label {
                     text: "Stop Frequency (MHz):"
-                    color: "white"
+                    color: hmiTheme.text
                     Layout.alignment: Qt.AlignVCenter
                 }
                 TextField {
@@ -178,15 +151,22 @@ Item {
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                     validator: DoubleValidator { bottom: 0; top: 6000; decimals: 6 }
                     Layout.fillWidth: true
-                    onEditingFinished: {
-                        item1.stopFreqHz = text * 1e6
+                    color: hmiTheme.text
+                    placeholderTextColor: hmiTheme.muted
+                    selectedTextColor: hmiTheme.darkMode ? "#061514" : "#FFFFFF"
+                    selectionColor: hmiTheme.accent
+                    background: Rectangle {
+                        radius: 8
+                        color: hmiTheme.card
+                        border.color: hmiTheme.lineStrong
+                        border.width: 1
                     }
+                    onEditingFinished: item1.stopFreqHz = Number(text) * 1e6
                 }
             }
         }
     }
 
-    // ===== ปุ่ม Apply / Stop Scan =====
     ColumnLayout {
         id: columnLayout
         y: 294
@@ -201,80 +181,68 @@ Item {
             id: rowLayout
             spacing: 10
 
-            // ----- ปุ่ม Apply Range (เริ่มสแกน) -----
             Button {
                 id: testButton
                 text: "Apply Range"
                 font.pixelSize: 18
-
-                property color normalColor: "#337ab7"
-                property color hoverColor: "#3f8fd6"
-                property color pressedColor: "#23527c"
-
+                property color normalColor: hmiTheme.info
+                property color hoverColor: Qt.lighter(hmiTheme.info, 1.12)
+                property color pressedColor: Qt.darker(hmiTheme.info, 1.15)
                 hoverEnabled: true
-                enabled: trigerScan   // พร้อมสแกนเมื่อ trigerScan = true
-
+                enabled: trigerScan
                 onClicked: {
                     trigerScan = false
-                    // console.log("Apply Range")
-
                     var msg = {
                         "objectName": "Scan",
-                        "frequency": {
-                            "start": item1.startFreqHz,
-                            "stop": item1.stopFreqHz
-                        },
+                        "frequency": { "start": item1.startFreqHz, "stop": item1.stopFreqHz },
                         "modes": ["wide", "narrow"]
                     }
                     sCan(JSON.stringify(msg))
                 }
-
                 background: Rectangle {
-                    id: bgRect
-                    color: testButton.down
-                           ? testButton.pressedColor
-                           : (testButton.hovered ? testButton.hoverColor : testButton.normalColor)
+                    color: !testButton.enabled ? hmiTheme.disabled : (testButton.down ? testButton.pressedColor : (testButton.hovered ? testButton.hoverColor : testButton.normalColor))
                     radius: 18
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
-
+                contentItem: Text {
+                    text: testButton.text
+                    color: "#FFFFFF"
+                    font.pixelSize: testButton.font.pixelSize
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
                 Layout.preferredHeight: 50
                 Layout.fillWidth: true
             }
 
-            // ----- ปุ่ม Stop Scan (หยุดกลางคัน) -----
             Button {
                 id: stopButton
                 text: "Stop"
                 font.pixelSize: 18
-
-                property color normalColor: "#d9534f"
-                property color hoverColor: "#c9302c"
-                property color pressedColor: "#ac2925"
-
+                property color normalColor: hmiTheme.danger
+                property color hoverColor: Qt.lighter(hmiTheme.danger, 1.08)
+                property color pressedColor: Qt.darker(hmiTheme.danger, 1.15)
                 hoverEnabled: true
-                enabled: !trigerScan     // เปิดใช้ตอนกำลังสแกนอยู่ (ตรงข้าม Apply)
-
+                enabled: !trigerScan
                 onClicked: {
-                    // console.log("Stop Scan")
-
-                    var msg = {
-                        "objectName": "Scan",
-                        "action": "stop"      // ให้ backend เช็ค action นี้แล้วหยุดสแกน
-                    }
+                    var msg = { "objectName": "Scan", "action": "stop" }
                     sCan(JSON.stringify(msg))
-
-                    trigerScan = true       // พร้อมให้กด Apply ใหม่รอบต่อไป
+                    trigerScan = true
                 }
-
                 background: Rectangle {
-                    color: stopButton.down
-                           ? stopButton.pressedColor
-                           : (stopButton.hovered ? stopButton.hoverColor : stopButton.normalColor)
+                    color: !stopButton.enabled ? hmiTheme.disabled : (stopButton.down ? stopButton.pressedColor : (stopButton.hovered ? stopButton.hoverColor : stopButton.normalColor))
                     radius: 18
                     Behavior on color { ColorAnimation { duration: 120 } }
                 }
-
+                contentItem: Text {
+                    text: stopButton.text
+                    color: "#FFFFFF"
+                    font.pixelSize: stopButton.font.pixelSize
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
                 Layout.preferredHeight: 50
                 Layout.fillWidth: true
             }

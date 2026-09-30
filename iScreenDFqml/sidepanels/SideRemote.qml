@@ -1,9 +1,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
+import QtGraphicalEffects 1.12
+import "../../ui"
 
 Item {
     id: remote
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: remote.darkMode }
     anchors.fill: parent
     property var krakenmapval: null
 
@@ -69,23 +73,21 @@ Item {
         }
 
         // ===== UI =====
-        Column {
+        ColumnLayout {
             id: col
             anchors.fill: parent
             anchors.margins: 12
             spacing: 10
 
-            Row {
+            RowLayout {
                 id: headerRow
-                height: 36
-                anchors.left: parent.left
-                anchors.right: parent.right
+                Layout.fillWidth: true
+                Layout.preferredHeight: 36
                 spacing: 10
 
                 Label {
                     text: "Remote SDRs"
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#e8f5ec"
+                    color: hmiTheme.text
                     font.pixelSize: 18
                     font.bold: true
                 }
@@ -96,21 +98,31 @@ Item {
                     id: addBtn
                     width: 50; height: 35
                     radius: height/2
-                    anchors.right: parent.right
-                    anchors.rightMargin: 30
-                    color: "#25303b"
+                    Layout.preferredWidth: 50
+                    Layout.preferredHeight: 35
+                    color: hmiTheme.navTile
+                    border.width: 1
+                    border.color: hmiTheme.navTileBorder
                     Image {
-                        id: addIcon
+                        id: addIconSource
                         anchors.centerIn: parent
-                        source: "qrc:/iScreenDFqml/images/gearicon.png"  /*"qrc:/images/addicon.png"*/
-                        width: 37; height: 37
+                        source: "qrc:/iScreenDFqml/images/gearicon.png"
+                        width: 24; height: 24
                         fillMode: Image.PreserveAspectFit
+                        visible: false
+                    }
+
+                    ColorOverlay {
+                        anchors.fill: addIconSource
+                        source: addIconSource
+                        color: remote.darkMode ? "#ECF6F4" : hmiTheme.navTileText
+                        cached: true
                     }
                     MouseArea {
                         anchors.fill: parent
                         hoverEnabled: true
-                        onEntered: addBtn.color = "#324152"
-                        onExited:  addBtn.color = "#25303b"
+                        onEntered: addBtn.color = hmiTheme.navTileHover
+                        onExited:  addBtn.color = hmiTheme.navTile
                         onClicked: {
                             // ตัวอย่าง: เพิ่มแถวใหม่ใน UI (ไม่ยุ่ง DB)
                         //     deviceModel.append({
@@ -130,13 +142,10 @@ Item {
             Rectangle {
                 id: panel
                 radius: 10
-                color: "#00111212"
-                border.color: "#00111212"
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: headerRow.bottom
-                anchors.bottom: parent.bottom
-                anchors.topMargin: 8
+                color: hmiTheme.panel
+                border.color: hmiTheme.line
+                Layout.fillWidth: true
+                Layout.fillHeight: true
 
                 layer.enabled: true
                 layer.smooth: true
@@ -160,12 +169,23 @@ Item {
                         deviceRssi: model.rssi
                         rowIndex: index
                         isCurrent: ListView.isCurrentItem
+                        darkMode: remote.darkMode
+                        krakenmapval: remote.krakenmapval
                         onClicked: {
                             listView.currentIndex = index
                             console.log("Focus row:", deviceName , deviceIp, devicePort, deviceStatus)
                             // ตัวอย่าง: krakenmapval.connectTo(deviceIp, devicePort) ถ้ามี
                         }
                     }
+                }
+
+                Text {
+                    anchors.centerIn: parent
+                    visible: deviceModel.count === 0
+                    text: "No remote SDR data"
+                    color: hmiTheme.textSecondary
+                    font.pixelSize: 14
+                    font.bold: true
                 }
             }
         }

@@ -1,10 +1,14 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
+import "ui"
 
 Item {
     id: root
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: root.darkMode }
     width: 1205
     height: 400
     visible: true
@@ -166,7 +170,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgModeScan.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: btnScan.down ? 0.18 : (btnScan.hovered ? 0.10 : 0.0)
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -175,7 +179,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgModeScan.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: btnScan.active ? 0.14 : 0.0
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
@@ -203,7 +207,7 @@ Item {
                     anchors.fill: parent
                     radius: bgModeScan.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: btnScan.hovered ? 0.18 : 0.0
                     visible: opacity > 0.001
@@ -214,7 +218,7 @@ Item {
                     anchors.fill: parent
                     radius: bgModeScan.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: btnScan.active ? 0.28 : 0.0
                     visible: opacity > 0.001
@@ -227,7 +231,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: selectMode ? "#FFFFFF" : "#9CA3AF"
+                color: selectMode ? hmiTheme.text : hmiTheme.muted
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -259,7 +263,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgModeMem.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: btnMemory.down ? 0.18 : (btnMemory.hovered ? 0.10 : 0.0)
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -268,7 +272,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgModeMem.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: btnMemory.active ? 0.14 : 0.0
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 140; easing.type: Easing.OutQuad } }
@@ -296,7 +300,7 @@ Item {
                     anchors.fill: parent
                     radius: bgModeMem.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: btnMemory.hovered ? 0.18 : 0.0
                     visible: opacity > 0.001
@@ -307,7 +311,7 @@ Item {
                     anchors.fill: parent
                     radius: bgModeMem.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: btnMemory.active ? 0.28 : 0.0
                     visible: opacity > 0.001
@@ -320,7 +324,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: selectMode ? "#9CA3AF" : "#FFFFFF"
+                color: selectMode ? hmiTheme.muted : hmiTheme.text
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -366,7 +370,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgDeleteScan.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: deleteScanButton.down ? 0.22 : (deleteScanButton.hovered ? 0.12 : 0.0)
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -388,7 +392,7 @@ Item {
                     anchors.fill: parent
                     radius: bgDeleteScan.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: deleteScanButton.hovered ? 0.18 : 0.0
                     visible: opacity > 0.001
@@ -401,7 +405,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: hmiTheme.text
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -435,7 +439,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgDeleteMem.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: deleteMemoryButton.down ? 0.22 : (deleteMemoryButton.hovered ? 0.12 : 0.0)
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -457,7 +461,7 @@ Item {
                     anchors.fill: parent
                     radius: bgDeleteMem.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: deleteMemoryButton.hovered ? 0.18 : 0.0
                     visible: opacity > 0.001
@@ -470,7 +474,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: hmiTheme.text
                 font.pixelSize: 16
                 font.bold: true
             }
@@ -564,7 +568,7 @@ Item {
                 Rectangle {
                     anchors.fill: parent
                     radius: bgFilterMem.radius
-                    color: "#ffffff"
+                    color: hmiTheme.text
                     opacity: filterMemoryButton.down ? 0.22 : (filterMemoryButton.hovered ? 0.12 : 0.0)
                     visible: opacity > 0.001
                     Behavior on opacity { NumberAnimation { duration: 120; easing.type: Easing.OutQuad } }
@@ -586,7 +590,7 @@ Item {
                     anchors.fill: parent
                     radius: bgFilterMem.radius
                     color: "transparent"
-                    border.color: "#ffffff"
+                    border.color: hmiTheme.text
                     border.width: 1
                     opacity: filterMemoryButton.hovered ? 0.18 : 0.0
                     visible: opacity > 0.001
@@ -601,7 +605,7 @@ Item {
                 anchors.fill: parent
                 horizontalAlignment: Text.AlignHCenter
                 verticalAlignment: Text.AlignVCenter
-                color: "#ffffff"
+                color: hmiTheme.text
                 font.pixelSize: 16
                 font.bold: true
                 elide: Text.ElideRight
@@ -621,13 +625,13 @@ Item {
                 height: Math.min(520, parent.height * 0.8)
 
                 // ===== THEME =====
-                property color dBg:     "#111820"
-                property color dBorder: "#2A3A44"
-                property color dText:   "#E6EDF3"
-                property color dSub:    "#9AA6B2"
-                property color dHover:  "#1B2A33"
-                property color dAccent: "#00c896"
-                property color dPress:  "#223742"
+                property color dBg:     hmiTheme.panel
+                property color dBorder: hmiTheme.lineStrong
+                property color dText:   hmiTheme.text
+                property color dSub:    hmiTheme.textSecondary
+                property color dHover:  hmiTheme.cardAlt
+                property color dAccent: hmiTheme.accent
+                property color dPress:  hmiTheme.cardAlt
 
                 background: Rectangle {
                     radius: 16
@@ -668,7 +672,7 @@ Item {
                         anchors.right: parent.right
                         anchors.bottom: parent.bottom
                         height: 1
-                        color: "#22313A"
+                        color: hmiTheme.line
                         opacity: 0.9
                     }
                 }
@@ -884,7 +888,7 @@ Item {
                                     }
                                     background: Rectangle {
                                         radius: 6
-                                        color: "#22313A"
+                                        color: hmiTheme.line
                                         opacity: 0.45
                                     }
                                 }
@@ -927,7 +931,7 @@ Item {
                         Rectangle {
                             Layout.fillWidth: true
                             height: 1
-                            color: "#22313A"
+                            color: hmiTheme.line
                             opacity: 0.9
                         }
 
@@ -1064,10 +1068,13 @@ Item {
                     return (v === undefined || v === null || v === "" || isNaN(x)) ? (d === undefined ? 0 : d) : x
                 }
 
-                property color cTitle:   "#FFFFFF"
-                property color cValue:   "#F2F6FF"
-                property color cLabel:   "#BFD0E6"
-                property color cOutline: "#081018"
+                property color cTitle:   hmiTheme.text
+                property color cValue:   hmiTheme.text
+                property color cLabel:   hmiTheme.textSecondary
+                property color cOutline: "transparent"
+                property color pillFill: root.darkMode ? "#0C2B25" : "#E5F6F1"
+                property color pillBorder: root.darkMode ? "#1DE3B7" : hmiTheme.accent
+                property color pillTextColor: root.darkMode ? "#22F3C7" : hmiTheme.accent
 
                 // ===== model roles (มาจาก filteredMemModel แล้ว) =====
                 property string profileId:        model.profileId
@@ -1097,8 +1104,8 @@ Item {
                     property bool isPress: false
 
                     radius: 18 * u
-                    color: "#0E1520"
-                    border.color: "#1C2A3D"
+                    color: hmiTheme.panel
+                    border.color: hmiTheme.lineStrong
                     border.width: Math.max(1, Math.round(1 * u))
 
                     scale: isPress ? 0.98 : 1.0
@@ -1107,7 +1114,7 @@ Item {
                     Rectangle {
                         anchors.fill: parent
                         radius: parent.radius
-                        color: "#FFFFFF"
+                        color: hmiTheme.text
                         opacity: card.isHover ? 0.05 : 0.0
                         Behavior on opacity { NumberAnimation { duration: 120 } }
                         z: 1
@@ -1119,7 +1126,7 @@ Item {
                         anchors.top: parent.top
                         height: parent.height * 0.45
                         radius: parent.radius
-                        color: "#FFFFFF"
+                        color: hmiTheme.text
                         opacity: 0.04
                         clip: true
                         z: 2
@@ -1184,8 +1191,8 @@ Item {
                             anchors.right: parent.right
                             height: 24 * u
                             radius: height / 2
-                            color: "#0C2B25"
-                            border.color: "#1DE3B7"
+                            color: pillFill
+                            border.color: pillBorder
                             border.width: Math.max(1, Math.round(1.2 * u))
                             width: Math.max(62 * u, pillText.implicitWidth + 22 * u)
 
@@ -1193,11 +1200,9 @@ Item {
                                 id: pillText
                                 anchors.centerIn: parent
                                 text: modTag
-                                color: "#22F3C7"
+                                color: pillTextColor
                                 font.pixelSize: Math.round(16 * u)
                                 font.bold: true
-                                style: Text.Outline
-                                styleColor: "#062019"
                             }
                         }
 
@@ -1215,8 +1220,6 @@ Item {
                                 font.bold: true
                                 elide: Text.ElideRight
                                 maximumLineCount: 1
-                                style: Text.Outline
-                                styleColor: cOutline
                             }
                         }
 
@@ -1228,8 +1231,8 @@ Item {
                             anchors.topMargin: 35 * u
                             height: 122 * u
                             radius: 12 * u
-                            color: "#0E1520"
-                            border.color: "#122033"
+                            color: hmiTheme.panel
+                            border.color: hmiTheme.line
                             border.width: Math.max(1, Math.round(1 * u))
 
                             Column {
@@ -1238,21 +1241,21 @@ Item {
 
                                 Row {
                                     spacing: 14 * u
-                                    Text { text: "Frequency:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
-                                    Text { text: subLine;      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
-                                    Text { text: "MHz";      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
+                                    Text { text: "Frequency:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true }
+                                    Text { text: subLine;      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true }
+                                    Text { text: "MHz";      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true }
                                 }
 
                                 Row {
                                     spacing: 14 * u
-                                    Text { text: "Bandwidth:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
-                                    Text { text: bwLine;      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
+                                    Text { text: "Bandwidth:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true }
+                                    Text { text: bwLine;      color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true }
                                 }
 
                                 Row {
                                     spacing: 14 * u
-                                    Text { text: "Squelch:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
-                                    Text { text: sqlLine;   color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true; style: Text.Outline; styleColor: cOutline }
+                                    Text { text: "Squelch:"; color: cLabel; font.pixelSize: Math.round(20 * u); font.bold: true }
+                                    Text { text: sqlLine;   color: cValue; font.pixelSize: Math.round(21 * u); font.bold: true }
                                 }
                             }
                         }
@@ -1286,8 +1289,8 @@ Item {
 
         background: Rectangle {
             radius: 24
-            color: "#0B1220"
-            border.color: "#223049"
+            color: hmiTheme.panel
+            border.color: hmiTheme.lineStrong
             border.width: 1
         }
 
@@ -1302,7 +1305,7 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: presetActionDialog.presetName
-                    color: "#F1F5F9"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                     elide: Text.ElideRight
@@ -1311,7 +1314,7 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 1
-                    color: "#223049"
+                    color: hmiTheme.lineStrong
                     opacity: 0.9
                 }
 
@@ -1328,15 +1331,15 @@ Item {
                         Rectangle {
                             anchors.fill: parent
                             radius: height / 2
-                            color: presetActionDialog.modifyMousehovered ? "#0B2A2A" : "transparent"
-                            border.color: presetActionDialog.modifyMousehovered ? "#2DD4BF" : "#334155"
+                            color: presetActionDialog.modifyMousehovered ? hmiTheme.cardAlt : "transparent"
+                            border.color: presetActionDialog.modifyMousehovered ? hmiTheme.accent : hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "Modify"
-                            color: presetActionDialog.modifyMousehovered ? "#ECFEFF" : "#CFFAF4"
+                            color: presetActionDialog.modifyMousehovered ? hmiTheme.text : hmiTheme.accent
                             font.pixelSize: 14
                             font.bold: true
                         }
@@ -1362,14 +1365,14 @@ Item {
                             anchors.fill: parent
                             radius: height / 2
                             color: presetActionDialog.deleteMousehovered ? "#2A1116" : "transparent"
-                            border.color: presetActionDialog.deleteMousehovered ? "#FF7A7A" : "#334155"
+                            border.color: presetActionDialog.deleteMousehovered ? hmiTheme.danger : hmiTheme.lineStrong
                             border.width: 1
                         }
 
                         Text {
                             anchors.centerIn: parent
                             text: "Delete"
-                            color: presetActionDialog.deleteMousehovered ? "#FF7A7A" : "#F87171"
+                            color: hmiTheme.danger
                             font.pixelSize: 14
                             font.bold: true
                         }

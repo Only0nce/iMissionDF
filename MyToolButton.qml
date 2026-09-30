@@ -1,42 +1,42 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import "ui"
 
 Item {
+    id: root
     property string bname: "name"
     property string bColor: "#000000"
     property real buttonID: 0
     property alias label: label
+    property bool darkMode: true
     width: 120
     height: 40
     rotation: 0
     property alias toolButton: toolButton
+
+    Theme { id: hmiTheme; darkMode: root.darkMode }
+
     ToolButton {
         id: toolButton
         anchors.fill: parent
-        Rectangle {
+        hoverEnabled: true
+
+        background: Rectangle {
+            radius: 8
             color: bColor
-            radius: 5
-            border.color: "#ffffff"
-            border.width: 0
-            anchors.fill: parent
-            Label {
-                id: label
-                width: 40
-                text: bname
-                anchors.fill: parent
-                horizontalAlignment: Text.AlignHCenter
-                verticalAlignment: Text.AlignVCenter
-                font.pointSize: 12
-                anchors.topMargin: 0
-                font.bold: false
-                anchors.bottomMargin: 0
-            }
+            border.color: hmiTheme.lineStrong
+            border.width: 1
+        }
+
+        contentItem: Label {
+            id: label
+            text: bname
+            horizontalAlignment: Text.AlignHCenter
+            verticalAlignment: Text.AlignVCenter
+            font.pointSize: 12
+            font.bold: true
+            color: hmiTheme.darkMode ? "#F5FCFA" : "#17312B"
+            elide: Text.ElideRight
         }
     }
 }
-
-/*##^##
-Designer {
-    D{i:0;formeditorColor:"#000000"}D{i:3}D{i:2}D{i:1}
-}
-##^##*/

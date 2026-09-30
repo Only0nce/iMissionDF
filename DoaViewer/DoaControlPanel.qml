@@ -1,21 +1,37 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../ui"
 
-Rectangle {
+HmiPanel {
     id: root
-    radius: 10
-    color: "#0B1220"
-    border.color: "#223049"
-    border.width: 1
+    clip: true
+    implicitWidth: 188
+    Theme { id: theme; darkMode: root.darkMode }
 
     RowLayout {
         anchors.fill: parent
-        // anchors.margins: 8
-        anchors.leftMargin: 8
-        spacing: 10
+        anchors.leftMargin: 10
+        anchors.rightMargin: 10
+        spacing: 6
 
-        Text { text: "DOA"; color: "#E5E7EB"; font.pixelSize: 13 }
+        ColumnLayout {
+            spacing: 1
+            Layout.preferredWidth: 58
+            Text {
+                text: "DOA"
+                color: theme.text
+                font.pixelSize: 12
+                font.bold: true
+            }
+            Text {
+                text: "ENGINE"
+                color: theme.muted
+                font.pixelSize: 8
+                font.bold: true
+                font.letterSpacing: 0.8
+            }
+        }
 
         Switch {
             checked: doaClient.doaEnabled
@@ -23,10 +39,13 @@ Rectangle {
             onToggled: doaClient.doaEnabled = checked
         }
 
-        Text {
+        HmiStatusPill {
+            darkMode: root.darkMode
             text: doaClient.doaEnabled ? "ON" : "OFF"
-            color: doaClient.doaEnabled ? "#22c55e" : "#f87171"
-            font.pixelSize: 13
+            tone: doaClient.doaEnabled ? "good" : "danger"
+            compact: true
         }
+
+        Item { Layout.fillWidth: true }
     }
 }

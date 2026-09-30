@@ -9,13 +9,17 @@ Item {
     width: 300
     height: 110
 
-    Material.theme: Material.Dark
-    Material.accent: "#6EF2E8"
+    property bool darkMode: true
 
-    readonly property color primaryText: "#F4FBFF"
-    readonly property color secondaryText: "#D3E1E7"
-    readonly property color fieldBackground: "#B30A141B"
-    readonly property color fieldBorder: "#805E7A86"
+    Material.theme: darkMode ? Material.Dark : Material.Light
+    Material.accent: darkMode ? "#6EF2E8" : "#008B75"
+
+    readonly property color primaryText: darkMode ? "#F4FBFF" : "#102824"
+    readonly property color secondaryText: darkMode ? "#D3E1E7" : "#284640"
+    readonly property color fieldBackground: darkMode ? "#B30A141B" : "#FFFFFF"
+    readonly property color fieldBorder: darkMode ? "#805E7A86" : "#739E96"
+    readonly property color selectionFill: darkMode ? "#6EF2E8" : "#16A98F"
+    readonly property color selectedText: darkMode ? "#071018" : "#FFFFFF"
 
     // property real low_cut: -30000  // default
     // property real high_cut: 30000
@@ -58,17 +62,17 @@ Item {
                 Label {
                     text: "Low :"
                     color: secondaryText
-                    font.pointSize: 11
+                    font.pixelSize: 13
                 }
                 TextField {
                     id: lowField
                     text: low_cut.toString()
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
                     Layout.preferredWidth: 95
-                    font.pointSize: 11
+                    font.pixelSize: 13
                     color: primaryText
-                    selectionColor: "#6EF2E8"
-                    selectedTextColor: "#071018"
+                    selectionColor: selectionFill
+                    selectedTextColor: selectedText
                     font.bold: true
                     background: Rectangle {
                         radius: 4
@@ -88,18 +92,18 @@ Item {
                 Label {
                     text: "High :"
                     color: secondaryText
-                    font.pointSize: 10
+                    font.pixelSize: 12
                 }
                 TextField {
                     id: highField
                     inputMethodHints: Qt.ImhFormattedNumbersOnly
-                    font.pointSize: 11
+                    font.pixelSize: 13
                     validator: IntValidator { bottom: 0; top: 250000 }  // ช่วงค่าที่รองรับ
                     text: high_cut.toString()
                     Layout.preferredWidth: 95
                     color: primaryText
-                    selectionColor: "#6EF2E8"
-                    selectedTextColor: "#071018"
+                    selectionColor: selectionFill
+                    selectedTextColor: selectedText
                     font.bold: true
                     background: Rectangle {
                         radius: 4
@@ -117,7 +121,7 @@ Item {
             Label {
                 text: "Analog Demod Bandwidth (Hz)"
                 font.bold: true
-                font.pointSize: 11
+                font.pixelSize: 13
                 color: primaryText
                 horizontalAlignment: Text.AlignHCenter
                 Layout.alignment: Qt.AlignHCenter

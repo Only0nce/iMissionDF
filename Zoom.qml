@@ -10,6 +10,10 @@ Item {
     property alias buttonOut: buttonOut
     property alias buttonReset: buttonReset
     property alias buttonClear: buttonClear
+    property bool darkMode: true
+    readonly property color buttonFill: darkMode ? "#223A42" : "#008B75"
+    readonly property color buttonFillHover: darkMode ? "#2F4D57" : "#16A98F"
+    readonly property color buttonBorder: darkMode ? "#6FAFBE" : "#00705F"
     width: 60
     height: 150
     Rectangle {
@@ -33,6 +37,14 @@ Item {
 
             ToolButton {
                 id: buttonIn
+                hoverEnabled: true
+                background: Rectangle {
+                    radius: 8
+                    color: buttonIn.pressed ? Qt.darker(_item.buttonFill, 1.18) : (buttonIn.hovered ? _item.buttonFillHover : _item.buttonFill)
+                    border.width: 1
+                    border.color: _item.buttonBorder
+                    opacity: _item.darkMode ? 0.55 : 0.92
+                }
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredWidth: 75
@@ -50,6 +62,14 @@ Item {
 
             ToolButton {
                 id: buttonOut
+                hoverEnabled: true
+                background: Rectangle {
+                    radius: 8
+                    color: buttonOut.pressed ? Qt.darker(_item.buttonFill, 1.18) : (buttonOut.hovered ? _item.buttonFillHover : _item.buttonFill)
+                    border.width: 1
+                    border.color: _item.buttonBorder
+                    opacity: _item.darkMode ? 0.55 : 0.92
+                }
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredWidth: 75
@@ -68,6 +88,14 @@ Item {
 
             ToolButton {
                 id: buttonReset
+                hoverEnabled: true
+                background: Rectangle {
+                    radius: 8
+                    color: buttonReset.pressed ? Qt.darker(_item.buttonFill, 1.18) : (buttonReset.hovered ? _item.buttonFillHover : _item.buttonFill)
+                    border.width: 1
+                    border.color: _item.buttonBorder
+                    opacity: _item.darkMode ? 0.55 : 0.92
+                }
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredWidth: 75
@@ -85,6 +113,14 @@ Item {
 
             ToolButton {
                 id: buttonClear
+                hoverEnabled: true
+                background: Rectangle {
+                    radius: 8
+                    color: buttonClear.pressed ? Qt.darker(_item.buttonFill, 1.18) : (buttonClear.hovered ? _item.buttonFillHover : _item.buttonFill)
+                    border.width: 1
+                    border.color: _item.buttonBorder
+                    opacity: _item.darkMode ? 0.55 : 0.92
+                }
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.preferredWidth: 75

@@ -1,7 +1,9 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import QtQuick.Controls.Material 2.4
 import Qt.labs.settings 1.1
+import "../ui"
 
 Rectangle {
     id: root
@@ -10,7 +12,9 @@ Rectangle {
     // QQuickWindow UpdateRequest crashes on embedded Qt 5.15 render loops.
     width: parent ? parent.width : 1920
     height: parent ? parent.height : 1080
-    color: "#000000"
+    readonly property bool hmiDarkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: root.hmiDarkMode }
+    color: hmiTheme.page
 
     // =========================
     // Logical display-source routing
@@ -61,6 +65,96 @@ Rectangle {
         if (root.renderQualityLevel <= 0) return 100
         if (root.renderQualityLevel >= 2) return 60
         return 90
+    }
+
+    // V27: DoA waterfall readability upgrade.
+    // Build a 256-entry LUT in QML and pass it to the native/CUDA waterfall
+    // renderer.  This keeps the fast render path intact while fixing the low
+    // contrast palettes that made the waterfall hard to read in both themes.
+    function _wfClamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+    function _wfLerp(a, b, t) {
+        return Math.round(Number(a) + (Number(b) - Number(a)) * Number(t))
+    }
+
+    function _wfMix(c0, c1, t) {
+        var r0 = (c0 >> 16) & 255
+        var g0 = (c0 >> 8) & 255
+        var b0 = c0 & 255
+        var r1 = (c1 >> 16) & 255
+        var g1 = (c1 >> 8) & 255
+        var b1 = c1 & 255
+        return ((_wfLerp(r0, r1, t) & 255) << 16)
+             | ((_wfLerp(g0, g1, t) & 255) << 8)
+             |  (_wfLerp(b0, b1, t) & 255)
+    }
+
+    function _wfRamp(stops, gamma) {
+        var out = []
+        if (!stops || stops.length < 2) return [0x001122, 0x00FFFF, 0xFFFFFF]
+        var g = Number(gamma)
+        if (!isFinite(g) || g <= 0.0) g = 1.0
+
+        for (var i = 0; i < 256; ++i) {
+            var x = i / 255.0
+            // gamma < 1 lifts weak/medium signals so faint vertical traces do
+            // not disappear into the noise floor.
+            var t = Math.pow(x, g)
+            var lower = stops[0]
+            var upper = stops[stops.length - 1]
+            for (var k = 0; k < stops.length - 1; ++k) {
+                if (t >= stops[k].p && t <= stops[k + 1].p) {
+                    lower = stops[k]
+                    upper = stops[k + 1]
+                    break
+                }
+            }
+            var span = Math.max(0.000001, upper.p - lower.p)
+            var local = _wfClamp((t - lower.p) / span, 0.0, 1.0)
+            out.push(_wfMix(lower.c, upper.c, local))
+        }
+        return out
+    }
+
+    function waterfallPaletteForTheme(dark) {
+        if (dark) {
+            // V28: Night waterfall now uses a purple/magenta/amber palette so it
+            // is visually different from the blue/cyan FFT spectrum trace.
+            // Noise stays dark-plum; peaks climb to amber/white.
+            return _wfRamp([
+                { p: 0.00, c: 0x09040E },
+                { p: 0.10, c: 0x170A25 },
+                { p: 0.22, c: 0x30105A },
+                { p: 0.36, c: 0x6E1BB8 },
+                { p: 0.50, c: 0xB625C8 },
+                { p: 0.62, c: 0xFF2FA3 },
+                { p: 0.74, c: 0xFF684A },
+                { p: 0.84, c: 0xFFB000 },
+                { p: 0.93, c: 0xFFE766 },
+                { p: 1.00, c: 0xFFFFFF }
+            ], 0.78)
+        }
+
+        // V28: Day waterfall keeps a light background as requested.  It no
+        // longer uses a dark/navy floor and no longer follows the blue spectrum
+        // color.  Weak signals appear violet; stronger RF energy moves through
+        // magenta/orange/red-brown for high contrast on a light panel.
+        return _wfRamp([
+            { p: 0.00, c: 0xF8F4EA },
+            { p: 0.10, c: 0xEFE5D7 },
+            { p: 0.22, c: 0xDACBFF },
+            { p: 0.36, c: 0xA978FF },
+            { p: 0.50, c: 0xD33AC8 },
+            { p: 0.63, c: 0xFF4F8E },
+            { p: 0.75, c: 0xFF8A00 },
+            { p: 0.86, c: 0xD44700 },
+            { p: 0.94, c: 0x7A1D00 },
+            { p: 1.00, c: 0x2A0800 }
+        ], 0.74)
+    }
+
+    function waterfallBackgroundForTheme(dark) {
+        return dark ? "#09040E" : "#F8F4EA"
     }
 
     function _polarFps() {
@@ -661,7 +755,8 @@ Rectangle {
         TopBar {
             id: top1
             Layout.fillWidth: true
-            Layout.preferredHeight: 300
+            Layout.preferredHeight: 334
+            darkMode: root.hmiDarkMode
             fftPlotTarget: fftPlot
             displayChannel: root.displayChannel
             rxSourceAvailable: root.rxSourceAvailable
@@ -676,27 +771,88 @@ Rectangle {
             spacing: 10
 
             // ================= DOA =================
-            Rectangle {
-                Layout.preferredWidth: 560
+            HmiPanel {
+                Layout.preferredWidth: Math.max(470, Math.min(590, parent.width * 0.35))
                 Layout.fillHeight: true
-                radius: 12
-                color: "#071025"
-                border.color: "#20304A"
-                border.width: 1
+                darkMode: root.hmiDarkMode
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 10
 
-                    Text {
-                        text: "DOA (MUSIC Polar)"
-                        color: "#E5E7EB"
-                        font.pixelSize: 14
-                        font.bold: true
+                    // Two-line header prevents PEAK/CONF/DOA-state chips from
+                    // competing with the title when the polar panel narrows.
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 5
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            ColumnLayout {
+                                spacing: 1
+                                Layout.fillWidth: true
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "DOA · MUSIC POLAR"
+                                    color: hmiTheme.text
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.logicalSourceName() + " display · coherent DF result"
+                                    color: hmiTheme.muted
+                                    font.pixelSize: 9
+                                    font.bold: true
+                                    elide: Text.ElideRight
+                                }
+                            }
+
+                            HmiStatusPill {
+                                darkMode: root.hmiDarkMode
+                                compact: true
+                                text: doaClient.doaEnabled ? (doaClient.signalPresent ? "SIGNAL" : "GATED") : "DOA OFF"
+                                tone: doaClient.doaEnabled ? (doaClient.signalPresent ? "good" : "warn") : "danger"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            HmiMetricChip {
+                                darkMode: root.hmiDarkMode
+                                label: "PEAK"
+                                value: Number(doaClient.doaDeg).toFixed(1) + "°"
+                                tone: doaClient.signalPresent ? "warn" : "neutral"
+                            }
+                            HmiMetricChip {
+                                darkMode: root.hmiDarkMode
+                                label: "CONF"
+                                value: Number(doaClient.confidence).toFixed(2)
+                                tone: doaClient.signalPresent ? "good" : "neutral"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: "Band " + Number(doaClient.bandPeakDb).toFixed(1)
+                                      + " dB  ·  Th " + Number(doaClient.gateThDb).toFixed(1) + " dB"
+                                color: doaClient.signalPresent ? hmiTheme.success : hmiTheme.textSecondary
+                                font.pixelSize: 9
+                                font.bold: true
+                                elide: Text.ElideRight
+                                Layout.maximumWidth: 190
+                            }
+                        }
                     }
 
                     DoaPolarPlot {
+                        darkMode: root.hmiDarkMode
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         enabled: doaClient.doaEnabled
@@ -714,29 +870,60 @@ Rectangle {
             }
 
             // ================= FFT + WATERFALL =================
-            Rectangle {
+            HmiPanel {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                radius: 12
-                color: "#071025"
-                border.color: "#20304A"
-                border.width: 1
+                darkMode: root.hmiDarkMode
 
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 10
                     spacing: 10
 
-                    Text {
-                        text: root.spectrumTitle()
-                        color: "#E5E7EB"
-                        font.pixelSize: 14
-                        font.bold: true
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ColumnLayout {
+                            spacing: 1
+                            Text {
+                                text: root.spectrumTitle()
+                                color: hmiTheme.text
+                                font.pixelSize: 14
+                                font.bold: true
+                            }
+                            Text {
+                                text: root.rxDisplaySelected
+                                      ? "Shared AstraRX/Home receiver source"
+                                      : "Physical DF ADC CH" + root.physicalDfChannelForDisplay(root.displayChannel)
+                                color: hmiTheme.muted
+                                font.pixelSize: 9
+                                font.bold: true
+                            }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        HmiMetricChip {
+                            darkMode: root.hmiDarkMode
+                            label: "SOURCE"
+                            value: root.logicalSourceName()
+                            tone: root.fftEnabled ? "info" : "neutral"
+                        }
+                        HmiStatusPill {
+                            darkMode: root.hmiDarkMode
+                            compact: true
+                            text: root.fftEnabled ? "FFT LIVE" : "FFT OFF"
+                            tone: root.fftEnabled ? "good" : "danger"
+                        }
                     }
 
                     // ===== Controls: Y range =====
-                    RowLayout {
+                    // Scroll only when the FFT panel becomes narrow. This keeps
+                    // Auto-Y, min/max and quality telemetry from colliding.
+                    HmiHorizontalScroll {
                         Layout.fillWidth: true
+                        Layout.preferredHeight: 42
                         spacing: 12
 
                         CheckBox {
@@ -745,7 +932,7 @@ Rectangle {
                             onToggled: root.yAuto = checked   // ✅ จะไป saveDbSettings() เอง
                         }
 
-                        Text { text: "Min dB"; color: "#94A3B8"; verticalAlignment: Text.AlignVCenter }
+                        Text { text: "Min dB"; color: hmiTheme.textSecondary; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11; font.bold: true }
 
                         SpinBox {
                             from: -200; to: 0
@@ -756,7 +943,7 @@ Rectangle {
                             onValueModified: root.yMinDbUser = value
                         }
 
-                        Text { text: "Max dB"; color: "#94A3B8"; verticalAlignment: Text.AlignVCenter }
+                        Text { text: "Max dB"; color: hmiTheme.textSecondary; verticalAlignment: Text.AlignVCenter; font.pixelSize: 11; font.bold: true }
 
                         SpinBox {
                             from: -200; to: 0
@@ -771,7 +958,7 @@ Rectangle {
                             text: root.yAuto
                                   ? ("AUTO (" + fftPlot._mmin.toFixed(1) + " .. " + fftPlot._mmax.toFixed(1) + " dB)")
                                   : ("MANUAL (" + root.yMinDbUser + " .. " + root.yMaxDbUser + " dB)")
-                            color: "#AAB7D1"
+                            color: hmiTheme.textSecondary
                             font.pixelSize: 12
                         }
 
@@ -779,13 +966,14 @@ Rectangle {
                             text: "Q " + root._qualityName().toUpperCase()
                                   + " S" + root._spectrumFps()
                                   + "/W" + root._waterfallFps()
-                            color: root.adaptiveQualityEnabled ? "#86EFAC" : "#FBBF24"
+                            color: root.adaptiveQualityEnabled ? hmiTheme.success : hmiTheme.warning
                             font.pixelSize: 12
                         }
                     }
 
                     FftPlot {
                         id: fftPlot
+                        darkMode: root.hmiDarkMode
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.preferredHeight: parent.height * 0.55
@@ -831,6 +1019,7 @@ Rectangle {
                     // ===== Waterfall =====
                     WaterfallCanvas {
                         id: wf
+                        darkMode: root.hmiDarkMode
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         Layout.preferredHeight: parent.height * 0.35
@@ -852,15 +1041,12 @@ Rectangle {
                         rowHeightPx: 1
                         showDebug: false
                         nativeRenderEnabled: true
+                        color: root.waterfallBackgroundForTheme(root.hmiDarkMode)
 
-                        waterfallColors: [
-                            0x000004, 0x02021E, 0x04043A, 0x060656, 0x080872,
-                            0x0A0A8E, 0x0C0CAA, 0x0E0EC6,
-                            0x0030E0, 0x0060FF, 0x0090FF, 0x00C0FF, 0x00FFFF,
-                            0x00FFB0, 0x00FF60, 0x40FF00, 0xA0FF00, 0xFFFF00,
-                            0xFFB000, 0xFF8000, 0xFF4000, 0xFF0000,
-                            0xFF8080, 0xFFFFFF
-                        ]
+                        // V28: theme-specific 256-entry palette.  Day mode
+                        // uses a light warm floor; night mode uses purple/amber.
+                        // Both intentionally differ from the blue FFT spectrum.
+                        waterfallColors: root.waterfallPaletteForTheme(root.hmiDarkMode)
                     }
                 }
             }

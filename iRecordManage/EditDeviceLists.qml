@@ -1,12 +1,17 @@
 // EditDeviceForm.qml
 import QtQuick 2.12
 import QtQuick.Controls 2.5
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.12
+import "../ui"
 
 Item {
     id: root
-    width: 1200
-    height: 600
+    width: parent ? parent.width : 1200
+    height: parent ? parent.height : 600
+    property bool isDarkTheme: Material.theme === Material.Dark
+
+    Theme { id: hmiTheme; darkMode: root.isDarkTheme }
 
     signal cancelRequested()
     signal deleteRequested()
@@ -43,8 +48,8 @@ Item {
     Rectangle {
         anchors.fill: parent
         radius: 8
-        color: "#020617"
-        border.color: "#111827"
+        color: hmiTheme.panel
+        border.color: hmiTheme.lineStrong
         border.width: 1
 
         // ================= HEADER =================
@@ -54,7 +59,7 @@ Item {
             anchors.right: parent.right
             anchors.top: parent.top
             height: 52
-            color: "#020617"
+            color: hmiTheme.panel
 
             RowLayout {
                 anchors.fill: parent
@@ -63,7 +68,7 @@ Item {
 
                 Label {
                     text: qsTr("Edit Device")
-                    color: "#F9FAFB"
+                    color: hmiTheme.text
                     font.pixelSize: 20
                     font.bold: true
                     Layout.alignment: Qt.AlignVCenter
@@ -102,7 +107,7 @@ Item {
                 // ---------- แถว 1 : Device Name / SID ----------
                 Label {
                     text: "Device Name:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -111,19 +116,19 @@ Item {
                     id: txtDeviceName
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "SID:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -132,12 +137,12 @@ Item {
                     id: txtSid
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -145,7 +150,7 @@ Item {
                 // ---------- แถว 2 : Payload Size / Terminal Type ----------
                 Label {
                     text: "Payload Size:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -154,19 +159,19 @@ Item {
                     id: txtPayload
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "Terminal Type:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -175,12 +180,12 @@ Item {
                     id: txtTerminal
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -188,7 +193,7 @@ Item {
                 // ---------- แถว 3 : IP Address / URI ----------
                 Label {
                     text: "IP Address:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -197,19 +202,19 @@ Item {
                     id: txtIp
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "URI:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -218,12 +223,12 @@ Item {
                     id: txtUri
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -231,7 +236,7 @@ Item {
                 // ---------- แถว 4 : Frequency / Group ----------
                 Label {
                     text: "Frequency (MHz):"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -240,19 +245,19 @@ Item {
                     id: txtFreq
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "Group:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -261,12 +266,12 @@ Item {
                     id: txtGroup
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -274,7 +279,7 @@ Item {
                 // ---------- แถว 5 : Visible / Ambient ----------
                 Label {
                     text: "Visible:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -283,19 +288,19 @@ Item {
                     id: txtVisible
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "Ambient:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -304,12 +309,12 @@ Item {
                     id: txtAmbient
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -317,7 +322,7 @@ Item {
                 // ---------- แถว 6 : Last Access / Chunk ----------
                 Label {
                     text: "Last Access:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -326,19 +331,19 @@ Item {
                     id: txtLastAccess
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
 
                 Label {
                     text: "Chunk:"
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     font.pixelSize: 14
                     Layout.alignment: Qt.AlignVCenter | Qt.AlignLeft
                     Layout.preferredWidth: formGrid.labelWidth
@@ -347,12 +352,12 @@ Item {
                     id: txtChunk
                     Layout.fillWidth: true
                     height: 32
-                    color: "#E5E7EB"
+                    color: hmiTheme.textSecondary
                     horizontalAlignment: Text.AlignHCenter
                     background: Rectangle {
                         radius: 4
-                        color: "#020617"
-                        border.color: "#1F2937"
+                        color: hmiTheme.panel
+                        border.color: hmiTheme.line
                         border.width: 1
                     }
                 }
@@ -366,7 +371,7 @@ Item {
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             height: 64
-            color: "#020617"
+            color: hmiTheme.panel
 
             RowLayout {
                 anchors.right: parent.right
@@ -374,39 +379,29 @@ Item {
                 anchors.margins: 16
                 spacing: 8
 
-                Button {
+                HmiButton {
                     id: btnCancel
+                    darkMode: root.isDarkTheme
                     text: qsTr("Cancel")
+                    fontPixelSize: 14
                     onClicked: root.cancelRequested()
                 }
 
-                Button {
+                HmiButton {
                     id: btnDelete
+                    darkMode: root.isDarkTheme
+                    tone: "danger"
                     text: qsTr("Delete")
-                    background: Rectangle { radius: 4; color: "#DC2626" }
-                    contentItem: Label {
-                        text: btnDelete.text
-                        color: "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
+                    fontPixelSize: 14
                     onClicked: root.deleteRequested()
                 }
 
-                Button {
+                HmiButton {
                     id: btnSave
+                    darkMode: root.isDarkTheme
+                    tone: "primary"
                     text: qsTr("Save Changes")
-                    background: Rectangle { radius: 4; color: "#2563EB" }
-                    contentItem: Label {
-                        text: btnSave.text
-                        color: "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.pixelSize: 14
-                        font.bold: true
-                    }
+                    fontPixelSize: 14
                     onClicked: root.saveRequested(
                                   txtDeviceName.text,
                                   txtSid.text,

@@ -14,9 +14,12 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.3
 import Qt.labs.settings 1.1
+import "../../ui"
 
 Item {
     id: sidelogs
+    property bool darkMode: true
+    Theme { id: hmiTheme; darkMode: sidelogs.darkMode }
     anchors.fill: parent
     clip: true
 
@@ -80,19 +83,25 @@ Item {
     }
 
     // ===== Theme =====
-    property color panelBg: "#111212"
-    property color cardBg: "#111A1E"
-    property color cardBg2: "#0D1417"
-    property color hoverBg: "#152226"
-    property color fieldBg: "#111A1E"
-    property color borderGreen: "#1B8F77"
-    property color textGreen: "#7AE2CF"
-    property color textWhite: "#FFFFFF"
-    property color textSoft: "#9fb3c8"
-    property color textDim: "#666666"
-    property color dangerBg: "#3a2020"
-    property color dangerBorder: "#6b3333"
-    property color selectedBg: "#163A35"
+    property color panelBg: hmiTheme.panel
+    property color cardBg: hmiTheme.darkMode ? hmiTheme.input : "#FFFFFF"
+    property color cardBg2: hmiTheme.darkMode ? hmiTheme.card : "#FFFFFF"
+    property color hoverBg: hmiTheme.darkMode ? hmiTheme.cardAlt : "#E7F4F1"
+    property color fieldBg: hmiTheme.darkMode ? hmiTheme.input : "#FFFFFF"
+    property color borderGreen: hmiTheme.darkMode ? hmiTheme.lineStrong : "#7C9791"
+    property color textGreen: hmiTheme.darkMode ? hmiTheme.accent : "#006B5B"
+    property color textWhite: hmiTheme.darkMode ? hmiTheme.text : "#102321"
+    property color textSoft: hmiTheme.darkMode ? hmiTheme.textSecondary : "#244843"
+    property color textDim: hmiTheme.darkMode ? hmiTheme.muted : "#5A6F6A"
+    property color dangerBg: hmiTheme.darkMode ? "#3a2020" : "#F9E6E8"
+    property color dangerBorder: hmiTheme.danger
+    property color dangerButtonText: hmiTheme.darkMode ? "#ffdada" : "#111111"
+    property color selectedBg: hmiTheme.darkMode ? "#163A35" : "#DDF4EF"
+    property color primaryButtonBg: hmiTheme.darkMode ? "#169976" : "#006B5B"
+    property color primaryButtonText: "#FFFFFF"
+    property color outlineButtonBg: hmiTheme.darkMode ? hmiTheme.cardAlt : "#FFFFFF"
+    property color outlineButtonText: hmiTheme.darkMode ? "#D8FFF6" : "#004D43"
+    property color disabledText: hmiTheme.darkMode ? "#7CAEA5" : "#516862"
 
     function pick(obj, keys, fallback) {
         for (var i = 0; i < keys.length; ++i) {
@@ -1107,7 +1116,7 @@ Item {
                 anchors.left: parent.left
                 anchors.leftMargin: 12
 
-                color: "#eeeeee"
+                color: hmiTheme.text
                 text: "DOA Logs"
                 font.pixelSize: 18
                 font.bold: true
@@ -1115,23 +1124,23 @@ Item {
 
             Rectangle {
                 id: sendDoaMapButton
-                width: 115
-                height: 30
+                width: 132
+                height: 36
                 radius: height / 2
 
                 anchors.right: parent.right
                 anchors.rightMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
 
-                color: sendDoaMapMouse.containsMouse ? "#324152" : "#25303b"
+                color: sendDoaMapMouse.containsMouse ? hmiTheme.card : hmiTheme.cardAlt
                 border.color: sendDoaMapMouse.containsMouse ? textGreen : borderGreen
                 border.width: 1
 
                 Text {
                     anchors.centerIn: parent
                     text: "Refresh DOA"
-                    color: textGreen
-                    font.pixelSize: 12
+                    color: outlineButtonText
+                    font.pixelSize: 13
                     font.bold: true
                 }
 
@@ -1155,12 +1164,12 @@ Item {
         }
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 34
+            Layout.preferredHeight: 40
             spacing: 6
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 38
                 radius: 8
                 color: fieldBg
                 border.color: searchField.activeFocus ? textGreen : borderGreen
@@ -1174,9 +1183,9 @@ Item {
                     anchors.rightMargin: 9
                     verticalAlignment: Text.AlignVCenter
 
-                    font.pixelSize: 13
-                    color: textGreen
-                    selectedTextColor: "#111212"
+                    font.pixelSize: 14
+                    color: hmiTheme.text
+                    selectedTextColor: hmiTheme.darkMode ? "#111212" : "#FFFFFF"
                     selectionColor: textGreen
                     cursorVisible: activeFocus
                     clip: true
@@ -1201,7 +1210,7 @@ Item {
                     anchors.verticalCenter: parent.verticalCenter
                     text: "Search DOA, freq, key, lat/lon..."
                     color: textDim
-                    font.pixelSize: 13
+                    font.pixelSize: 14
                     elide: Text.ElideRight
                     visible: searchField.text.length === 0 && !searchField.activeFocus
                 }
@@ -1210,22 +1219,22 @@ Item {
             Button {
                 id: searchButton
                 Layout.preferredWidth: 74
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 38
                 text: "Search"
 
                 onClicked: sidelogs.searchLogs()
 
                 background: Rectangle {
                     radius: 8
-                    color: searchButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
-                    border.color: "#169976"
+                    color: searchButton.pressed ? Qt.darker(primaryButtonBg, 1.18) : primaryButtonBg
+                    border.color: primaryButtonBg
                     border.width: 1
                 }
 
                 contentItem: Text {
                     text: searchButton.text
-                    color: "#212121"
-                    font.pixelSize: 12
+                    color: primaryButtonText
+                    font.pixelSize: 13
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -1235,7 +1244,7 @@ Item {
             Button {
                 id: refreshButton
                 Layout.preferredWidth: 68
-                Layout.preferredHeight: 32
+                Layout.preferredHeight: 38
                 text: "Load"
 
                 // ✅ Load button เป็น reload จึงไม่ขยับ map
@@ -1243,12 +1252,126 @@ Item {
 
                 background: Rectangle {
                     radius: 8
-                    color: refreshButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
+                    color: refreshButton.pressed ? Qt.darker(primaryButtonBg, 1.18) : primaryButtonBg
                 }
 
                 contentItem: Text {
                     text: refreshButton.text
-                    color: "#212121"
+                    color: primaryButtonText
+                    font.pixelSize: 13
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 34
+            spacing: 6
+
+            Button {
+                id: firstButton
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                text: "FIRST"
+                enabled: sidelogs.currentPage > 1 && !sidelogs.pageLoading
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.82)
+
+                onClicked: sidelogs.jumpFirstLog()
+
+                background: Rectangle {
+                    radius: 8
+                    color: firstButton.pressed ? Qt.darker(outlineButtonBg, 1.06) : outlineButtonBg
+                    border.color: borderGreen
+                    border.width: 1
+                }
+
+                contentItem: Text {
+                    text: firstButton.text
+                    color: outlineButtonText
+                    font.pixelSize: 12
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Button {
+                id: prevButton
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                text: "PREV"
+                enabled: sidelogs.currentPage > 1 && !sidelogs.pageLoading
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.68)
+
+                onClicked: sidelogs.jumpPrevLog()
+
+                background: Rectangle {
+                    radius: 8
+                    color: prevButton.pressed ? Qt.darker(outlineButtonBg, 1.06) : outlineButtonBg
+                    border.color: borderGreen
+                    border.width: 1
+                }
+
+                contentItem: Text {
+                    text: prevButton.text
+                    color: outlineButtonText
+                    font.pixelSize: 12
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Button {
+                id: nextButton
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                text: "NEXT"
+                enabled: sidelogs.currentPage < sidelogs.totalPages && !sidelogs.pageLoading
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.68)
+
+                onClicked: sidelogs.jumpNextLog()
+
+                background: Rectangle {
+                    radius: 8
+                    color: nextButton.pressed ? Qt.darker(outlineButtonBg, 1.06) : outlineButtonBg
+                    border.color: borderGreen
+                    border.width: 1
+                }
+
+                contentItem: Text {
+                    text: nextButton.text
+                    color: outlineButtonText
+                    font.pixelSize: 12
+                    font.bold: true
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
+            Button {
+                id: lastButton
+                Layout.fillWidth: true
+                Layout.preferredHeight: 32
+                text: "LAST"
+                enabled: sidelogs.currentPage < sidelogs.totalPages && !sidelogs.pageLoading
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.68)
+
+                onClicked: sidelogs.jumpLastLog()
+
+                background: Rectangle {
+                    radius: 8
+                    color: lastButton.pressed ? Qt.darker(outlineButtonBg, 1.06) : outlineButtonBg
+                    border.color: borderGreen
+                    border.width: 1
+                }
+
+                contentItem: Text {
+                    text: lastButton.text
+                    color: outlineButtonText
                     font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
@@ -1259,126 +1382,12 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 30
-            spacing: 6
-
-            Button {
-                id: firstButton
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                text: "FIRST"
-                enabled: sidelogs.currentPage > 1 && !sidelogs.pageLoading
-                opacity: enabled ? 1.0 : 0.35
-
-                onClicked: sidelogs.jumpFirstLog()
-
-                background: Rectangle {
-                    radius: 8
-                    color: firstButton.pressed ? Qt.darker("#25303b", 1.4) : "#25303b"
-                    border.color: borderGreen
-                    border.width: 1
-                }
-
-                contentItem: Text {
-                    text: firstButton.text
-                    color: textGreen
-                    font.pixelSize: 11
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            Button {
-                id: prevButton
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                text: "PREV"
-                enabled: sidelogs.currentPage > 1 && !sidelogs.pageLoading
-                opacity: enabled ? 1.0 : 0.35
-
-                onClicked: sidelogs.jumpPrevLog()
-
-                background: Rectangle {
-                    radius: 8
-                    color: prevButton.pressed ? Qt.darker("#25303b", 1.4) : "#25303b"
-                    border.color: borderGreen
-                    border.width: 1
-                }
-
-                contentItem: Text {
-                    text: prevButton.text
-                    color: textGreen
-                    font.pixelSize: 11
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            Button {
-                id: nextButton
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                text: "NEXT"
-                enabled: sidelogs.currentPage < sidelogs.totalPages && !sidelogs.pageLoading
-                opacity: enabled ? 1.0 : 0.35
-
-                onClicked: sidelogs.jumpNextLog()
-
-                background: Rectangle {
-                    radius: 8
-                    color: nextButton.pressed ? Qt.darker("#25303b", 1.4) : "#25303b"
-                    border.color: borderGreen
-                    border.width: 1
-                }
-
-                contentItem: Text {
-                    text: nextButton.text
-                    color: textGreen
-                    font.pixelSize: 11
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-
-            Button {
-                id: lastButton
-                Layout.fillWidth: true
-                Layout.preferredHeight: 28
-                text: "LAST"
-                enabled: sidelogs.currentPage < sidelogs.totalPages && !sidelogs.pageLoading
-                opacity: enabled ? 1.0 : 0.35
-
-                onClicked: sidelogs.jumpLastLog()
-
-                background: Rectangle {
-                    radius: 8
-                    color: lastButton.pressed ? Qt.darker("#25303b", 1.4) : "#25303b"
-                    border.color: borderGreen
-                    border.width: 1
-                }
-
-                contentItem: Text {
-                    text: lastButton.text
-                    color: textGreen
-                    font.pixelSize: 11
-                    font.bold: true
-                    horizontalAlignment: Text.AlignHCenter
-                    verticalAlignment: Text.AlignVCenter
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            Layout.preferredHeight: 26
+            Layout.preferredHeight: 32
             spacing: 6
 
             Rectangle {
                 Layout.preferredWidth: 92
-                Layout.preferredHeight: 26
+                Layout.preferredHeight: 32
                 radius: 8
                 color: fieldBg
                 border.color: borderGreen
@@ -1401,7 +1410,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 26
+                Layout.preferredHeight: 32
                 radius: 8
                 color: fieldBg
                 border.color: borderGreen
@@ -1418,9 +1427,9 @@ Item {
                              ? ("Selected: " + selectedCount + "/" + maxSelectedLogs + "  |  Auto Map ON")
                              : ("Select DOA logs 0/" + maxSelectedLogs))
                     color: selectLimitWarningText.length > 0
-                           ? "#FFCF4C"
+                           ? (hmiTheme.darkMode ? "#FFCF4C" : "#8A5E00")
                            : (selectedCount > 0 ? textGreen : textSoft)
-                    font.pixelSize: 11
+                    font.pixelSize: 12
                     verticalAlignment: Text.AlignVCenter
                     horizontalAlignment: Text.AlignLeft
                     elide: Text.ElideRight
@@ -1430,20 +1439,20 @@ Item {
             Button {
                 id: clearFilterButton
                 Layout.preferredWidth: 56
-                Layout.preferredHeight: 26
+                Layout.preferredHeight: 32
                 text: "Clear"
 
                 onClicked: sidelogs.clearSearchAndJumpFirst()
 
                 background: Rectangle {
                     radius: 8
-                    color: clearFilterButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
+                    color: clearFilterButton.pressed ? Qt.darker(primaryButtonBg, 1.18) : primaryButtonBg
                 }
 
                 contentItem: Text {
                     text: clearFilterButton.text
-                    color: "#212121"
-                    font.pixelSize: 11
+                    color: primaryButtonText
+                    font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -1453,28 +1462,28 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 28
+            Layout.preferredHeight: 34
             spacing: 6
 
             Button {
                 id: selectFilteredButton
                 Layout.fillWidth: true
-                Layout.preferredHeight: 28
+                Layout.preferredHeight: 32
                 text: "All Filtered"
                 enabled: sidelogs.selectedCount < sidelogs.maxSelectedLogs
-                opacity: enabled ? 1.0 : 0.35
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.68)
 
                 onClicked: sidelogs.selectAllFiltered()
 
                 background: Rectangle {
                     radius: 8
-                    color: selectFilteredButton.pressed ? Qt.darker("#169976", 1.4) : "#169976"
+                    color: selectFilteredButton.pressed ? Qt.darker(primaryButtonBg, 1.18) : primaryButtonBg
                 }
 
                 contentItem: Text {
                     text: selectFilteredButton.text
-                    color: "#212121"
-                    font.pixelSize: 11
+                    color: primaryButtonText
+                    font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -1484,22 +1493,22 @@ Item {
             Button {
                 id: clearFilteredButton
                 Layout.fillWidth: true
-                Layout.preferredHeight: 28
+                Layout.preferredHeight: 32
                 text: "Clear Selected"
 
                 onClicked: sidelogs.clearFilteredSelection()
 
                 background: Rectangle {
                     radius: 8
-                    color: clearFilteredButton.pressed ? Qt.darker("#25303b", 1.4) : "#25303b"
+                    color: clearFilteredButton.pressed ? Qt.darker(outlineButtonBg, 1.06) : outlineButtonBg
                     border.color: borderGreen
                     border.width: 1
                 }
 
                 contentItem: Text {
                     text: clearFilteredButton.text
-                    color: textGreen
-                    font.pixelSize: 11
+                    color: outlineButtonText
+                    font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -1557,7 +1566,7 @@ Item {
                                 Layout.preferredWidth: 16
                                 Layout.preferredHeight: 16
                                 radius: 4
-                                color: rowCard.selected ? textGreen : "#111A1E"
+                                color: rowCard.selected ? textGreen : hmiTheme.text
                                 border.color: rowCard.selected ? textGreen : "#4A5A5D"
                                 border.width: 1
                                 Layout.alignment: Qt.AlignVCenter
@@ -1565,7 +1574,7 @@ Item {
                                 Text {
                                     anchors.centerIn: parent
                                     text: rowCard.selected ? "✓" : ""
-                                    color: "#111212"
+                                    color: hmiTheme.panel
                                     font.pixelSize: 11
                                     font.bold: true
                                 }
@@ -1650,8 +1659,8 @@ Item {
                     text: logModel.count === 0
                           ? "Press Load to refresh records"
                           : "Try changing search text"
-                    color: textGreen
-                    font.pixelSize: 11
+                    color: outlineButtonText
+                    font.pixelSize: 12
                     horizontalAlignment: Text.AlignHCenter
                     anchors.horizontalCenter: parent.horizontalCenter
                 }
@@ -1660,7 +1669,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 30
+            Layout.preferredHeight: 34
             spacing: 6
 
             Text {
@@ -1681,10 +1690,10 @@ Item {
             Button {
                 id: deleteSelectedButton
                 Layout.preferredWidth: 96
-                Layout.preferredHeight: 28
+                Layout.preferredHeight: 32
                 text: "Delete"
                 enabled: sidelogs.selectedCount > 0
-                opacity: enabled ? 1.0 : 0.35
+                opacity: enabled ? 1.0 : (hmiTheme.darkMode ? 0.42 : 0.68)
 
                 onClicked: sidelogs.requestDeleteSelectedLogs()
 
@@ -1697,8 +1706,8 @@ Item {
 
                 contentItem: Text {
                     text: deleteSelectedButton.text
-                    color: "#ffdada"
-                    font.pixelSize: 11
+                    color: dangerButtonText
+                    font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -1708,7 +1717,7 @@ Item {
             Button {
                 id: clearUiButton
                 Layout.preferredWidth: 76
-                Layout.preferredHeight: 28
+                Layout.preferredHeight: 32
                 text: "Clear UI"
 
                 onClicked: sidelogs.clearLogs(false)
@@ -1722,8 +1731,8 @@ Item {
 
                 contentItem: Text {
                     text: clearUiButton.text
-                    color: "#ffdada"
-                    font.pixelSize: 11
+                    color: dangerButtonText
+                    font.pixelSize: 12
                     font.bold: true
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter

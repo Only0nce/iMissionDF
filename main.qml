@@ -3,6 +3,7 @@
 import QtQuick 2.12
 import QtQuick.Window 2.12
 import QtQuick.Controls 2.12
+import QtQuick.Controls.Material 2.12
 import QtQuick.Layouts 1.3
 import QtWebSockets 1.0
 import QtGraphicalEffects 1.0
@@ -19,10 +20,21 @@ import QtMultimedia 5.12
 
 import "iScreenDFqml/pages"
 import "iRecordManage"
+import "ui"
 import "./"
 
 Window {
     id: window
+
+    // Window-level theme is required for Controls2 Popup/ComboBox menus. Qt
+    // reparents popup visuals into the Window Overlay, so page-local Material
+    // attached properties alone are not sufficient on Qt 5.15/EGLFS.
+    Theme { id: windowTheme; darkMode: mainPage.darkTheme }
+    Material.theme: mainPage.darkTheme ? Material.Dark : Material.Light
+    Material.background: windowTheme.panel
+    Material.foreground: windowTheme.text
+    Material.primary: windowTheme.accent
+    Material.accent: windowTheme.accent
     visible: true
     width: 1280
     height: 720
@@ -212,39 +224,35 @@ Window {
         active: false
     }
 
-    //======================================================================================================
-    TapBarRecordFiles {
-        id: tabBarRecord
-        anchors.fill: parent
+    // Recorder pages are created only by MainPage/StackView.  Keeping another
+    // full TapBarRecordFiles instance permanently behind the application caused
+    // two Controls1 TableViews to observe the same ListModel and produced the
+    // recurring "Model size of -N is less than 0" DelegateModel corruption.
+    // Keep only the playback action at the root and let the active Recorder page
+    // forward its signal here.
+    function handleRecorderWavePlayToggle(wantPlay, filesArray, concatMode, playPosMs) {
+        console.log("[main] wavePlayToggleRequested wantPlay=", wantPlay,
+                    "concatMode=", concatMode,
+                    "filesArray.length=", filesArray ? filesArray.length : 0)
 
-        // RecordFiles → TapBarRecordFiles → main
-        onWavePlayToggleRequested: {
-            console.log("[main] wavePlayToggleRequested wantPlay=", wantPlay,
-                        "concatMode=", concatMode,
-                        "filesArray.length=", filesArray ? filesArray.length : 0)
+        window.waveEditorConcatMode = concatMode
+        window.waveEditorFiles      = filesArray || []
 
-            window.waveEditorConcatMode = concatMode
-            window.waveEditorFiles      = filesArray || []
-
-            if (wantPlay) {
-                if (window.waveEditorFiles.length > 0) {
-                    window.waveEditorIndex = 0
-
-                    var p = window.waveEditorFiles[0]
-                    var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
-
-                    console.log("[main] start playlist, index=0 url=", url)
-
-                    playerlog.stop()
-                    playerlog.source = url
-                    playerlog.play()
-                } else {
-                    console.warn("[main] wantPlay but filesArray is empty")
-                }
+        if (wantPlay) {
+            if (window.waveEditorFiles.length > 0) {
+                window.waveEditorIndex = 0
+                var p = window.waveEditorFiles[0]
+                var url = (p.indexOf("file://") === 0) ? p : ("file://" + p)
+                console.log("[main] start playlist, index=0 url=", url)
+                playerlog.stop()
+                playerlog.source = url
+                playerlog.play()
             } else {
-                console.log("[main] pause request from WaveEditor")
-                playerlog.pause()
+                console.warn("[main] wantPlay but filesArray is empty")
             }
+        } else {
+            console.log("[main] pause request from WaveEditor")
+            playerlog.pause()
         }
     }
 

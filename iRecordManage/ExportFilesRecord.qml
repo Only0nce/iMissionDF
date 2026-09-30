@@ -1,12 +1,17 @@
 // ExportFilesRecord.qml
 import QtQuick 2.15
 import QtQuick.Controls 2.15
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.15
+import "../ui"
 
 Item {
     id: exportFilesRecordroot
     width: 700
     height: 500
+
+    readonly property bool hmiDarkMode: Material.theme === Material.Dark
+    Theme { id: hmiTheme; darkMode: exportFilesRecordroot.hmiDarkMode }
 
     // ==== รับค่าจาก exportOverlay ====
     property var    files: []          // [{full_path, size, duration_sec}, ...]
@@ -118,7 +123,7 @@ Item {
             text: "Export Selected Files"
             font.pixelSize: 22
             font.bold: true
-            color: "#e5e7eb"
+            color: hmiTheme.text
             Layout.fillWidth: true
         }
 
@@ -127,15 +132,15 @@ Item {
             text: pathToSave && pathToSave.length > 0
                   ? ("Target: " + pathToSave)
                   : "Target: (no device selected)"
-            color: "#9ca3af"
+            color: hmiTheme.muted
             Layout.fillWidth: true
         }
 
         Rectangle {
             Layout.fillWidth: true
-            radius: 8
-            color: "#151923"
-            border.color: "#252c3b"
+            radius: hmiTheme.radiusMd
+            color: hmiTheme.cardAlt
+            border.color: hmiTheme.line
             implicitHeight: colSummary.implicitHeight + 12
 
             ColumnLayout {
@@ -146,17 +151,17 @@ Item {
 
                 Label {
                     text: "Files: " + fileCount
-                    color: "#d1d5db"
+                    color: hmiTheme.textSecondary
                 }
 
                 Label {
                     text: "Total duration: " + formatDuration(totalDurationSec)
-                    color: "#d1d5db"
+                    color: hmiTheme.textSecondary
                 }
 
                 Label {
                     text: "Total size: " + formatSize(totalSizeKBytes)
-                    color: "#d1d5db"
+                    color: hmiTheme.textSecondary
                 }
             }
         }
@@ -164,14 +169,15 @@ Item {
         ColumnLayout {
             spacing: 4
             Layout.fillWidth: true
-            Label { text: "Output file name"; color: "#b7c0ca" }
-            TextField {
+            Label { text: "Output file name"; color: hmiTheme.textSecondary; font.bold: true }
+            HmiTextField {
                 id: nameField
+                darkMode: exportFilesRecordroot.hmiDarkMode
                 Layout.fillWidth: true
-                text: defaultName          // 🔴 แสดงค่าจริง
+                text: defaultName
                 placeholderText: "auto: date_time"
-                font.pixelSize: 16
-                background: Rectangle { radius: 6; color: "#0e1116"; border.color: "#2a2f37" }
+                fontPixelSize: 16
+                emphasized: true
             }
 
         }
@@ -179,11 +185,37 @@ Item {
         ColumnLayout {
             spacing: 4
             Layout.fillWidth: true
-            Label { text: "Status"; color: "#b7c0ca" }
+            RowLayout {
+                Layout.fillWidth: true
+                Label { text: "Status"; color: hmiTheme.textSecondary; font.bold: true }
+                Item { Layout.fillWidth: true }
+                HmiStatusPill {
+                    darkMode: exportFilesRecordroot.hmiDarkMode
+                    compact: true
+                    text: exporting ? "EXPORTING" : (progress >= 100 ? "COMPLETE" : "READY")
+                    tone: exporting ? "info" : (progress >= 100 ? "good" : "neutral")
+                }
+            }
             ProgressBar {
+                id: exportProgressBar
                 Layout.fillWidth: true
                 from: 0; to: 100
                 value: progress
+                background: Rectangle {
+                    implicitHeight: 10
+                    radius: 5
+                    color: hmiTheme.input
+                    border.color: hmiTheme.line
+                }
+                contentItem: Item {
+                    implicitHeight: 10
+                    Rectangle {
+                        width: exportProgressBar.visualPosition * parent.width
+                        height: parent.height
+                        radius: 5
+                        color: progress >= 100 ? hmiTheme.success : hmiTheme.accent
+                    }
+                }
 
                 Behavior on value {
                     NumberAnimation { duration: 200 }
@@ -192,7 +224,7 @@ Item {
 
             Label {
                 text: statusText || (exporting ? "Exporting..." : "Idle")
-                color: "#9ca3af"
+                color: hmiTheme.muted
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
             }
@@ -204,8 +236,10 @@ Item {
 
             Item { Layout.fillWidth: true }
 
-            Button {
-                text: qsTr("Cancel")
+            HmiButton {
+                text: qsTr("CANCEL")
+                compact: true
+                darkMode: exportFilesRecordroot.hmiDarkMode
                 enabled: !exporting
                 onClicked: {
                     var p = exportFilesRecordroot.parent
@@ -229,8 +263,11 @@ Item {
 //                }
             }
 
-            Button {
-                text: exporting ? qsTr("Saving...") : qsTr("Save")
+            HmiButton {
+                text: exporting ? qsTr("SAVING...") : qsTr("SAVE")
+                compact: true
+                tone: "primary"
+                darkMode: exportFilesRecordroot.hmiDarkMode
                 enabled: !exporting && fileCount > 0 && pathToSave !== ""
                 onClicked: {
 //                    console.log("[mountPoint]",mountPoint,"label",label,"pathToSave",pathToSave)
@@ -283,8 +320,11 @@ Item {
                 }
             }
 
-            Button {
+            HmiButton {
                 text: qsTr("OK")
+                compact: true
+                tone: "primary"
+                darkMode: exportFilesRecordroot.hmiDarkMode
                 visible: !exporting && progress >= 100
 
                 onClicked: {

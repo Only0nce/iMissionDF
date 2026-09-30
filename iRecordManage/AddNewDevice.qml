@@ -1,18 +1,23 @@
 // AddNewDevice.qml (ตัวหัว Device List + ปุ่ม Add)
 import QtQuick 2.12
 import QtQuick.Controls 2.5
+import QtQuick.Controls.Material 2.15
 import QtQuick.Layouts 1.12
 import QtQuick.Extras 1.4
 import QtGraphicalEffects 1.0
 import "."
+import "../ui"
 
 Item {
     id: newRegisterDevice
-    width: 1980
+    width: parent ? parent.width : 1980
     height: 100
 
     property int iconSize: 35
     property int buttonSize: 50
+    property bool isDarkTheme: Material.theme === Material.Dark
+
+    Theme { id: hmiTheme; darkMode: newRegisterDevice.isDarkTheme }
     signal searchTextChanged(string text)
     function iconSrc(name) {
         if (name === "addDevice")
@@ -28,19 +33,22 @@ Item {
         dim: true
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
-        width: 900
-        height: 600
+        width: Math.min(900, parent.width - 40)
+        height: Math.min(600, parent.height - 60)
         x: (parent ? (parent.width  - width)  / 2 : 0)
         y: (parent ? (parent.height - height) / 2 : 0)
 
         background: Rectangle {
             anchors.fill: parent
-            radius: 8
-            color: "transparent"
+            radius: hmiTheme.radiusLg
+            color: hmiTheme.panel
+            border.width: 1
+            border.color: hmiTheme.lineStrong
         }
 
         RegisterNewDevice {
              anchors.fill: parent
+             isDarkTheme: newRegisterDevice.isDarkTheme
 
              onCancelRequested: registerPopup.close()
 
@@ -87,79 +95,48 @@ Item {
 
         Label {
             text: qsTr("Device List")
-            color: "#F9FAFB"
-            font.pixelSize: 26
+            color: hmiTheme.text
+            font.pixelSize: 24
             font.bold: true
             Layout.alignment: Qt.AlignVCenter
         }
 
         Item { Layout.fillWidth: true }
 
-        TextField {
+        HmiTextField {
             id: searchField
+            darkMode: newRegisterDevice.isDarkTheme
             placeholderText: qsTr("Search name / IP / URI")
-            Layout.preferredWidth: 260
+            Layout.preferredWidth: 300
+            Layout.preferredHeight: 42
             Layout.alignment: Qt.AlignVCenter
-            height: buttonSize
-            font.pixelSize: 14
+            fontPixelSize: 14
             horizontalAlignment: Text.AlignHCenter
-            color: "#E5E7EB"
-            background: Rectangle {
-                radius: 4
-                color: "#111827"
-                border.color: "#4B5563"
-                border.width: 1
-            }
 
-            // ⬇⬇⬇ เพิ่มตรงนี้
             onTextChanged: {
                 newRegisterDevice.searchTextChanged(text)
             }
         }
 
 
-        Button {
+        HmiButton {
             id: clearButton
-            text: qsTr("Clear")
+            darkMode: newRegisterDevice.isDarkTheme
+            text: qsTr("CLEAR")
             Layout.alignment: Qt.AlignVCenter
-            height: buttonSize
-            font.pixelSize: 14
-            background: Rectangle {
-                radius: 4
-                color: "transparent"
-                border.color: "#D1D5DB"
-                border.width: 1
-            }
+            Layout.preferredHeight: 42
+            fontPixelSize: 13
             onClicked: searchField.text = ""
         }
 
-        // ========== ปุ่ม Add Device ==========
-        ToolButton {
+        HmiButton {
             id: btnAddDevice
-
-            implicitWidth: buttonSize
-            implicitHeight: buttonSize
-            Layout.preferredWidth: buttonSize
-            Layout.preferredHeight: buttonSize
-
-            background: Rectangle {
-                anchors.fill: parent
-                radius: 6
-                color: "transparent"
-                border.color: "#4B5563"
-                border.width: 1
-            }
-
-            contentItem: Image {
-                anchors.centerIn: parent
-                width: newRegisterDevice.iconSize
-                height: newRegisterDevice.iconSize
-                source: iconSrc("addDevice")
-                fillMode: Image.PreserveAspectFit
-                smooth: true
-                sourceSize.width: newRegisterDevice.iconSize
-                sourceSize.height: newRegisterDevice.iconSize
-            }
+            darkMode: newRegisterDevice.isDarkTheme
+            tone: "primary"
+            text: qsTr("+ ADD DEVICE")
+            Layout.preferredHeight: 42
+            Layout.preferredWidth: 132
+            fontPixelSize: 13
 
             onClicked: {
                 console.log("Add Device clicked")
