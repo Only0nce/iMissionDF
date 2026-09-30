@@ -775,10 +775,10 @@ Item {
                 Layout.preferredHeight: 35
                 hoverEnabled: true
 
-                // R20.4 RADIO UX1.4: REC indication follows the actual recorder
-                // state reported by LogWatcher/Mainwindows, not SQL. SQL can gate
-                // recording policy, but it is not itself proof that alsarecd is
-                // currently in RECORD state.
+                // R20.4 RADIO UX1.5: Production bench confirms expected/armed
+                // recorder state means continuous recording is active in this build.
+                // Treat either expectedOn or actualOn as operator-visible REC LIVE.
+                // Keep actualOn and stateText for diagnostics/backward compatibility.
                 property bool scanRecOn: false
                 property bool recActualOn: false
                 property bool recExpectedOn: false
@@ -852,21 +852,18 @@ Item {
                 }
 
                 onScanRecOnChanged: {
-                    console.log("[REC ICON] recorder active =", scanRecOn)
+                    console.log("[REC ICON] recLive =", scanRecOn, "expected=", recExpectedOn, "actual=", recActualOn, "state=", recorderStateText)
                     blinkPhaseOn = true
                 }
 
                 Rectangle {
-                    color: toolButtonRec.recActualOn
+                    color: toolButtonRec.scanRecOn
                            ? (toolButtonRec.blinkPhaseOn ? hmiTheme.danger : Qt.darker(hmiTheme.danger, 1.18))
-                           : (toolButtonRec.recExpectedOn
-                              ? (toolButtonRec.blinkPhaseOn ? hmiTheme.warning : Qt.darker(hmiTheme.warning, 1.18))
-                              : hmiTheme.cardAlt)
+                           : hmiTheme.cardAlt
                     radius: hmiTheme.radiusSm
-                    border.color: toolButtonRec.recActualOn
+                    border.color: toolButtonRec.scanRecOn
                                   ? hmiTheme.danger
-                                  : (toolButtonRec.recExpectedOn ? hmiTheme.warning
-                                                                 : (toolButtonRec.hovered ? hmiTheme.accentHover : hmiTheme.lineStrong))
+                                  : (toolButtonRec.hovered ? hmiTheme.accentHover : hmiTheme.lineStrong)
                     border.width: toolButtonRec.scanRecOn || toolButtonRec.hovered ? 2 : 1
                     anchors.fill: parent
 
@@ -880,8 +877,7 @@ Item {
                             height: 10
                             radius: 5
                             anchors.verticalCenter: parent.verticalCenter
-                            color: toolButtonRec.recActualOn ? "#FFFFFF"
-                                  : (toolButtonRec.recExpectedOn ? "#2A1700" : hmiTheme.muted)
+                            color: toolButtonRec.scanRecOn ? "#FFFFFF" : hmiTheme.muted
                             visible: toolButtonRec.scanRecOn
                             opacity: toolButtonRec.scanRecOn
                                      ? (toolButtonRec.blinkPhaseOn ? 1.0 : 0.28)
@@ -891,10 +887,11 @@ Item {
                         Text {
                             id: recLiveText
                             anchors.verticalCenter: parent.verticalCenter
-                            text: toolButtonRec.recActualOn ? "REC"
-                                  : (toolButtonRec.recExpectedOn ? "ARM" : "REC")
+                            // Operator wording: expected/armed means the recorder is
+                            // continuously writing in this product configuration.
+                            text: toolButtonRec.scanRecOn ? "REC LIVE" : "REC"
                             color: toolButtonRec.scanRecOn ? "#FFFFFF" : hmiTheme.textSecondary
-                            font.pixelSize: 12
+                            font.pixelSize: toolButtonRec.scanRecOn ? 11 : 12
                             font.bold: true
                             font.letterSpacing: 0.5
                         }
